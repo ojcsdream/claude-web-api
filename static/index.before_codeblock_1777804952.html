@@ -1,0 +1,1454 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Claude Web</title>
+
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [["$", "$"], ["\\(", "\\)"]],
+        displayMath: [["$$", "$$"], ["\\[", "\\]"]],
+        processEscapes: true
+      },
+      chtml: {
+        scale: 1.02,
+        matchFontHeight: false
+      },
+      startup: { typeset: false }
+    };
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #1f1f1d;
+      color: #f0ece3;
+      font-family: ui-serif, Georgia, "Times New Roman", "Songti SC", "Noto Serif CJK SC", serif;
+    }
+
+    body {
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 64px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      background: rgba(31,31,29,0.96);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .menu-btn {
+      width: 42px;
+      height: 42px;
+      border: 0;
+      background: transparent;
+      color: #d8d3c8;
+      font-size: 28px;
+      border-radius: 10px;
+    }
+
+    .title {
+      flex: 1;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 18px;
+      font-weight: 750;
+      color: #eee8dc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .share-btn {
+      height: 40px;
+      padding: 0 16px;
+      border-radius: 13px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: transparent;
+      color: #f0ece3;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 86px 18px 260px;
+    }
+
+    #chatList {
+      display: flex;
+      flex-direction: column;
+      gap: 26px;
+    }
+
+    .empty {
+      color: #8f887d;
+      text-align: center;
+      padding-top: 30vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .msg-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .msg-wrap.user {
+      align-items: flex-end;
+    }
+
+    .msg-wrap.assistant {
+      align-items: flex-start;
+    }
+
+    .msg {
+      width: 100%;
+      display: flex;
+    }
+
+    .msg.user {
+      justify-content: flex-end;
+    }
+
+    .msg.assistant {
+      justify-content: flex-start;
+    }
+
+    .bubble {
+      max-width: 94%;
+      word-break: break-word;
+      overflow-x: auto;
+    }
+
+    .user .bubble {
+      max-width: min(84%, 540px);
+      background: #11110f;
+      color: #f5f1e8;
+      border-radius: 18px;
+      padding: 12px 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+
+    .assistant .bubble {
+      color: #eee9df;
+      font-size: 18px;
+      line-height: 1.85;
+    }
+
+    .assistant .bubble p {
+      margin: 0.55em 0;
+    }
+
+    .assistant .bubble pre {
+      background: #111110;
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+      font-size: 14px;
+    }
+
+    .answer-meta {
+      margin-top: 12px;
+      color: #8f887d;
+      font-size: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      opacity: 0.8;
+    }
+
+    .answer-meta::before {
+      content: "使用 ";
+      opacity: 0.65;
+    }
+
+    .msg-actions {
+      display: flex;
+      gap: 6px;
+      opacity: 0.55;
+      padding: 2px 0;
+    }
+
+    .msg-wrap.user .msg-actions {
+      align-self: flex-end;
+      padding-right: 4px;
+    }
+
+    .msg-wrap.assistant .msg-actions {
+      align-self: flex-start;
+    }
+
+    .small-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      color: #aaa397;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      padding: 0;
+    }
+
+    .thinking {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+    }
+
+    .thinking span {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #f5ead8;
+      opacity: 0.55;
+      animation: dot 1.2s infinite ease-in-out;
+    }
+
+    .thinking span:nth-child(2) { animation-delay: 0.15s; }
+    .thinking span:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes dot {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+      40% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    mjx-container {
+      color: #f4efe6 !important;
+      max-width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+
+    mjx-container[display="true"] {
+      display: block;
+      text-align: center;
+      margin: 1em 0 !important;
+      padding: 0.35em 0.1em;
+    }
+
+    .composer {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 25;
+      padding: 10px 12px calc(14px + env(safe-area-inset-bottom));
+      background: linear-gradient(180deg, rgba(31,31,29,0), rgba(31,31,29,0.92) 20%, rgba(31,31,29,0.98));
+    }
+
+    .composer-inner {
+      max-width: 760px;
+      margin: 0 auto;
+      background: #2f2f2c;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 26px;
+      padding: 10px 10px 8px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 46px;
+      max-height: 160px;
+      border: 0;
+      background: transparent;
+      color: #f0ece3;
+      padding: 8px 10px;
+      resize: none;
+      outline: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 17px;
+      line-height: 1.4;
+    }
+
+    .file-info {
+      color: #9fb7e8;
+      font-size: 12px;
+      padding: 0 8px 4px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .preview img {
+      max-width: 68px;
+      max-height: 68px;
+      border-radius: 10px;
+      margin: 4px;
+      border: 1px solid rgba(255,255,255,0.10);
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 4px;
+    }
+
+    .plus-btn {
+      width: 40px;
+      height: 40px;
+      border: 0;
+      background: transparent;
+      color: #d8d3c8;
+      font-size: 30px;
+      border-radius: 999px;
+    }
+
+    #fileInput {
+      display: none;
+    }
+
+    .model-pill {
+      flex: 1;
+      text-align: center;
+      background: transparent;
+      border: 0;
+      color: #bdb6aa;
+      font-size: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .send-btn {
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 999px;
+      background: #ece5d7;
+      color: #1f1f1d;
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    .drawer-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.42);
+      z-index: 80;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+
+    .drawer-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .drawer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: min(88vw, 350px);
+      background: #262623;
+      z-index: 90;
+      transform: translateX(-105%);
+      transition: transform 0.22s;
+      padding: 16px 14px 28px;
+      overflow-y: auto;
+      border-right: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .drawer-title {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 20px;
+      font-weight: 750;
+    }
+
+    .drawer-sub {
+      margin-top: 4px;
+      color: #9c968c;
+      font-size: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .close-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.05);
+      color: #d8d3c8;
+      font-size: 22px;
+    }
+
+    .section {
+      margin-bottom: 22px;
+    }
+
+    .section-title {
+      color: #8d877d;
+      font-size: 12px;
+      margin-bottom: 10px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .session-item, .drawer-btn, .model-choice {
+      width: 100%;
+      min-height: 38px;
+      border-radius: 11px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      color: #d8d3c8;
+      margin-bottom: 7px;
+      padding: 8px 10px;
+      text-align: left;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    .session-item.active, .model-choice.active {
+      background: rgba(255,255,255,0.14);
+      color: #fff7ea;
+    }
+
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+    }
+
+    .field {
+      margin-bottom: 10px;
+    }
+
+    .field label {
+      display: block;
+      color: #9c968c;
+      font-size: 12px;
+      margin-bottom: 5px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .field input, .field select {
+      width: 100%;
+      min-height: 40px;
+      border-radius: 11px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: #1f1f1d;
+      color: #f0ece3;
+      padding: 0 10px;
+      font-size: 14px;
+      outline: none;
+    }
+
+    .danger {
+      color: #e0a199;
+    }
+  </style>
+
+<style id="fix-chat-image-size">
+  /* 限制聊天区用户上传图片尺寸，防止撑爆页面 */
+  .user-upload img,
+  .msg-wrap img,
+  .bubble img {
+    max-width: min(220px, 72vw) !important;
+    max-height: 220px !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain !important;
+    border-radius: 14px !important;
+    display: block !important;
+  }
+
+  .user .bubble img {
+    max-width: min(180px, 64vw) !important;
+    max-height: 180px !important;
+  }
+
+  /* 输入框预览图更小 */
+  .preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-height: 86px;
+    overflow-y: auto;
+    padding: 2px 6px 0;
+  }
+
+  .preview img {
+    width: 54px !important;
+    height: 54px !important;
+    max-width: 54px !important;
+    max-height: 54px !important;
+    object-fit: cover !important;
+    border-radius: 10px !important;
+    margin: 2px !important;
+  }
+</style>
+
+
+<style id="file-cancel-and-fetch-models-style">
+  .clear-files-btn {
+    display: none;
+    margin: 4px 6px 2px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.045);
+    color: #cfc7b8;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .clear-files-btn:active {
+    background: rgba(127,29,29,0.18);
+    color: #e0a199;
+  }
+
+  .fetch-models-status {
+    margin: 8px 0;
+    color: #9c968c;
+    font-size: 12px;
+    line-height: 1.5;
+    word-break: break-word;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .fetch-models-status.good {
+    color: #a7d8a7;
+  }
+
+  .fetch-models-status.bad {
+    color: #e0a199;
+  }
+
+  .fetched-models-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow-y: auto;
+    margin-top: 8px;
+  }
+
+  .fetched-model-btn {
+    text-align: left;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.04);
+    color: #d8d3c8;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 12px;
+    word-break: break-all;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .fetched-model-btn:active {
+    background: rgba(255,255,255,0.10);
+  }
+</style>
+
+
+<style id="multi-image-preview-style">
+  .user-upload {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .user-upload img {
+    max-width: 150px !important;
+    max-height: 150px !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    display: block !important;
+  }
+
+  @media (max-width: 640px) {
+    .user-upload img {
+      max-width: 120px !important;
+      max-height: 120px !important;
+    }
+  }
+</style>
+
+
+
+</head>
+
+<body>
+  <div class="topbar">
+    <button id="openDrawer" class="menu-btn">☰</button>
+    <div id="topTitle" class="title">Claude Web</div>
+    <button id="shareBtn" class="share-btn">Share</button>
+  </div>
+
+  <div id="drawerOverlay" class="drawer-overlay"></div>
+
+  <aside id="drawer" class="drawer">
+    <div class="drawer-head">
+      <div>
+        <div class="drawer-title">Claude Web</div>
+        <div class="drawer-sub">对话、模型、接入商</div>
+      </div>
+      <button id="closeDrawer" class="close-btn">×</button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">对话</div>
+      <div id="sessionList"></div>
+      <button id="newConvBtn" class="drawer-btn">+ 新对话</button>
+      <button id="renameConvBtn" class="drawer-btn">重命名</button>
+      <button id="exportConvBtn" class="drawer-btn">导出</button>
+      <button id="deleteConvBtn" class="drawer-btn danger">删除对话</button>
+    </div>
+
+
+    <div class="section">
+      <div class="section-title">模型</div>
+      <div id="modelChoices" class="grid2">
+        <button class="model-choice active" data-model="claude-opus-4-7">Opus 4.7</button>
+        <button class="model-choice" data-model="claude-opus-4-6">Opus 4.6</button>
+        <button class="model-choice" data-model="claude-sonnet-4-6">Sonnet 4.6</button>
+        <button class="model-choice" data-model="gpt-5.5">GPT-5.5</button>
+        <button class="model-choice" data-model="custom">自定义</button>
+      </div>
+
+      <div id="customModelBox" class="field" style="display:none;margin-top:10px;">
+        <label>模型 ID</label>
+        <input id="apiModel" value="claude-opus-4-7" />
+      </div>
+
+      <button id="fetchModelsBtn" class="drawer-btn" type="button">拉取当前接入商模型</button>
+      <div id="fetchModelsStatus" class="fetch-models-status"></div>
+      <div id="fetchedModelsList" class="fetched-models-list"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">接入商</div>
+
+      <div class="field">
+        <label>选择接入商</label>
+        <select id="profileSelect"></select>
+      </div>
+
+      <div class="field">
+        <label>名称</label>
+        <input id="profileName" placeholder="例如 DeepKey" />
+      </div>
+
+      <div class="field">
+        <label>API URL</label>
+        <input id="apiUrl" placeholder="https://deepkey.top" />
+      </div>
+
+      <div class="field">
+        <label>API Key</label>
+        <input id="apiKey" type="password" />
+      </div>
+
+      <button id="newProfileBtn" class="drawer-btn">新增接入商</button>
+      <button id="saveProfileBtn" class="drawer-btn">保存接入商</button>
+      <button id="defaultProfileBtn" class="drawer-btn">设为默认</button>
+      <button id="deleteProfileBtn" class="drawer-btn danger">删除接入商</button>
+    </div>
+  </aside>
+
+  <main class="wrap">
+    <div id="chatList">
+      <div class="empty">加载中...</div>
+    </div>
+  </main>
+
+  <div class="composer">
+    <div class="composer-inner">
+      <textarea id="prompt" placeholder="Write a message..."></textarea>
+      <div id="fileInfo" class="file-info"></div>
+      <div id="preview" class="preview"></div>
+      <button id="clearFilesBtn" class="clear-files-btn" type="button">取消附件</button>
+
+      <div class="toolbar">
+        <button id="plusBtn" class="plus-btn">+</button>
+        <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf" />
+        <button id="modelPill" class="model-pill">Opus 4.7⌄</button>
+        <button id="sendBtn" class="send-btn">↑</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    const chatList = $("chatList");
+    const topTitle = $("topTitle");
+
+    const drawer = $("drawer");
+    const overlay = $("drawerOverlay");
+
+    const sessionList = $("sessionList");
+    const profileSelect = $("profileSelect");
+
+
+    const profileName = $("profileName");
+    const apiUrl = $("apiUrl");
+    const apiKey = $("apiKey");
+    const apiModel = $("apiModel");
+
+    const modelChoices = $("modelChoices");
+    const customModelBox = $("customModelBox");
+    const modelPill = $("modelPill");
+    const fetchModelsBtn = $("fetchModelsBtn");
+    const fetchModelsStatus = $("fetchModelsStatus");
+    const fetchedModelsList = $("fetchedModelsList");
+
+    const promptEl = $("prompt");
+    const sendBtn = $("sendBtn");
+    const fileInput = $("fileInput");
+    const fileInfo = $("fileInfo");
+    const preview = $("preview");
+    const clearFilesBtn = $("clearFilesBtn");
+
+    let conversations = [];
+    let activeConversationId = null;
+    let messages = [];
+    let profiles = [];
+    let activeProfileId = "";
+    let sending = false;
+
+    function escapeHtml(t) {
+      const d = document.createElement("div");
+      d.textContent = t || "";
+      return d.innerHTML;
+    }
+
+    async function api(method, url, body, form = false) {
+      const opt = { method };
+      if (body !== undefined) {
+        if (form) opt.body = body;
+        else {
+          opt.headers = { "Content-Type": "application/json" };
+          opt.body = JSON.stringify(body);
+        }
+      }
+      const r = await fetch(url, opt);
+      return await r.json();
+    }
+
+    function modelLabel(m) {
+      m = (m || "").toLowerCase();
+      if (m.includes("opus-4-7")) return "Opus 4.7⌄";
+      if (m.includes("opus-4-6")) return "Opus 4.6⌄";
+      if (m.includes("sonnet-4-6")) return "Sonnet 4.6⌄";
+      if (m.includes("gpt-5.5")) return "GPT-5.5⌄";
+      if (m.includes("gpt")) return apiModel.value.trim() + "⌄";
+      return (apiModel.value.trim() || "模型") + "⌄";
+    }
+
+    function currentModelKey() {
+      return "model_for_" + (activeProfileId || apiUrl.value.trim() || "default");
+    }
+
+    function setModel(model) {
+      apiModel.value = model || "claude-opus-4-7";
+      modelPill.textContent = modelLabel(apiModel.value);
+
+      let matched = false;
+      modelChoices.querySelectorAll(".model-choice").forEach(b => {
+        const active = b.dataset.model !== "custom" && b.dataset.model === apiModel.value;
+        if (active) matched = true;
+        b.classList.toggle("active", active);
+      });
+
+      const custom = modelChoices.querySelector('[data-model="custom"]');
+      if (custom) custom.classList.toggle("active", !matched);
+      customModelBox.style.display = matched ? "none" : "block";
+
+      localStorage.setItem("last_model_global", apiModel.value);
+      localStorage.setItem(currentModelKey(), apiModel.value);
+    }
+
+    function restoreModel() {
+      const m = localStorage.getItem(currentModelKey()) || localStorage.getItem("last_model_global") || apiModel.value || "claude-opus-4-7";
+      setModel(m);
+    }
+
+    function addModelChoiceButton(model) {
+      if (!model) return;
+
+      const exists = Array.from(modelChoices.querySelectorAll(".model-choice"))
+        .some(btn => btn.dataset.model === model);
+
+      if (exists) return;
+
+      const customBtn = modelChoices.querySelector('[data-model="custom"]');
+
+      const btn = document.createElement("button");
+      btn.className = "model-choice";
+      btn.dataset.model = model;
+      btn.textContent = model;
+
+      if (customBtn) {
+        modelChoices.insertBefore(btn, customBtn);
+      } else {
+        modelChoices.appendChild(btn);
+      }
+    }
+
+    function providerModelsKey() {
+      return "models_for_" + (activeProfileId || apiUrl.value.trim() || "default");
+    }
+
+    function saveProviderModels(models) {
+      try {
+        localStorage.setItem(providerModelsKey(), JSON.stringify(models || []));
+      } catch (e) {}
+    }
+
+    function loadProviderModels() {
+      try {
+        const raw = localStorage.getItem(providerModelsKey());
+        const arr = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(arr)) {
+          arr.forEach(addModelChoiceButton);
+        }
+      } catch (e) {}
+    }
+
+    async function fetchModelsFromProvider() {
+      const base = apiUrl.value.trim();
+      const token = apiKey.value.trim();
+
+      if (!base || !token) {
+        fetchModelsStatus.textContent = "请先填写 API URL 和 API Key";
+        fetchModelsStatus.className = "fetch-models-status bad";
+        return;
+      }
+
+      fetchModelsStatus.textContent = "正在拉取模型...";
+      fetchModelsStatus.className = "fetch-models-status";
+      fetchedModelsList.innerHTML = "";
+
+      try {
+        const data = await api("POST", "/api/profiles/models", {
+          name: profileName.value.trim() || "未命名",
+          base_url: base,
+          auth_token: token,
+          model: apiModel.value.trim() || "claude-opus-4-7",
+          is_default: false
+        });
+
+        if (!data.ok) {
+          fetchModelsStatus.textContent = "拉取失败：" + (data.error || "未知错误");
+          fetchModelsStatus.className = "fetch-models-status bad";
+          return;
+        }
+
+        const models = data.models || [];
+
+        if (!models.length) {
+          fetchModelsStatus.textContent = "没有返回模型列表";
+          fetchModelsStatus.className = "fetch-models-status bad";
+          return;
+        }
+
+        saveProviderModels(models);
+        models.forEach(addModelChoiceButton);
+
+        fetchedModelsList.innerHTML = models.map(m =>
+          `<button type="button" class="fetched-model-btn" data-model="${escapeHtml(m)}">${escapeHtml(m)}</button>`
+        ).join("");
+
+        fetchModelsStatus.textContent = "已拉取 " + models.length + " 个模型";
+        fetchModelsStatus.className = "fetch-models-status good";
+      } catch (e) {
+        fetchModelsStatus.textContent = "拉取失败：" + e;
+        fetchModelsStatus.className = "fetch-models-status bad";
+      }
+    }
+
+    function providerName() {
+      return profileName.value.trim() || apiUrl.value.trim() || "当前接入商";
+    }
+
+    function repairFractions(latex) {
+      if (!latex) return latex;
+      let x = latex;
+
+      x = x.replace(/\(([^()]+)\)\s*\/\s*\(([^()]+)\)/g, (_, a, b) => `\\frac{${a.trim()}}{${b.trim()}}`);
+
+      x = x.replace(/(^|[\s=+\-*/(])([\-]?(?:\\?[a-zA-Z]+|\d+)(?:\^\{?[\w+\-]+\}?)*(?:[a-zA-Z0-9^{}]*)?)\s*\/\s*([\-]?(?:\\?[a-zA-Z]+|\d+)(?:\^\{?[\w+\-]+\}?)*(?:[a-zA-Z0-9^{}]*)?)/g,
+        (_, prefix, a, b) => prefix + `\\frac{${a.trim()}}{${b.trim()}}`
+      );
+
+      return x;
+    }
+
+    function repairMath(root) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+
+      nodes.forEach(n => {
+        let t = n.nodeValue || "";
+
+        t = t.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => "$$" + repairFractions(inner) + "$$");
+        t = t.replace(/\$([^$\n]+?)\$/g, (_, inner) => "$" + repairFractions(inner) + "$");
+        t = t.replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => "\\[" + repairFractions(inner) + "\\]");
+        t = t.replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => "\\(" + repairFractions(inner) + "\\)");
+
+        n.nodeValue = t;
+      });
+    }
+
+    function renderMath(root) {
+      repairMath(root);
+      if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise([root]).catch(() => {});
+      }
+    }
+
+    function parseImagePreviewList(value) {
+      if (!value) return [];
+
+      if (Array.isArray(value)) return value;
+
+      if (typeof value === "string") {
+        const v = value.trim();
+
+        if (!v) return [];
+
+        try {
+          const parsed = JSON.parse(v);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (e) {}
+
+        return [v];
+      }
+
+      return [];
+    }
+
+    function renderMessages() {
+      if (!messages.length) {
+        chatList.innerHTML = '<div class="empty">当前对话还没有消息</div>';
+        return;
+      }
+
+      chatList.innerHTML = "";
+
+      messages.forEach((msg, idx) => {
+        const wrap = document.createElement("div");
+        wrap.className = "msg-wrap " + msg.role;
+
+        const row = document.createElement("div");
+        row.className = "msg " + msg.role;
+
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+
+        if (msg.role === "assistant") {
+          if ((msg.content || "").trim() === "思考中...") {
+            bubble.innerHTML = '<div class="thinking"><span></span><span></span><span></span></div>';
+          } else {
+            bubble.innerHTML = marked.parse(msg.content || "");
+            renderMath(bubble);
+
+            if (msg.model || msg.providerName) {
+              const meta = document.createElement("div");
+              meta.className = "answer-meta";
+              meta.textContent = (msg.providerName || "未知接入商") + " · " + (msg.model || "未知模型");
+              bubble.appendChild(meta);
+            }
+          }
+        } else {
+          let html = escapeHtml(msg.content || "").replace(/\n/g, "<br>");
+          if (msg.fileName && !msg.imagePreview) {
+            html += `<div class="file-chip">${escapeHtml(msg.fileName)}</div>`;
+          }
+
+          const imgs = parseImagePreviewList(msg.imagePreview);
+          if (imgs.length) {
+            html += '<div class="user-upload">';
+            imgs.forEach(src => {
+              html += `<img src="${escapeHtml(src)}" />`;
+            });
+            html += '</div>';
+          }
+
+          bubble.innerHTML = html || " ";
+        }
+
+        row.appendChild(bubble);
+
+        const actions = document.createElement("div");
+        actions.className = "msg-actions";
+        actions.innerHTML = `<button class="small-btn delete-msg" data-idx="${idx}">⌫</button>`;
+        if (msg.role === "assistant" && msg.id && (msg.content || "").trim() !== "思考中...") {
+          actions.innerHTML += `<button class="small-btn regen-msg" data-idx="${idx}">↻</button>`;
+        }
+
+        wrap.appendChild(row);
+        wrap.appendChild(actions);
+        chatList.appendChild(wrap);
+      });
+
+      requestAnimationFrame(() => {
+        const last = chatList.lastElementChild;
+        if (last) last.scrollIntoView({ behavior: "smooth", block: "end" });
+      });
+    }
+
+    function renderSessions() {
+      sessionList.innerHTML = "";
+      conversations.forEach(c => {
+        const b = document.createElement("button");
+        b.className = "session-item" + (c.id === activeConversationId ? " active" : "");
+        b.textContent = c.title || "新对话";
+        b.onclick = async () => {
+          activeConversationId = c.id;
+          await loadMessages();
+          renderAll();
+          closeDrawer();
+        };
+        sessionList.appendChild(b);
+      });
+    }
+
+    function renderProfiles() {
+      profileSelect.innerHTML = "";
+
+      if (!profiles.length) {
+        const o = document.createElement("option");
+        o.value = "";
+        o.textContent = "未保存接入商";
+        profileSelect.appendChild(o);
+        return;
+      }
+
+      profiles.forEach(p => {
+        const o = document.createElement("option");
+        o.value = p.id;
+        o.textContent = p.name + (p.is_default ? "（默认）" : "");
+        profileSelect.appendChild(o);
+      });
+
+      profileSelect.value = activeProfileId || "";
+    }
+
+    function applyProfile() {
+      const p = profiles.find(x => x.id === activeProfileId);
+      if (!p) return;
+      profileName.value = p.name || "";
+      apiUrl.value = p.base_url || "";
+      apiKey.value = p.auth_token || "";
+      apiModel.value = p.model || "claude-opus-4-7";
+      localStorage.setItem("active_profile", activeProfileId);
+      restoreModel();
+      loadProviderModels();
+    }
+
+    function renderAll() {
+      const c = conversations.find(x => x.id === activeConversationId);
+      topTitle.textContent = c && c.title ? c.title : "Claude Web";
+      renderSessions();
+      renderMessages();
+    }
+
+    async function loadConversations() {
+      const d = await api("GET", "/api/conversations");
+      conversations = d.conversations || [];
+
+      if (!conversations.length) {
+        const c = await api("POST", "/api/conversations", { title: "新对话" });
+        activeConversationId = c.id;
+        return loadConversations();
+      }
+
+      if (!activeConversationId || !conversations.find(c => c.id === activeConversationId)) {
+        activeConversationId = conversations[0].id;
+      }
+
+      await loadMessages();
+      renderAll();
+    }
+
+    async function loadMessages() {
+      const d = await api("GET", `/api/conversations/${activeConversationId}/messages`);
+      messages = d.messages || [];
+    }
+
+    async function loadProfiles() {
+      const d = await api("GET", "/api/profiles");
+      profiles = d.profiles || [];
+
+      const saved = localStorage.getItem("active_profile");
+      const def = profiles.find(p => p.is_default);
+      const found = profiles.find(p => p.id === saved);
+
+      if (found) activeProfileId = found.id;
+      else if (def) activeProfileId = def.id;
+      else if (profiles.length) activeProfileId = profiles[0].id;
+      else activeProfileId = "";
+
+      renderProfiles();
+      applyProfile();
+    }
+
+    async function sendPrompt() {
+      if (sending) return;
+
+      const text = promptEl.value.trim();
+      const files = fileInput.files;
+
+      if (!text && (!files || !files.length)) return;
+
+      sending = true;
+      sendBtn.disabled = true;
+
+      let fileName = null;
+      let imagePreview = null;
+
+      if (files && files.length) {
+        fileName = Array.from(files).map(f => f.name).join(", ");
+
+        const localImgs = [];
+        for (const f of files) {
+          if (f.type && f.type.startsWith("image/")) {
+            localImgs.push(URL.createObjectURL(f));
+          }
+        }
+
+        imagePreview = localImgs.length ? localImgs : null;
+      }
+
+      messages.push({ role: "user", content: text, fileName, imagePreview });
+      messages.push({ role: "assistant", content: "思考中..." });
+      renderMessages();
+
+      promptEl.value = "";
+
+      const model = apiModel.value.trim() || "claude-opus-4-7";
+      setModel(model);
+
+      try {
+        let resp;
+
+        if (files && files.length) {
+          const form = new FormData();
+          form.append("conversation_id", activeConversationId);
+          form.append("prompt", text);
+          form.append("api_base_url", apiUrl.value.trim());
+          form.append("api_auth_token", apiKey.value.trim());
+          form.append("api_model", model);
+          form.append("api_profile_name", providerName());
+
+          for (const f of files) form.append("files", f);
+
+          resp = await fetch("/api/chat/upload_stream", { method: "POST", body: form });
+        } else {
+          resp = await fetch("/api/chat/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversation_id: activeConversationId,
+              prompt: text,
+              api_base_url: apiUrl.value.trim(),
+              api_auth_token: apiKey.value.trim(),
+              api_model: model,
+              api_profile_name: providerName()
+            })
+          });
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let full = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          full += decoder.decode(value, { stream: true });
+          messages[messages.length - 1].content = full;
+          renderMessages();
+        }
+
+        clearSelectedFiles();
+
+        await loadConversations();
+        await loadMessages();
+        renderAll();
+      } catch (e) {
+        messages[messages.length - 1].content = "请求失败: " + e;
+        renderMessages();
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+      }
+    }
+
+    async function deleteMessageAfter(idx) {
+      const msg = messages[idx];
+      if (!msg) return;
+      if (!confirm("确定删除这条消息以及之后所有消息吗？")) return;
+
+      if (!msg.id) {
+        messages = messages.slice(0, idx);
+        renderMessages();
+        return;
+      }
+
+      await api("DELETE", `/api/conversations/${activeConversationId}/messages/${msg.id}/after`);
+      await loadMessages();
+      renderAll();
+    }
+
+    async function regenerateFrom(idx) {
+      const msg = messages[idx];
+      if (!msg || msg.role !== "assistant" || !msg.id) return;
+      if (!confirm("确定从这里重新回答吗？这条回复以及之后消息都会删除。")) return;
+
+      sending = true;
+      sendBtn.disabled = true;
+
+      messages = messages.slice(0, idx);
+      messages.push({ role: "assistant", content: "思考中..." });
+      renderMessages();
+
+      try {
+        const resp = await fetch("/api/chat/regenerate_from_stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: activeConversationId,
+            message_id: msg.id,
+            api_base_url: apiUrl.value.trim(),
+            api_auth_token: apiKey.value.trim(),
+            api_model: apiModel.value.trim() || "claude-opus-4-7",
+            api_profile_name: providerName()
+          })
+        });
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let full = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          full += decoder.decode(value, { stream: true });
+          messages[messages.length - 1].content = full;
+          renderMessages();
+        }
+
+        await loadMessages();
+        renderAll();
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+      }
+    }
+
+    function openDrawer() {
+      drawer.classList.add("open");
+      overlay.classList.add("open");
+    }
+
+    function closeDrawer() {
+      drawer.classList.remove("open");
+      overlay.classList.remove("open");
+    }
+
+    $("openDrawer").onclick = openDrawer;
+    $("closeDrawer").onclick = closeDrawer;
+    overlay.onclick = closeDrawer;
+
+    $("newConvBtn").onclick = async () => {
+      const c = await api("POST", "/api/conversations", { title: "新对话" });
+      activeConversationId = c.id;
+      await loadConversations();
+      closeDrawer();
+    };
+
+    $("renameConvBtn").onclick = async () => {
+      const c = conversations.find(x => x.id === activeConversationId);
+      const title = prompt("新名称", c ? c.title : "");
+      if (!title) return;
+      await api("POST", `/api/conversations/${activeConversationId}/rename`, { title });
+      await loadConversations();
+    };
+
+    $("deleteConvBtn").onclick = async () => {
+      if (!confirm("确定删除当前对话吗？")) return;
+      await api("DELETE", `/api/conversations/${activeConversationId}`);
+      activeConversationId = null;
+      await loadConversations();
+    };
+
+    $("exportConvBtn").onclick = () => {
+      if (activeConversationId) window.open(`/api/conversations/${activeConversationId}/export.md`, "_blank");
+    };
+
+    shareBtn.onclick = $("exportConvBtn").onclick;
+
+    modelChoices.onclick = e => {
+      const btn = e.target.closest(".model-choice");
+      if (!btn) return;
+      if (btn.dataset.model === "custom") {
+        customModelBox.style.display = "block";
+        apiModel.focus();
+      } else {
+        setModel(btn.dataset.model);
+      }
+    };
+
+    fetchModelsBtn.onclick = fetchModelsFromProvider;
+
+    fetchedModelsList.onclick = e => {
+      const btn = e.target.closest(".fetched-model-btn");
+      if (!btn) return;
+      const model = btn.dataset.model;
+      addModelChoiceButton(model);
+      setModel(model);
+      fetchModelsStatus.textContent = "已选择模型：" + model;
+      fetchModelsStatus.className = "fetch-models-status good";
+    };
+
+    apiModel.oninput = () => setModel(apiModel.value.trim() || "claude-opus-4-7");
+
+    modelPill.onclick = openDrawer;
+
+    profileSelect.onchange = () => {
+      activeProfileId = profileSelect.value;
+      applyProfile();
+    };
+
+    $("newProfileBtn").onclick = () => {
+      activeProfileId = "";
+      profileSelect.value = "";
+      profileName.value = "";
+      apiUrl.value = "";
+      apiKey.value = "";
+    };
+
+    $("saveProfileBtn").onclick = async () => {
+      const body = {
+        name: profileName.value.trim() || "未命名",
+        base_url: apiUrl.value.trim(),
+        auth_token: apiKey.value.trim(),
+        model: apiModel.value.trim() || "claude-opus-4-7",
+        is_default: false
+      };
+
+      let d;
+      if (activeProfileId) d = await api("PUT", `/api/profiles/${activeProfileId}`, body);
+      else d = await api("POST", "/api/profiles", body);
+
+      activeProfileId = d.id || activeProfileId;
+      await loadProfiles();
+    };
+
+    $("defaultProfileBtn").onclick = async () => {
+      if (!activeProfileId) return;
+      await api("POST", `/api/profiles/${activeProfileId}/default`);
+      await loadProfiles();
+    };
+
+    $("deleteProfileBtn").onclick = async () => {
+      if (!activeProfileId) return;
+      if (!confirm("确定删除当前接入商吗？")) return;
+      await api("DELETE", `/api/profiles/${activeProfileId}`);
+      activeProfileId = "";
+      await loadProfiles();
+    };
+
+    function clearSelectedFiles() {
+      fileInput.value = "";
+      fileInfo.textContent = "";
+      preview.innerHTML = "";
+      clearFilesBtn.style.display = "none";
+    }
+
+    $("plusBtn").onclick = () => fileInput.click();
+    clearFilesBtn.onclick = clearSelectedFiles;
+
+    fileInput.onchange = () => {
+      const files = fileInput.files;
+      if (!files || !files.length) {
+        clearSelectedFiles();
+        return;
+      }
+
+      clearFilesBtn.style.display = "inline-block";
+
+      fileInfo.textContent = "已选择 " + files.length + " 个文件：" + Array.from(files).map(f => f.name).join(", ");
+      preview.innerHTML = "";
+
+      Array.from(files).forEach(f => {
+        if (f.type && f.type.startsWith("image/")) {
+          const img = document.createElement("img");
+          img.src = URL.createObjectURL(f);
+          preview.appendChild(img);
+        }
+      });
+    };
+
+    sendBtn.onclick = sendPrompt;
+
+    promptEl.onkeydown = e => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendPrompt();
+      }
+    };
+
+    chatList.onclick = e => {
+      const del = e.target.closest(".delete-msg");
+      if (del) return deleteMessageAfter(Number(del.dataset.idx));
+
+      const regen = e.target.closest(".regen-msg");
+      if (regen) return regenerateFrom(Number(regen.dataset.idx));
+    };
+
+    (async () => {
+      try {
+        await loadProfiles();
+        restoreModel();
+        loadProviderModels();
+        await loadConversations();
+      } catch (e) {
+        chatList.innerHTML = '<div class="empty">加载失败：' + escapeHtml(String(e)) + '</div>';
+      }
+    })();
+  </script>
+</body>
+</html>

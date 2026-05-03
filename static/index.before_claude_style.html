@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Claude Web</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #11182b;
+      --panel-2: #0f172a;
+      --line: #25314a;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --blue: #3b82f6;
+      --blue-2: #2563eb;
+      --assistant: #0f172a;
+      --shadow: 0 10px 30px rgba(0,0,0,0.25);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background:
+        radial-gradient(circle at top, rgba(59,130,246,0.12), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    body { min-height: 100vh; }
+
+    .wrap {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 14px 14px 380px;
+    }
+
+    .topbar {
+      background: rgba(17,24,43,0.88);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px 18px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(8px);
+      margin-bottom: 14px;
+    }
+
+    .title {
+      font-size: 26px;
+      font-weight: 800;
+      margin: 0 0 6px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .session-bar {
+      margin-top: 14px;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .session-chip {
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #cbd5e1;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+
+    .session-chip.active {
+      background: linear-gradient(180deg, var(--blue), var(--blue-2));
+      color: white;
+      border-color: transparent;
+    }
+
+    .session-chip.new {
+      background: #1e293b;
+      color: #dbeafe;
+    }
+
+    .config-box {
+      margin-top: 14px;
+      border: 1px solid #334155;
+      background: rgba(15,23,42,0.55);
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    .config-title {
+      font-size: 14px;
+      color: #cbd5e1;
+      margin-bottom: 0;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .config-toggle {
+      background: #334155;
+      box-shadow: none;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+
+    .config-body {
+      margin-top: 10px;
+      display: none;
+    }
+
+    .config-box.open .config-body {
+      display: block;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    .grid label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .grid input {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      background: #0b1220;
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+    }
+
+    .chat-shell {
+      background: rgba(17,24,43,0.9);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+      min-height: 52vh;
+    }
+
+    #chatList {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .empty {
+      color: #64748b;
+      text-align: center;
+      padding: 34px 12px;
+      line-height: 1.8;
+    }
+
+    .msg { display: flex; }
+    .msg.user { justify-content: flex-end; }
+    .msg.assistant { justify-content: flex-start; }
+
+    .bubble {
+      max-width: 88%;
+      padding: 12px 14px;
+      border-radius: 18px;
+      line-height: 1.72;
+      word-break: break-word;
+      overflow-x: auto;
+    }
+
+    .user .bubble {
+      background: linear-gradient(180deg, var(--blue), var(--blue-2));
+      color: white;
+      border-bottom-right-radius: 6px;
+      box-shadow: 0 8px 22px rgba(37,99,235,0.28);
+    }
+
+    .assistant .bubble {
+      background: var(--assistant);
+      border: 1px solid #334155;
+      color: var(--text);
+      border-bottom-left-radius: 6px;
+    }
+
+    .bubble pre {
+      position: relative;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 42px 12px 12px;
+      overflow-x: auto;
+      margin: 0.8em 0;
+    }
+
+    .copy-code-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 5px 9px;
+      border-radius: 8px;
+      font-size: 12px;
+      background: #334155;
+      color: #e5e7eb;
+      box-shadow: none;
+    }
+
+    .bubble code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .bubble p { margin: 0.65em 0; }
+    .bubble ul, .bubble ol { padding-left: 1.4em; }
+
+    .user-upload { margin-top: 10px; }
+
+    .user-upload img {
+      display: block;
+      max-width: 220px;
+      max-height: 220px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+
+    .file-chip {
+      margin-top: 10px;
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      font-size: 13px;
+      color: #dbeafe;
+    }
+
+    .composer {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+      background: linear-gradient(180deg, rgba(11,16,32,0), rgba(11,16,32,0.88) 22%, rgba(11,16,32,0.98));
+    }
+
+    .composer-inner {
+      max-width: 920px;
+      margin: 0 auto;
+      background: rgba(17,24,43,0.95);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 12px;
+      backdrop-filter: blur(8px);
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 92px;
+      max-height: 220px;
+      border-radius: 14px;
+      border: 1px solid #334155;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 12px 13px;
+      font-size: 16px;
+      resize: vertical;
+      outline: none;
+    }
+
+    .attach-row {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px dashed #3f4d68;
+      border-radius: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      background: rgba(15,23,42,0.45);
+    }
+
+    .attach-row input[type="file"] {
+      display: block;
+      width: 100%;
+      margin-top: 8px;
+      color: var(--muted);
+    }
+
+    .filename {
+      margin-top: 8px;
+      color: #93c5fd;
+      word-break: break-all;
+      font-size: 13px;
+    }
+
+    .preview { margin-top: 10px; }
+
+    .preview img {
+      max-width: 120px;
+      max-height: 120px;
+      border-radius: 12px;
+      border: 1px solid #334155;
+      display: block;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 12px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 11px 16px;
+      font-size: 15px;
+      color: white;
+      background: linear-gradient(180deg, #4b8bff, #2563eb);
+      box-shadow: 0 8px 20px rgba(37,99,235,0.25);
+    }
+
+    button.secondary {
+      background: #334155;
+      box-shadow: none;
+    }
+
+    button.danger {
+      background: #7f1d1d;
+      box-shadow: none;
+    }
+
+    button:disabled { opacity: 0.6; }
+
+    .hint {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 640px) {
+      .wrap { padding: 12px 12px 420px; }
+      .title { font-size: 22px; }
+      .bubble { max-width: 92%; }
+      .user-upload img {
+        max-width: 180px;
+        max-height: 180px;
+      }
+      .hint {
+        width: 100%;
+        margin-left: 0;
+        margin-top: 4px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="title">Claude Web</div>
+      <div class="subtitle">SQLite 本地保存、多轮对话、流式输出、Markdown / LaTeX、文本与图片上传</div>
+      <div class="session-bar" id="sessionBar"></div>
+
+      <div class="config-box" id="configBox">
+        <div class="config-title">
+          <span>API 配置</span>
+          <button id="configToggleBtn" class="config-toggle">展开</button>
+        </div>
+        <div class="config-body">
+        <div class="grid">
+          <div>
+            <label for="apiBaseUrl">API URL</label>
+            <input id="apiBaseUrl" type="text" placeholder="例如: https://deepkey.top" />
+          </div>
+          <div>
+            <label for="apiAuthToken">API Key</label>
+            <input id="apiAuthToken" type="password" placeholder="输入第三方 API Key" />
+          </div>
+          <div>
+            <label for="apiModel">模型</label>
+            <input id="apiModel" type="text" value="claude-opus-4-7" />
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-shell">
+      <div id="chatList">
+        <div class="empty">正在加载本地数据库记录...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="composer">
+    <div class="composer-inner">
+      <textarea id="prompt" placeholder="输入你的问题，回车发送，Shift+回车换行"></textarea>
+
+      <div class="attach-row">
+        支持 txt / md / py / js / json / log 以及 png / jpg / jpeg / webp / gif
+        <input id="fileInput" type="file" accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.png,.jpg,.jpeg,.webp,.gif,.bmp" />
+        <div id="fileName" class="filename"></div>
+        <div id="preview" class="preview"></div>
+      </div>
+
+      <div class="toolbar">
+        <button id="sendBtn">发送</button>
+        <button id="newChatBtn" class="secondary">新建对话</button>
+        <button id="renameChatBtn" class="secondary">重命名</button>
+        <button id="exportChatBtn" class="secondary">导出当前对话</button>
+        <button id="deleteChatBtn" class="danger">删除当前对话</button>
+        <div class="hint">Enter 发送，Shift+Enter 换行</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <script>
+    const promptEl = document.getElementById("prompt");
+    const sendBtn = document.getElementById("sendBtn");
+    const newChatBtn = document.getElementById("newChatBtn");
+    const renameChatBtn = document.getElementById("renameChatBtn");
+    const exportChatBtn = document.getElementById("exportChatBtn");
+    const deleteChatBtn = document.getElementById("deleteChatBtn");
+    const chatListEl = document.getElementById("chatList");
+    const sessionBarEl = document.getElementById("sessionBar");
+    const fileInputEl = document.getElementById("fileInput");
+    const fileNameEl = document.getElementById("fileName");
+    const previewEl = document.getElementById("preview");
+
+    const apiBaseUrlEl = document.getElementById("apiBaseUrl");
+    const apiAuthTokenEl = document.getElementById("apiAuthToken");
+    const apiModelEl = document.getElementById("apiModel");
+    const configBoxEl = document.getElementById("configBox");
+    const configToggleBtn = document.getElementById("configToggleBtn");
+
+    const CONFIG_KEY = "claude_web_config_v1";
+
+    let conversations = [];
+    let activeConversationId = null;
+    let messages = [];
+    let sending = false;
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function enhanceCodeBlocks(root) {
+      if (window.hljs) {
+        root.querySelectorAll("pre code").forEach((block) => {
+          try {
+            hljs.highlightElement(block);
+          } catch (e) {}
+        });
+      }
+
+      root.querySelectorAll("pre").forEach((pre) => {
+        if (pre.querySelector(".copy-code-btn")) return;
+
+        const btn = document.createElement("button");
+        btn.className = "copy-code-btn";
+        btn.textContent = "复制";
+
+        btn.addEventListener("click", async () => {
+          const code = pre.querySelector("code");
+          const text = code ? code.innerText : pre.innerText;
+
+          try {
+            await navigator.clipboard.writeText(text);
+            btn.textContent = "已复制";
+            setTimeout(() => btn.textContent = "复制", 1200);
+          } catch (e) {
+            btn.textContent = "失败";
+            setTimeout(() => btn.textContent = "复制", 1200);
+          }
+        });
+
+        pre.appendChild(btn);
+      });
+    }
+
+    function renderMath(root) {
+      if (window.renderMathInElement) {
+        renderMathInElement(root, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false },
+            { left: "\\(", right: "\\)", display: false },
+            { left: "\\[", right: "\\]", display: true }
+          ],
+          throwOnError: false
+        });
+      }
+    }
+
+    function isImageFile(file) {
+      return file && file.type && file.type.startsWith("image/");
+    }
+
+    function clearFilePreview() {
+      fileInputEl.value = "";
+      fileNameEl.textContent = "";
+      previewEl.innerHTML = "";
+    }
+
+    function saveConfig() {
+      try {
+        localStorage.setItem(CONFIG_KEY, JSON.stringify({
+          apiBaseUrl: apiBaseUrlEl.value.trim(),
+          apiAuthToken: apiAuthTokenEl.value.trim(),
+          apiModel: apiModelEl.value.trim() || "claude-opus-4-7"
+        }));
+      } catch (e) {}
+    }
+
+    function loadConfig() {
+      try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        if (!raw) return;
+        const cfg = JSON.parse(raw);
+        apiBaseUrlEl.value = cfg.apiBaseUrl || "";
+        apiAuthTokenEl.value = cfg.apiAuthToken || "";
+        apiModelEl.value = cfg.apiModel || "claude-opus-4-7";
+      } catch (e) {}
+    }
+
+    async function apiGet(url) {
+      const r = await fetch(url);
+      return await r.json();
+    }
+
+    async function apiPost(url, body) {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {})
+      });
+      return await r.json();
+    }
+
+    async function apiDelete(url) {
+      const r = await fetch(url, { method: "DELETE" });
+      return await r.json();
+    }
+
+    async function loadConversations() {
+      const data = await apiGet("/api/conversations");
+      conversations = data.conversations || [];
+
+      if (!conversations.length) {
+        const created = await apiPost("/api/conversations", { title: "新对话" });
+        activeConversationId = created.id;
+        await loadConversations();
+        return;
+      }
+
+      if (!activeConversationId || !conversations.find(c => c.id === activeConversationId)) {
+        activeConversationId = conversations[0].id;
+      }
+
+      await loadMessages(activeConversationId);
+      renderAll();
+    }
+
+    async function loadMessages(cid) {
+      const data = await apiGet(`/api/conversations/${cid}/messages`);
+      messages = data.messages || [];
+    }
+
+    function renderSessionBar() {
+      sessionBarEl.innerHTML = "";
+
+      conversations.forEach((conv, index) => {
+        const btn = document.createElement("button");
+        btn.className = "session-chip" + (conv.id === activeConversationId ? " active" : "");
+        btn.textContent = conv.title || `对话 ${index + 1}`;
+        btn.addEventListener("click", async () => {
+          activeConversationId = conv.id;
+          await loadMessages(activeConversationId);
+          renderAll();
+        });
+        sessionBarEl.appendChild(btn);
+      });
+
+      const newBtn = document.createElement("button");
+      newBtn.className = "session-chip new";
+      newBtn.textContent = "+ 新对话";
+      newBtn.addEventListener("click", createNewConversation);
+      sessionBarEl.appendChild(newBtn);
+    }
+
+    function renderMessages() {
+      if (!messages.length) {
+        chatListEl.innerHTML = '<div class="empty">当前对话还没有消息</div>';
+        return;
+      }
+
+      chatListEl.innerHTML = "";
+
+      messages.forEach((msg) => {
+        const row = document.createElement("div");
+        row.className = `msg ${msg.role}`;
+
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+
+        if (msg.role === "assistant") {
+          bubble.innerHTML = marked.parse(msg.content || "");
+          enhanceCodeBlocks(bubble);
+          renderMath(bubble);
+        } else {
+          let html = "";
+          if (msg.content && msg.content.trim()) {
+            html += escapeHtml(msg.content).replace(/\n/g, "<br>");
+          }
+          if (msg.fileName && !msg.imagePreview) {
+            html += `<div class="file-chip">${escapeHtml(msg.fileName)}</div>`;
+          }
+          if (msg.imagePreview) {
+            html += `<div class="user-upload"><img src="${msg.imagePreview}" alt="uploaded image"></div>`;
+          }
+          bubble.innerHTML = html || " ";
+        }
+
+        row.appendChild(bubble);
+        chatListEl.appendChild(row);
+      });
+
+      requestAnimationFrame(() => {
+        const last = chatListEl.lastElementChild;
+        if (last) {
+          last.scrollIntoView({ behavior: "smooth", block: "end" });
+        }
+      });
+    }
+
+    function renderAll() {
+      renderSessionBar();
+      renderMessages();
+    }
+
+    async function createNewConversation() {
+      const created = await apiPost("/api/conversations", { title: "新对话" });
+      activeConversationId = created.id;
+      messages = [];
+      clearFilePreview();
+      await loadConversations();
+    }
+
+    async function renameCurrentConversation() {
+      if (!activeConversationId) return;
+
+      const current = conversations.find(c => c.id === activeConversationId);
+      const oldTitle = current ? current.title : "";
+
+      const title = prompt("请输入新的对话名称", oldTitle || "新对话");
+      if (title === null) return;
+
+      const newTitle = title.trim();
+      if (!newTitle) return;
+
+      await apiPost(`/api/conversations/${activeConversationId}/rename`, {
+        title: newTitle
+      });
+
+      await loadConversations();
+    }
+
+    async function deleteCurrentConversation() {
+      if (!activeConversationId) return;
+      await apiDelete(`/api/conversations/${activeConversationId}`);
+      activeConversationId = null;
+      messages = [];
+      clearFilePreview();
+      await loadConversations();
+    }
+
+    fileInputEl.addEventListener("change", () => {
+      const file = fileInputEl.files[0];
+      fileNameEl.textContent = file ? `已选择: ${file.name}` : "";
+      previewEl.innerHTML = "";
+
+      if (file && isImageFile(file)) {
+        const url = URL.createObjectURL(file);
+        previewEl.innerHTML = `<img src="${url}" alt="preview">`;
+      }
+    });
+
+    [apiBaseUrlEl, apiAuthTokenEl, apiModelEl].forEach(el => {
+      el.addEventListener("input", saveConfig);
+      el.addEventListener("change", saveConfig);
+    });
+
+    configToggleBtn.addEventListener("click", () => {
+      configBoxEl.classList.toggle("open");
+      configToggleBtn.textContent = configBoxEl.classList.contains("open") ? "收起" : "展开";
+    });
+
+    async function sendPrompt() {
+      if (sending) return;
+
+      const prompt = promptEl.value.trim();
+      const file = fileInputEl.files[0];
+
+      const apiBaseUrl = apiBaseUrlEl.value.trim();
+      const apiAuthToken = apiAuthTokenEl.value.trim();
+      const apiModel = apiModelEl.value.trim() || "claude-opus-4-7";
+
+      if (!activeConversationId) return;
+      if (!prompt && !file) return;
+
+      sending = true;
+      sendBtn.disabled = true;
+
+      let imagePreview = null;
+      let fileName = null;
+
+      if (file) {
+        fileName = file.name;
+        if (isImageFile(file)) {
+          imagePreview = URL.createObjectURL(file);
+        }
+      }
+
+      messages.push({
+        role: "user",
+        content: prompt || "",
+        fileName,
+        imagePreview
+      });
+
+      messages.push({
+        role: "assistant",
+        content: "思考中..."
+      });
+
+      renderAll();
+      promptEl.value = "";
+      saveConfig();
+
+      try {
+        let resp;
+
+        if (file) {
+          const form = new FormData();
+          form.append("conversation_id", activeConversationId);
+          form.append("prompt", prompt);
+          form.append("api_base_url", apiBaseUrl);
+          form.append("api_auth_token", apiAuthToken);
+          form.append("api_model", apiModel);
+          form.append("file", file);
+
+          resp = await fetch("/api/chat/upload_stream", {
+            method: "POST",
+            body: form
+          });
+        } else {
+          resp = await fetch("/api/chat/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversation_id: activeConversationId,
+              prompt,
+              api_base_url: apiBaseUrl,
+              api_auth_token: apiAuthToken,
+              api_model: apiModel
+            })
+          });
+        }
+
+        if (!resp.ok || !resp.body) {
+          messages[messages.length - 1].content = "请求失败";
+          renderAll();
+          return;
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let fullText = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          fullText += decoder.decode(value, { stream: true });
+          messages[messages.length - 1].content = fullText;
+          renderAll();
+        }
+
+        messages[messages.length - 1].content = fullText || "(无输出)";
+        renderAll();
+
+        clearFilePreview();
+        await loadConversations();
+        await loadMessages(activeConversationId);
+        renderAll();
+      } catch (e) {
+        messages[messages.length - 1].content = "请求失败: " + e;
+        renderAll();
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+      }
+    }
+
+    sendBtn.addEventListener("click", sendPrompt);
+    newChatBtn.addEventListener("click", createNewConversation);
+    renameChatBtn.addEventListener("click", renameCurrentConversation);
+    exportChatBtn.addEventListener("click", () => {
+      if (!activeConversationId) return;
+      window.open(`/api/conversations/${activeConversationId}/export.md`, "_blank");
+    });
+    deleteChatBtn.addEventListener("click", deleteCurrentConversation);
+
+    promptEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendPrompt();
+      }
+    });
+
+    loadConfig();
+    loadConversations();
+  </script>
+</body>
+</html>

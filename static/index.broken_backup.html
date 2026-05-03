@@ -1,0 +1,3702 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Claude Web</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+  <style>
+    :root {
+      --bg: #1f1f1d;
+      --bg-top: #191917;
+      --panel: #2b2b29;
+      --panel-soft: #262624;
+      --text: #f2f0e8;
+      --muted: #a9a49a;
+      --muted-2: #7f7a70;
+      --line: rgba(255,255,255,0.10);
+      --user: #111110;
+      --accent: #d8d0bf;
+      --danger: #7f1d1d;
+      --shadow: 0 18px 50px rgba(0,0,0,0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family:
+        ui-serif,
+        Georgia,
+        "Times New Roman",
+        "Songti SC",
+        "Noto Serif CJK SC",
+        "Source Han Serif SC",
+        "Source Han Serif CN",
+        serif;
+    }
+
+    body {
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 96px 22px 320px;
+    }
+
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 20;
+      height: 78px;
+      background: rgba(31,31,29,0.94);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      padding: 0 22px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: none;
+      border-radius: 0;
+      margin: 0;
+    }
+
+    .topbar::before {
+      content: "◧";
+      color: var(--muted);
+      font-size: 26px;
+      line-height: 1;
+      margin-right: 4px;
+    }
+
+    .title {
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      margin: 0;
+      color: #ded9ce;
+      max-width: 42vw;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .title::after {
+      content: "⌄";
+      font-weight: 400;
+      color: var(--muted);
+      margin-left: 10px;
+    }
+
+    .subtitle {
+      display: none;
+    }
+
+    .session-bar {
+      position: fixed;
+      top: 78px;
+      left: 0;
+      right: 0;
+      z-index: 18;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 20px 8px;
+      background: linear-gradient(
+        180deg,
+        rgba(31,31,29,0.94),
+        rgba(31,31,29,0.72),
+        rgba(31,31,29,0)
+      );
+      scrollbar-width: none;
+    }
+
+    .session-bar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .session-chip {
+      flex: 0 0 auto;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.035);
+      color: #d8d3c8;
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 14px;
+      white-space: nowrap;
+      box-shadow: none;
+    }
+
+    .session-chip.active {
+      background: #343431;
+      color: #f4efe4;
+      border-color: rgba(255,255,255,0.16);
+    }
+
+    .session-chip.new {
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .config-box {
+      position: fixed;
+      top: 18px;
+      right: 116px;
+      z-index: 30;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+
+    .config-title {
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+
+    .config-title span {
+      display: none;
+    }
+
+    .config-toggle {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: transparent;
+      color: #d8d3c8;
+      font-size: 0;
+      box-shadow: none;
+      padding: 0;
+    }
+
+    .config-toggle::before {
+      content: "▧";
+      font-size: 22px;
+    }
+
+    .config-body {
+      position: fixed;
+      top: 82px;
+      left: 18px;
+      right: 18px;
+      display: none;
+      background: #292927;
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 22px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .config-box.open .config-body {
+      display: block;
+    }
+
+    .grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .grid label {
+      display: block;
+      color: var(--muted);
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 12px;
+      margin: 0 0 6px;
+    }
+
+    .grid input {
+      width: 100%;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: #1f1f1d;
+      color: var(--text);
+      border-radius: 14px;
+      padding: 12px 13px;
+      outline: none;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 14px;
+    }
+
+    .chat-shell {
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      border-radius: 0;
+      padding: 38px 0 0;
+      min-height: 60vh;
+    }
+
+    #chatList {
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .empty {
+      color: var(--muted-2);
+      text-align: center;
+      padding: 28vh 0 0;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 15px;
+    }
+
+    .msg {
+      display: flex;
+      width: 100%;
+    }
+
+    .msg.user {
+      justify-content: flex-end;
+    }
+
+    .msg.assistant {
+      justify-content: flex-start;
+    }
+
+    .bubble {
+      line-height: 1.92;
+      word-break: break-word;
+      overflow-x: auto;
+    }
+
+    .user .bubble {
+      max-width: min(78%, 560px);
+      background: var(--user);
+      color: #f5f1e8;
+      border: 0;
+      border-radius: 22px;
+      padding: 13px 18px;
+      box-shadow: none;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 17px;
+      line-height: 1.55;
+      font-weight: 520;
+    }
+
+    .assistant .bubble {
+      max-width: 100%;
+      width: 100%;
+      background: transparent;
+      border: 0;
+      color: #eee9df;
+      border-radius: 0;
+      padding: 0;
+      font-size: 20px;
+      line-height: 1.85;
+      letter-spacing: 0.01em;
+    }
+
+    .assistant .bubble p {
+      margin: 0 0 1.08em;
+    }
+
+    .assistant .bubble p:last-child {
+      margin-bottom: 0;
+    }
+
+    .assistant .bubble ul,
+    .assistant .bubble ol {
+      margin: 0.8em 0 1.1em;
+      padding-left: 1.4em;
+    }
+
+    .assistant .bubble li {
+      margin: 0.25em 0;
+    }
+
+    .bubble strong {
+      font-weight: 700;
+      color: #fffaf0;
+    }
+
+    .bubble pre {
+      position: relative;
+      background: #111110;
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 18px;
+      padding: 44px 14px 14px;
+      overflow-x: auto;
+      margin: 1em 0;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .bubble code {
+      font-family:
+        ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        Consolas,
+        "Liberation Mono",
+        monospace;
+    }
+
+    .copy-code-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: #2f2f2c;
+      color: #d8d3c8;
+      box-shadow: none;
+      border: 1px solid rgba(255,255,255,0.10);
+    }
+
+    .user-upload {
+      margin-top: 10px;
+    }
+
+    .user-upload img {
+      display: block;
+      max-width: 220px;
+      max-height: 220px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+
+    .file-chip {
+      margin-top: 10px;
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.10);
+      font-size: 13px;
+      color: #e8e0d2;
+    }
+
+    .composer {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 25;
+      padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+      background: linear-gradient(
+        180deg,
+        rgba(31,31,29,0),
+        rgba(31,31,29,0.88) 28%,
+        rgba(31,31,29,0.98)
+      );
+    }
+
+    .composer-inner {
+      max-width: 760px;
+      margin: 0 auto;
+      background: #2d2d2a;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 28px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.42);
+      padding: 14px 14px 12px;
+      backdrop-filter: blur(18px);
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 58px;
+      max-height: 170px;
+      border: 0;
+      background: transparent;
+      color: #f0ece3;
+      padding: 8px 8px 6px;
+      resize: none;
+      outline: none;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 18px;
+      line-height: 1.42;
+    }
+
+    textarea::placeholder {
+      color: #8f8a82;
+    }
+
+    .attach-row {
+      margin: 6px 0 0;
+      padding: 0 4px;
+      border: 0;
+      background: transparent;
+      color: transparent;
+      font-size: 0;
+      min-height: 0;
+    }
+
+    .attach-row input[type="file"] {
+      display: none;
+    }
+
+    .attach-row::before {
+      content: "+";
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      color: #d8d3c8;
+      font-size: 34px;
+      font-weight: 200;
+      vertical-align: middle;
+    }
+
+    .filename {
+      display: inline-block;
+      margin-left: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      max-width: 68%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    .preview {
+      margin: 8px 0 0 4px;
+    }
+
+    .preview img {
+      max-width: 88px;
+      max-height: 88px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.10);
+      display: block;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+      padding: 0 2px;
+    }
+
+    .toolbar::before {
+      content: attr(data-model);
+    }
+
+    button {
+      border: 0;
+      color: #f3efe6;
+      background: transparent;
+      box-shadow: none;
+      border-radius: 999px;
+      padding: 9px 12px;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 14px;
+    }
+
+    #sendBtn {
+      margin-left: auto;
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      background: transparent;
+      color: transparent;
+      position: relative;
+    }
+
+    #sendBtn::before {
+      content: "↵";
+      color: #f1ede4;
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    #newChatBtn,
+    #exportChatBtn,
+    #renameChatBtn,
+    #deleteChatBtn {
+      color: var(--muted);
+      background: transparent;
+      padding: 7px 8px;
+      font-size: 13px;
+    }
+
+    #deleteChatBtn {
+      color: #b38b83;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+    }
+
+    .hint {
+      display: none;
+    }
+
+    body::after {
+      content: "Claude is AI and can make mistakes. Please double-check responses.";
+      position: fixed;
+      left: 24px;
+      right: 24px;
+      bottom: calc(4px + env(safe-area-inset-bottom));
+      z-index: 26;
+      text-align: center;
+      color: #8b867d;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 12px;
+      line-height: 1.35;
+      pointer-events: none;
+    }
+
+    @media (max-width: 640px) {
+      .wrap {
+        padding: 112px 26px 330px;
+      }
+
+      .topbar {
+        height: 78px;
+        padding: 0 22px;
+      }
+
+      .session-bar {
+        top: 78px;
+        padding-left: 22px;
+        padding-right: 22px;
+      }
+
+      .config-box {
+        right: 108px;
+      }
+
+      .assistant .bubble {
+        font-size: 19px;
+        line-height: 1.85;
+      }
+
+      .user .bubble {
+        font-size: 16.5px;
+        max-width: 84%;
+        border-radius: 18px;
+        padding: 12px 16px;
+      }
+
+      .composer {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-bottom: calc(26px + env(safe-area-inset-bottom));
+      }
+
+      .composer-inner {
+        border-radius: 28px;
+      }
+
+      textarea {
+        font-size: 18px;
+      }
+
+      #newChatBtn,
+      #exportChatBtn,
+      #renameChatBtn,
+      #deleteChatBtn {
+        display: none;
+      }
+
+      .user-upload img {
+        max-width: 180px;
+        max-height: 180px;
+      }
+    }
+  
+    /* Claude-like polish round 2 */
+    .share-btn {
+      position: fixed;
+      top: 18px;
+      right: 22px;
+      z-index: 34;
+      height: 44px;
+      padding: 0 20px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: transparent;
+      color: #f0ece3;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      box-shadow: none;
+    }
+
+    .share-btn:active {
+      background: rgba(255,255,255,0.06);
+    }
+
+    .topbar {
+      justify-content: flex-start;
+    }
+
+    .topbar::before {
+      content: "◫";
+      width: 32px;
+      color: #b9b3a8;
+      font-size: 24px;
+      margin-right: 12px;
+      transform: translateY(-1px);
+    }
+
+    .title {
+      font-size: 18px;
+      color: #dcd6ca;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .session-bar {
+      top: 76px;
+      padding-top: 4px;
+      opacity: 0.96;
+    }
+
+    .session-chip {
+      font-size: 13px;
+      padding: 7px 13px;
+      background: rgba(255,255,255,0.025);
+    }
+
+    .session-chip.active {
+      background: rgba(255,255,255,0.08);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+    }
+
+    .chat-shell {
+      padding-top: 24px;
+    }
+
+    .assistant .bubble {
+      color: #eee9df;
+      text-shadow: 0 0 0 transparent;
+    }
+
+    .assistant .bubble h1,
+    .assistant .bubble h2,
+    .assistant .bubble h3 {
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      line-height: 1.35;
+      margin: 0.9em 0 0.45em;
+      color: #f4efe6;
+    }
+
+    .assistant .bubble blockquote {
+      margin: 1em 0;
+      padding-left: 1em;
+      border-left: 2px solid rgba(255,255,255,0.18);
+      color: #cfc7b8;
+    }
+
+    .user .bubble {
+      background: #11110f;
+      color: #f4f0e7;
+      box-shadow: 0 10px 35px rgba(0,0,0,0.22);
+    }
+
+    .composer-inner {
+      padding: 13px 14px 11px;
+      border-radius: 30px;
+      background: #30302d;
+      border-color: rgba(255,255,255,0.09);
+    }
+
+    .toolbar {
+      position: relative;
+      min-height: 42px;
+    }
+
+    .model-pill {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      color: #bdb6aa;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 15px;
+      white-space: nowrap;
+      max-width: 48%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+    }
+
+    #sendBtn {
+      margin-left: auto;
+      opacity: 0.92;
+    }
+
+    #sendBtn::before {
+      content: "▥";
+      font-size: 25px;
+      letter-spacing: -6px;
+      transform: rotate(90deg);
+      display: inline-block;
+    }
+
+    .attach-row::before {
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+      font-size: 33px;
+      color: #d0c9bd;
+    }
+
+    .scroll-bottom-btn {
+      position: fixed;
+      left: 50%;
+      bottom: 214px;
+      transform: translateX(-50%);
+      z-index: 22;
+      width: 48px;
+      height: 48px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: #2b2b29;
+      color: #f0ece3;
+      font-size: 28px;
+      line-height: 1;
+      padding: 0 0 4px;
+      box-shadow: 0 10px 34px rgba(0,0,0,0.32);
+    }
+
+    .scroll-bottom-btn:active {
+      background: #343431;
+    }
+
+    body::after {
+      bottom: calc(5px + env(safe-area-inset-bottom));
+      color: #8b867d;
+      font-size: 12.5px;
+    }
+
+    @media (max-width: 640px) {
+      .share-btn {
+        right: 22px;
+        top: 18px;
+        height: 44px;
+        padding: 0 18px;
+        font-size: 15px;
+      }
+
+      .config-box {
+        right: 104px;
+      }
+
+      .config-toggle {
+        width: 44px;
+        height: 44px;
+      }
+
+      .model-pill {
+        font-size: 14.5px;
+        max-width: 52%;
+      }
+
+      .scroll-bottom-btn {
+        bottom: 216px;
+      }
+
+      .composer-inner {
+        border-radius: 30px;
+      }
+    }
+
+  
+    /* Left drawer for sessions + API config */
+    .drawer-open {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      border: 0;
+      background: transparent;
+      color: #d8d3c8;
+      font-size: 24px;
+      line-height: 1;
+      padding: 0;
+      box-shadow: none;
+      margin-right: 8px;
+    }
+
+    .topbar::before {
+      display: none !important;
+      content: none !important;
+    }
+
+    .drawer-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.42);
+      z-index: 80;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.22s ease;
+      backdrop-filter: blur(2px);
+    }
+
+    .drawer-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .side-drawer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: min(86vw, 360px);
+      background: #262623;
+      border-right: 1px solid rgba(255,255,255,0.08);
+      z-index: 90;
+      transform: translateX(-102%);
+      transition: transform 0.24s ease;
+      box-shadow: 18px 0 60px rgba(0,0,0,0.38);
+      padding: 18px 16px calc(22px + env(safe-area-inset-bottom));
+      overflow-y: auto;
+    }
+
+    .side-drawer.open {
+      transform: translateX(0);
+    }
+
+    body.drawer-lock {
+      overflow: hidden;
+    }
+
+    .drawer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+
+    .drawer-title {
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 22px;
+      font-weight: 750;
+      color: #f0ece3;
+      line-height: 1.2;
+    }
+
+    .drawer-subtitle {
+      margin-top: 5px;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 13px;
+      color: #9c968c;
+    }
+
+    .drawer-close {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      color: #d8d3c8;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: none;
+      font-size: 24px;
+      line-height: 1;
+      padding: 0;
+    }
+
+    .drawer-section {
+      margin-bottom: 24px;
+    }
+
+    .drawer-label {
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 12px;
+      color: #8d877d;
+      margin-bottom: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    /* Move session list from top to drawer */
+    #drawerSessions .session-bar {
+      position: static !important;
+      display: flex !important;
+      flex-direction: column;
+      gap: 8px;
+      padding: 0 !important;
+      margin: 0 !important;
+      background: transparent !important;
+      overflow: visible;
+      opacity: 1;
+    }
+
+    #drawerSessions .session-chip {
+      width: 100%;
+      text-align: left;
+      justify-content: flex-start;
+      border-radius: 14px;
+      padding: 11px 12px;
+      font-size: 14px;
+      background: transparent;
+      color: #d8d3c8;
+      border: 1px solid transparent;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #drawerSessions .session-chip.active {
+      background: rgba(255,255,255,0.075);
+      border-color: rgba(255,255,255,0.08);
+      color: #fffaf0;
+    }
+
+    #drawerSessions .session-chip.new {
+      color: #bfb8ac;
+      border-color: rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      text-align: center;
+    }
+
+    /* Move API config into drawer */
+    #drawerConfig .config-box {
+      position: static !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      background: transparent !important;
+    }
+
+    #drawerConfig .config-title {
+      display: none !important;
+    }
+
+    #drawerConfig .config-body {
+      position: static !important;
+      display: block !important;
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+    }
+
+    #drawerConfig .grid {
+      gap: 12px;
+    }
+
+    #drawerConfig .grid label {
+      color: #9c968c;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    #drawerConfig .grid input {
+      background: #1f1f1d;
+      border-color: rgba(255,255,255,0.10);
+      color: #f0ece3;
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    /* Top no longer shows session/config */
+    .topbar > .session-bar,
+    .topbar > .config-box {
+      display: none !important;
+    }
+
+    .topbar {
+      padding-left: 18px;
+    }
+
+    .title {
+      max-width: 52vw;
+    }
+
+    @media (max-width: 640px) {
+      .drawer-open {
+        margin-right: 6px;
+      }
+
+      .side-drawer {
+        width: min(88vw, 340px);
+      }
+
+      .title {
+        max-width: 44vw;
+      }
+    }
+
+  
+    /* Claude-like polish round 3 */
+    .top-more-btn {
+      position: fixed;
+      top: 18px;
+      right: 104px;
+      z-index: 35;
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: transparent;
+      color: #d8d3c8;
+      font-size: 26px;
+      line-height: 1;
+      padding: 0 0 6px;
+      box-shadow: none;
+    }
+
+    .top-menu {
+      position: fixed;
+      top: 70px;
+      right: 18px;
+      z-index: 50;
+      width: 190px;
+      display: none;
+      padding: 8px;
+      border-radius: 18px;
+      background: #2b2b28;
+      border: 1px solid rgba(255,255,255,0.10);
+      box-shadow: 0 18px 60px rgba(0,0,0,0.42);
+    }
+
+    .top-menu.open {
+      display: block;
+    }
+
+    .top-menu button {
+      width: 100%;
+      text-align: left;
+      display: block;
+      padding: 11px 12px;
+      border-radius: 12px;
+      color: #eee9df;
+      font-size: 14px;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .top-menu button:active {
+      background: rgba(255,255,255,0.06);
+    }
+
+    .top-menu .danger-text {
+      color: #d79b91;
+    }
+
+    .share-btn {
+      right: 18px !important;
+      width: auto;
+      min-width: 76px;
+    }
+
+    .config-box {
+      right: 156px !important;
+    }
+
+    .title {
+      max-width: calc(100vw - 250px) !important;
+      font-size: 18px !important;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .title::after {
+      content: "⌄";
+      font-weight: 400;
+      color: #8f887d;
+      margin-left: 8px;
+    }
+
+    .drawer-open {
+      font-size: 0 !important;
+      position: relative;
+    }
+
+    .drawer-open::before {
+      content: "◫";
+      font-size: 25px;
+      color: #c8c1b6;
+    }
+
+    /* 主工具栏保留但更弱化，因为顶部已有更多菜单 */
+    #renameChatBtn,
+    #exportChatBtn,
+    #deleteChatBtn {
+      display: none !important;
+    }
+
+    #newChatBtn {
+      color: #9f988e !important;
+      font-size: 13px !important;
+    }
+
+    .composer-inner {
+      background: #2f2f2c;
+    }
+
+    .assistant .bubble {
+      max-width: 94%;
+    }
+
+    .user .bubble {
+      margin-right: 2px;
+    }
+
+    @media (max-width: 640px) {
+      .top-more-btn {
+        right: 104px;
+        top: 18px;
+        width: 44px;
+        height: 44px;
+      }
+
+      .share-btn {
+        right: 18px !important;
+        min-width: 72px;
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .config-box {
+        display: none !important;
+      }
+
+      .title {
+        max-width: calc(100vw - 238px) !important;
+        font-size: 17px !important;
+      }
+
+      .top-menu {
+        right: 14px;
+      }
+    }
+
+  
+    /* Fix drawer API config + compact composer */
+    #drawerConfig .config-box {
+      display: block !important;
+      position: static !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      background: transparent !important;
+    }
+
+    #drawerConfig .config-body {
+      display: block !important;
+      position: static !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+    }
+
+    #drawerConfig .grid {
+      display: grid !important;
+      gap: 12px !important;
+    }
+
+    #drawerConfig .grid input {
+      display: block !important;
+      width: 100% !important;
+      min-height: 44px;
+      background: #1f1f1d !important;
+      color: #f0ece3 !important;
+      border: 1px solid rgba(255,255,255,0.12) !important;
+      border-radius: 14px !important;
+    }
+
+    #drawerConfig .grid label {
+      display: block !important;
+      color: #9c968c !important;
+    }
+
+    .composer {
+      padding: 8px 14px calc(16px + env(safe-area-inset-bottom)) !important;
+    }
+
+    .composer-inner {
+      border-radius: 26px !important;
+      padding: 10px 12px 10px !important;
+      min-height: 128px;
+      background: #30302d !important;
+    }
+
+    textarea {
+      min-height: 48px !important;
+      max-height: 120px !important;
+      font-size: 18px !important;
+      line-height: 1.38 !important;
+      padding: 6px 8px 2px !important;
+    }
+
+    textarea::placeholder {
+      color: #9a958c !important;
+    }
+
+    .attach-row {
+      margin-top: 0 !important;
+      height: 42px;
+      display: inline-flex;
+      align-items: center;
+      width: 48px;
+      vertical-align: middle;
+    }
+
+    .attach-row::before {
+      width: 38px !important;
+      height: 38px !important;
+      font-size: 30px !important;
+    }
+
+    .filename {
+      position: absolute;
+      left: 62px;
+      bottom: 58px;
+      max-width: 56%;
+      font-size: 12px !important;
+    }
+
+    .preview {
+      position: absolute;
+      left: 18px;
+      bottom: 62px;
+      margin: 0 !important;
+    }
+
+    .preview img {
+      max-width: 68px !important;
+      max-height: 68px !important;
+    }
+
+    .toolbar {
+      margin-top: -42px !important;
+      padding-left: 52px !important;
+      min-height: 42px !important;
+    }
+
+    .model-pill {
+      font-size: 14px !important;
+      max-width: 54% !important;
+      color: #bdb6aa !important;
+    }
+
+    #sendBtn {
+      width: 38px !important;
+      height: 38px !important;
+    }
+
+    #sendBtn::before {
+      font-size: 23px !important;
+    }
+
+    #newChatBtn {
+      display: none !important;
+    }
+
+    .scroll-bottom-btn {
+      bottom: 168px !important;
+      width: 44px !important;
+      height: 44px !important;
+      font-size: 25px !important;
+    }
+
+    body::after {
+      bottom: calc(2px + env(safe-area-inset-bottom)) !important;
+      font-size: 11.5px !important;
+      opacity: 0.78;
+    }
+
+    .wrap {
+      padding-bottom: 230px !important;
+    }
+
+    @media (max-width: 640px) {
+      #drawerConfig .config-box {
+        display: block !important;
+      }
+
+      .wrap {
+        padding-bottom: 235px !important;
+      }
+
+      .composer-inner {
+        min-height: 126px;
+      }
+
+      .scroll-bottom-btn {
+        bottom: 164px !important;
+      }
+    }
+
+  
+    /* Composer layout refinement */
+    .composer {
+      padding: 8px 14px calc(24px + env(safe-area-inset-bottom)) !important;
+    }
+
+    .composer-inner {
+      min-height: 112px !important;
+      padding: 12px 14px 10px !important;
+      border-radius: 28px !important;
+    }
+
+    textarea {
+      min-height: 44px !important;
+      max-height: 110px !important;
+      font-size: 17px !important;
+      line-height: 1.35 !important;
+      padding: 4px 8px 0 !important;
+    }
+
+    .attach-row {
+      position: absolute;
+      left: 18px;
+      bottom: 16px;
+      width: 42px !important;
+      height: 42px !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      z-index: 4;
+    }
+
+    .attach-row::before {
+      width: 42px !important;
+      height: 42px !important;
+      font-size: 31px !important;
+      line-height: 1 !important;
+    }
+
+    .toolbar {
+      margin-top: 8px !important;
+      padding-left: 56px !important;
+      padding-right: 4px !important;
+      min-height: 42px !important;
+      display: flex !important;
+      align-items: center !important;
+    }
+
+    .model-pill {
+      position: static !important;
+      transform: none !important;
+      margin: 0 auto !important;
+      max-width: 58% !important;
+      text-align: center;
+      font-size: 14.5px !important;
+      color: #bdb6aa !important;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #sendBtn {
+      margin-left: 0 !important;
+      flex: 0 0 auto;
+      width: 40px !important;
+      height: 40px !important;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+    }
+
+    #sendBtn::before {
+      content: "▥" !important;
+      font-size: 24px !important;
+      letter-spacing: -6px;
+      transform: rotate(90deg);
+    }
+
+    .filename {
+      position: absolute;
+      left: 64px;
+      bottom: 62px;
+      max-width: calc(100% - 110px);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #aaa399 !important;
+      font-size: 12px !important;
+      z-index: 5;
+    }
+
+    .preview {
+      position: absolute;
+      left: 18px;
+      bottom: 62px;
+      z-index: 5;
+    }
+
+    .preview img {
+      max-width: 62px !important;
+      max-height: 62px !important;
+      border-radius: 12px !important;
+    }
+
+    .scroll-bottom-btn {
+      bottom: 150px !important;
+    }
+
+    body::after {
+      bottom: calc(4px + env(safe-area-inset-bottom)) !important;
+      font-size: 11px !important;
+      line-height: 1.25 !important;
+      opacity: 0.7;
+    }
+
+    .wrap {
+      padding-bottom: 205px !important;
+    }
+
+    @media (max-width: 640px) {
+      .composer {
+        padding-left: 14px !important;
+        padding-right: 14px !important;
+        padding-bottom: calc(24px + env(safe-area-inset-bottom)) !important;
+      }
+
+      .composer-inner {
+        min-height: 112px !important;
+      }
+
+      .model-pill {
+        max-width: 54% !important;
+        font-size: 14px !important;
+      }
+
+      .wrap {
+        padding-bottom: 210px !important;
+      }
+
+      .scroll-bottom-btn {
+        bottom: 150px !important;
+      }
+    }
+
+  
+    /* API profile manager */
+    #drawerConfig .profile-manager {
+      margin-bottom: 14px;
+    }
+
+    #drawerConfig .profile-manager label {
+      display: block;
+      color: #9c968c;
+      font-size: 12px;
+      margin-bottom: 6px;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+    }
+
+    #drawerConfig select {
+      width: 100%;
+      min-height: 44px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: #1f1f1d;
+      color: #f0ece3;
+      padding: 0 12px;
+      font-size: 14px;
+      outline: none;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+    }
+
+    #drawerConfig .profile-actions {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    #drawerConfig .profile-actions button {
+      min-height: 38px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.045);
+      color: #d8d3c8;
+      font-size: 13px;
+      box-shadow: none;
+      padding: 8px 6px;
+    }
+
+    #deleteProfileBtn {
+      color: #d79b91 !important;
+    }
+
+  
+    #drawerConfig .profile-actions {
+      grid-template-columns: 1fr 1fr 1fr !important;
+    }
+
+    #drawerConfig .profile-test-result {
+      margin-top: 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #9c968c;
+      word-break: break-word;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+    }
+
+    #drawerConfig .profile-test-result.good {
+      color: #a7d8a7;
+    }
+
+    #drawerConfig .profile-test-result.bad {
+      color: #e0a199;
+    }
+
+  
+    /* Real model dropdown */
+    #drawerConfig select#apiModelSelect {
+      display: block !important;
+      width: 100% !important;
+      min-height: 46px !important;
+      border-radius: 14px !important;
+      border: 1px solid rgba(255,255,255,0.12) !important;
+      background: #1f1f1d !important;
+      color: #f0ece3 !important;
+      padding: 0 12px !important;
+      font-size: 14px !important;
+      outline: none !important;
+      appearance: auto !important;
+      -webkit-appearance: menulist !important;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif !important;
+    }
+
+    #drawerConfig select#apiModelSelect option {
+      background: #1f1f1d;
+      color: #f0ece3;
+    }
+
+    #customModelBox {
+      display: none;
+    }
+
+  
+    /* Claude-like micro interactions v4 */
+    .thinking {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: #b7afa2;
+      opacity: 0.72;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+      font-size: 15px;
+      letter-spacing: 0.02em;
+      padding: 4px 0;
+      animation: thinkingFade 1.8s ease-in-out infinite;
+    }
+
+    .thinking span {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #bdb6aa;
+      opacity: 0.35;
+      animation: thinkingDot 1.35s ease-in-out infinite;
+    }
+
+    .thinking span:nth-child(2) {
+      animation-delay: 0.18s;
+    }
+
+    .thinking span:nth-child(3) {
+      animation-delay: 0.36s;
+    }
+
+    .thinking em {
+      font-style: normal;
+      margin-left: 4px;
+      opacity: 0.72;
+    }
+
+    @keyframes thinkingDot {
+      0%, 80%, 100% {
+        transform: translateY(0);
+        opacity: 0.28;
+      }
+      38% {
+        transform: translateY(-4px);
+        opacity: 0.9;
+      }
+    }
+
+    @keyframes thinkingFade {
+      0%, 100% {
+        opacity: 0.45;
+      }
+      50% {
+        opacity: 0.88;
+      }
+    }
+
+    /* send button: clear bottom-right arrow */
+    #sendBtn {
+      background: #f0ece3 !important;
+      color: #1f1f1d !important;
+      border-radius: 999px !important;
+      width: 40px !important;
+      height: 40px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.28) !important;
+      transition: transform 0.14s ease, opacity 0.14s ease, background 0.14s ease !important;
+    }
+
+    #sendBtn::before {
+      content: "↑" !important;
+      color: #1f1f1d !important;
+      font-size: 24px !important;
+      font-weight: 700 !important;
+      line-height: 1 !important;
+      letter-spacing: 0 !important;
+      transform: none !important;
+      display: block !important;
+      margin-top: -1px;
+    }
+
+    #sendBtn:active {
+      transform: scale(0.94);
+      background: #d9d2c5 !important;
+    }
+
+    #sendBtn:disabled {
+      opacity: 0.42 !important;
+      transform: none !important;
+    }
+
+    /* composer refinement */
+    .composer-inner {
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    }
+
+    .composer-inner:focus-within {
+      border-color: rgba(255,255,255,0.16) !important;
+      box-shadow:
+        0 18px 60px rgba(0,0,0,0.42),
+        0 0 0 1px rgba(255,255,255,0.035),
+        0 0 32px rgba(255,255,255,0.035) !important;
+      background: #343430 !important;
+    }
+
+    textarea {
+      caret-color: #efe8da;
+    }
+
+    /* message polish */
+    .msg {
+      animation: msgIn 0.18s ease-out;
+    }
+
+    @keyframes msgIn {
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .user .bubble {
+      transition: transform 0.16s ease, background 0.16s ease;
+    }
+
+    .user .bubble:active {
+      transform: scale(0.992);
+    }
+
+    .assistant .bubble {
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    .assistant .bubble a {
+      color: #d8c7a3;
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    .assistant .bubble hr {
+      border: 0;
+      border-top: 1px solid rgba(255,255,255,0.10);
+      margin: 1.4em 0;
+    }
+
+    /* drawer softer */
+    .side-drawer {
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.035), transparent 34%),
+        #262623 !important;
+    }
+
+    #drawerSessions .session-chip {
+      transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+    }
+
+    #drawerSessions .session-chip:active {
+      transform: scale(0.985);
+    }
+
+    #drawerConfig .grid input,
+    #drawerConfig select,
+    #drawerConfig .profile-actions button,
+    #drawerConfig .model-choice {
+      transition: border-color 0.16s ease, background 0.16s ease, transform 0.12s ease;
+    }
+
+    #drawerConfig .grid input:focus {
+      border-color: rgba(255,255,255,0.22) !important;
+      background: #22221f !important;
+    }
+
+    #drawerConfig .profile-actions button:active,
+    #drawerConfig .model-choice:active {
+      transform: scale(0.98);
+    }
+
+    /* model choices more native Claude-like */
+    #drawerConfig .model-choice-group {
+      grid-template-columns: 1fr !important;
+      gap: 0 !important;
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 18px;
+      overflow: hidden;
+      background: rgba(255,255,255,0.035);
+    }
+
+    #drawerConfig .model-choice {
+      border: 0 !important;
+      border-radius: 0 !important;
+      min-height: 54px !important;
+      text-align: left !important;
+      padding: 0 16px !important;
+      background: transparent !important;
+      color: #e5ded2 !important;
+      font-size: 17px !important;
+      position: relative;
+    }
+
+    #drawerConfig .model-choice + .model-choice {
+      border-top: 1px solid rgba(255,255,255,0.08) !important;
+    }
+
+    #drawerConfig .model-choice.active::after {
+      content: "";
+      position: absolute;
+      right: 17px;
+      top: 50%;
+      width: 16px;
+      height: 16px;
+      transform: translateY(-50%);
+      border-radius: 999px;
+      border: 3px solid #a9c7ff;
+      box-shadow: inset 0 0 0 4px #30302d;
+    }
+
+    #drawerConfig .model-choice.active {
+      background: rgba(255,255,255,0.035) !important;
+      color: #fff7ea !important;
+    }
+
+    /* top bar polish */
+    .topbar {
+      background:
+        linear-gradient(180deg, rgba(31,31,29,0.98), rgba(31,31,29,0.92)) !important;
+    }
+
+    .share-btn,
+    .top-more-btn {
+      transition: background 0.14s ease, transform 0.12s ease;
+    }
+
+    .share-btn:active,
+    .top-more-btn:active {
+      transform: scale(0.96);
+      background: rgba(255,255,255,0.06) !important;
+    }
+
+    /* attach plus smoother */
+    .attach-row::before {
+      transition: background 0.14s ease, transform 0.12s ease;
+    }
+
+    .attach-row:active::before {
+      transform: scale(0.94);
+      background: rgba(255,255,255,0.05);
+    }
+
+  
+    /* Better send button + regenerate action */
+    #sendBtn {
+      width: 42px !important;
+      height: 42px !important;
+      border-radius: 999px !important;
+      background: #e8e1d4 !important;
+      color: #22211f !important;
+      box-shadow:
+        0 8px 24px rgba(0,0,0,0.28),
+        inset 0 -1px 0 rgba(0,0,0,0.12) !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      position: relative !important;
+      overflow: hidden !important;
+    }
+
+    #sendBtn::before {
+      content: "" !important;
+      width: 0 !important;
+      height: 0 !important;
+      border-left: 7px solid transparent !important;
+      border-right: 7px solid transparent !important;
+      border-bottom: 13px solid #22211f !important;
+      transform: translateY(-1px) !important;
+      display: block !important;
+      margin: 0 !important;
+      letter-spacing: 0 !important;
+    }
+
+    #sendBtn::after {
+      content: "" !important;
+      position: absolute !important;
+      width: 4px !important;
+      height: 13px !important;
+      border-radius: 999px !important;
+      background: #22211f !important;
+      top: 19px !important;
+      left: 50% !important;
+      transform: translateX(-50%) !important;
+    }
+
+    #sendBtn:active {
+      transform: scale(0.94) !important;
+      background: #d8d0c2 !important;
+    }
+
+    .assistant-actions {
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      opacity: 0.58;
+      transition: opacity 0.16s ease;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans CJK SC",
+        sans-serif;
+    }
+
+    .assistant .bubble:hover .assistant-actions,
+    .assistant-actions:active {
+      opacity: 1;
+    }
+
+    .regen-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.045);
+      color: #bdb6aa;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      font-size: 19px;
+      line-height: 1;
+      box-shadow: none;
+      transition: transform 0.14s ease, background 0.14s ease, color 0.14s ease;
+    }
+
+    .regen-btn:active {
+      transform: rotate(-18deg) scale(0.94);
+      background: rgba(255,255,255,0.10);
+      color: #f0ece3;
+    }
+
+  
+    /* Final send button + thinking brightness + model sync visual */
+    #sendBtn {
+      width: 42px !important;
+      height: 42px !important;
+      min-width: 42px !important;
+      min-height: 42px !important;
+      border-radius: 999px !important;
+      background: #f3eee4 !important;
+      border: 0 !important;
+      color: transparent !important;
+      font-size: 0 !important;
+      line-height: 0 !important;
+      padding: 0 !important;
+      margin-left: 0 !important;
+      box-shadow:
+        0 8px 28px rgba(0,0,0,0.32),
+        inset 0 -1px 0 rgba(0,0,0,0.12) !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      position: relative !important;
+      overflow: hidden !important;
+      transform: none !important;
+    }
+
+    #sendBtn::before {
+      content: "↑" !important;
+      display: block !important;
+      color: #20201e !important;
+      font-size: 28px !important;
+      font-weight: 800 !important;
+      line-height: 1 !important;
+      width: auto !important;
+      height: auto !important;
+      border: 0 !important;
+      background: transparent !important;
+      transform: translateY(-1px) !important;
+      margin: 0 !important;
+      letter-spacing: 0 !important;
+    }
+
+    #sendBtn::after {
+      display: none !important;
+      content: none !important;
+    }
+
+    #sendBtn:active {
+      transform: scale(0.93) !important;
+      background: #d8d1c5 !important;
+    }
+
+    #sendBtn:disabled {
+      opacity: 0.45 !important;
+      background: #b9b2a7 !important;
+    }
+
+    .thinking {
+      color: #eee7d8 !important;
+      opacity: 0.95 !important;
+      filter: drop-shadow(0 0 10px rgba(245,238,224,0.22));
+      animation: thinkingFadeBright 1.45s ease-in-out infinite !important;
+    }
+
+    .thinking span {
+      background: #f5ead8 !important;
+      opacity: 0.55 !important;
+      box-shadow: 0 0 12px rgba(245,234,216,0.38);
+      animation: thinkingDotBright 1.15s ease-in-out infinite !important;
+    }
+
+    .thinking span:nth-child(2) {
+      animation-delay: 0.15s !important;
+    }
+
+    .thinking span:nth-child(3) {
+      animation-delay: 0.30s !important;
+    }
+
+    .thinking em {
+      color: #e8dfcf !important;
+      opacity: 0.95 !important;
+    }
+
+    @keyframes thinkingDotBright {
+      0%, 80%, 100% {
+        transform: translateY(0) scale(0.88);
+        opacity: 0.38;
+      }
+      40% {
+        transform: translateY(-5px) scale(1.15);
+        opacity: 1;
+      }
+    }
+
+    @keyframes thinkingFadeBright {
+      0%, 100% {
+        opacity: 0.72;
+      }
+      50% {
+        opacity: 1;
+      }
+    }
+
+    .model-pill {
+      color: #d4ccbf !important;
+      opacity: 0.96 !important;
+    }
+
+  
+    /* Message delete actions */
+    .msg-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .msg-wrap.user {
+      align-items: flex-end;
+    }
+
+    .msg-wrap.assistant {
+      align-items: flex-start;
+    }
+
+    .msg-actions {
+      display: flex;
+      gap: 8px;
+      opacity: 0.35;
+      transition: opacity 0.16s ease;
+      padding: 0 2px;
+    }
+
+    .msg-wrap:hover .msg-actions,
+    .msg-actions:active {
+      opacity: 1;
+    }
+
+    .delete-msg-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      color: #a99f93;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      font-size: 16px;
+      box-shadow: none;
+    }
+
+    .delete-msg-btn:active {
+      transform: scale(0.94);
+      background: rgba(127,29,29,0.22);
+      color: #e0a199;
+    }
+
+    .msg-wrap.user .msg-actions {
+      padding-right: 4px;
+    }
+
+    .msg-wrap.assistant .msg-actions {
+      padding-left: 0;
+    }
+
+  
+    /* Fix message visibility after delete-actions patch */
+    #chatList {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 28px !important;
+    }
+
+    .msg-wrap {
+      display: flex !important;
+      flex-direction: column !important;
+      width: 100% !important;
+      gap: 6px !important;
+      position: relative !important;
+    }
+
+    .msg-wrap.user {
+      align-items: flex-end !important;
+    }
+
+    .msg-wrap.assistant {
+      align-items: flex-start !important;
+    }
+
+    .msg {
+      display: flex !important;
+      width: 100% !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+    }
+
+    .msg.user {
+      justify-content: flex-end !important;
+    }
+
+    .msg.assistant {
+      justify-content: flex-start !important;
+    }
+
+    .bubble {
+      opacity: 1 !important;
+      visibility: visible !important;
+      display: block !important;
+    }
+
+    .user .bubble {
+      max-width: min(84%, 560px) !important;
+      background: #11110f !important;
+      color: #f5f1e8 !important;
+      border-radius: 18px !important;
+      padding: 12px 16px !important;
+    }
+
+    .assistant .bubble {
+      max-width: 94% !important;
+      width: auto !important;
+      color: #eee9df !important;
+      background: transparent !important;
+      padding: 0 !important;
+    }
+
+    .msg-actions {
+      display: flex !important;
+      gap: 8px !important;
+      opacity: 0.22 !important;
+      transition: opacity 0.16s ease !important;
+      position: static !important;
+      width: auto !important;
+      height: auto !important;
+      pointer-events: auto !important;
+    }
+
+    .msg-wrap.user .msg-actions {
+      align-self: flex-end !important;
+      padding-right: 6px !important;
+    }
+
+    .msg-wrap.assistant .msg-actions {
+      align-self: flex-start !important;
+      padding-left: 0 !important;
+    }
+
+    .msg-wrap:hover .msg-actions,
+    .msg-actions:active {
+      opacity: 0.9 !important;
+    }
+
+    .delete-msg-btn {
+      width: 30px !important;
+      height: 30px !important;
+      border-radius: 999px !important;
+      border: 1px solid rgba(255,255,255,0.08) !important;
+      background: rgba(255,255,255,0.035) !important;
+      color: #a99f93 !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 0 !important;
+      font-size: 15px !important;
+      box-shadow: none !important;
+    }
+
+  </style>
+
+
+
+<style id="model-choice-group-v1">
+  #drawerConfig .model-choice-group {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    margin-bottom: 12px !important;
+  }
+
+  #drawerConfig .model-choice {
+    min-height: 42px !important;
+    border-radius: 14px !important;
+    border: 1px solid rgba(255,255,255,0.10) !important;
+    background: rgba(255,255,255,0.045) !important;
+    color: #d8d3c8 !important;
+    font-size: 13px !important;
+    box-shadow: none !important;
+    padding: 8px 10px !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif !important;
+  }
+
+  #drawerConfig .model-choice.active {
+    background: rgba(255,255,255,0.14) !important;
+    color: #fff7ea !important;
+    border-color: rgba(255,255,255,0.22) !important;
+  }
+
+  #apiModelInputBox {
+    display: none;
+  }
+</style>
+
+</head>
+<body>
+  <div id="drawerOverlay" class="drawer-overlay"></div>
+  <aside id="sideDrawer" class="side-drawer">
+    <div class="drawer-head">
+      <div>
+        <div class="drawer-title">Claude Web</div>
+        <div class="drawer-subtitle">本地会话与 API 配置</div>
+      </div>
+      <button id="drawerCloseBtn" class="drawer-close">×</button>
+    </div>
+
+    <div class="drawer-section">
+      <div class="drawer-label">对话</div>
+      <div id="drawerSessions"></div>
+    </div>
+
+    <div class="drawer-section">
+      <div class="drawer-label">API 配置</div>
+      <div id="drawerConfig"></div>
+    </div>
+  </aside>
+  <div class="wrap">
+    <div class="topbar">
+      <button id="drawerOpenBtn" class="drawer-open">☰</button>
+      <div class="title" id="topTitle">Claude Web</div>
+      <button id="topMoreBtn" class="top-more-btn">⋯</button>
+      <button id="shareBtn" class="share-btn">Share</button>
+
+      <div id="topMenu" class="top-menu">
+        <button id="topRenameBtn">重命名</button>
+        <button id="topExportBtn">导出 Markdown</button>
+        <button id="topDeleteBtn" class="danger-text">删除对话</button>
+      </div>
+      <div class="subtitle">SQLite 本地保存、多轮对话、流式输出、Markdown / LaTeX、文本与图片上传</div>
+      <div class="session-bar" id="sessionBar"></div>
+
+      <div class="config-box" id="configBox">
+        <div class="config-title">
+          <span>API 配置</span>
+          <button id="configToggleBtn" class="config-toggle">展开</button>
+        </div>
+        <div class="config-body">
+        <div class="profile-manager">
+          <label for="apiProfileSelect">接入商</label>
+          <select id="apiProfileSelect"></select>
+          <div class="profile-actions">
+            <button id="newProfileBtn" type="button">新增</button>
+            <button id="saveProfileBtn" type="button">保存</button>
+            <button id="testProfileBtn" type="button">测试</button>
+            <button id="defaultProfileBtn" type="button">设默认</button>
+            <button id="deleteProfileBtn" type="button">删除</button>
+          </div>
+          <div id="profileTestResult" class="profile-test-result"></div>
+        </div>
+
+        <div class="grid">
+          <div>
+            <label for="apiProfileName">名称</label>
+            <input id="apiProfileName" type="text" placeholder="例如: DeepKey" />
+          </div>
+          <div>
+            <label for="apiBaseUrl">API URL</label>
+            <input id="apiBaseUrl" type="text" placeholder="例如: https://deepkey.top" />
+          </div>
+          <div>
+            <label for="apiAuthToken">API Key</label>
+            <input id="apiAuthToken" type="password" placeholder="输入第三方 API Key" />
+          </div>
+          <div>
+            <label for="apiModelSelect">模型选择</label>
+            <select id="apiModelSelect">
+              <option value="claude-opus-4-7">Opus 4.7</option>
+              <option value="claude-opus-4-6">Opus 4.6</option>
+              <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+              <option value="custom">自定义模型 ID</option>
+            </select>
+          </div>
+          <div id="customModelBox">
+            <label for="apiModel">模型 ID</label>
+            <input id="apiModel" type="text" value="claude-opus-4-7" />
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-shell">
+      <div id="chatList">
+        <div class="empty">正在加载本地数据库记录...</div>
+      </div>
+    </div>
+
+    <button id="scrollBottomBtn" class="scroll-bottom-btn">↓</button>
+  </div>
+
+  <div class="composer">
+    <div class="composer-inner">
+      <textarea id="prompt" placeholder="Write a message..."></textarea>
+
+      <div class="attach-row">
+        支持 txt / md / py / js / json / log 以及 png / jpg / jpeg / webp / gif
+        <input id="fileInput" type="file" accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.png,.jpg,.jpeg,.webp,.gif,.bmp" />
+        <div id="fileName" class="filename"></div>
+        <div id="preview" class="preview"></div>
+      </div>
+
+      <div class="toolbar">
+        <div class="model-pill" id="modelPill">Opus 4.7 Adaptive⌄</div>
+        <button id="sendBtn">发送</button>
+        <button id="newChatBtn" class="secondary">新建对话</button>
+        <button id="renameChatBtn" class="secondary">重命名</button>
+        <button id="exportChatBtn" class="secondary">导出当前对话</button>
+        <button id="deleteChatBtn" class="danger">删除当前对话</button>
+        <div class="hint">Enter 发送，Shift+Enter 换行</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <script>
+    const promptEl = document.getElementById("prompt");
+    const sendBtn = document.getElementById("sendBtn");
+    const newChatBtn = document.getElementById("newChatBtn");
+    const renameChatBtn = document.getElementById("renameChatBtn");
+    const exportChatBtn = document.getElementById("exportChatBtn");
+    const deleteChatBtn = document.getElementById("deleteChatBtn");
+    const chatListEl = document.getElementById("chatList");
+    const sessionBarEl = document.getElementById("sessionBar");
+    const fileInputEl = document.getElementById("fileInput");
+    const fileNameEl = document.getElementById("fileName");
+    const previewEl = document.getElementById("preview");
+
+    const apiProfileSelectEl = document.getElementById("apiProfileSelect");
+    const apiProfileNameEl = document.getElementById("apiProfileName");
+    const apiBaseUrlEl = document.getElementById("apiBaseUrl");
+    const apiAuthTokenEl = document.getElementById("apiAuthToken");
+    const apiModelSelectEl = document.getElementById("apiModelSelect");
+    const apiModelEl = document.getElementById("apiModel");
+    const customModelBoxEl = document.getElementById("customModelBox");
+    const newProfileBtn = document.getElementById("newProfileBtn");
+    const saveProfileBtn = document.getElementById("saveProfileBtn");
+    const testProfileBtn = document.getElementById("testProfileBtn");
+    const defaultProfileBtn = document.getElementById("defaultProfileBtn");
+    const deleteProfileBtn = document.getElementById("deleteProfileBtn");
+    const profileTestResultEl = document.getElementById("profileTestResult");
+    const modelPillEl = document.getElementById("modelPill");
+    const scrollBottomBtn = document.getElementById("scrollBottomBtn");
+    const shareBtn = document.getElementById("shareBtn");
+    const topTitleEl = document.getElementById("topTitle");
+    const topMoreBtn = document.getElementById("topMoreBtn");
+    const topMenu = document.getElementById("topMenu");
+    const topRenameBtn = document.getElementById("topRenameBtn");
+    const topExportBtn = document.getElementById("topExportBtn");
+    const topDeleteBtn = document.getElementById("topDeleteBtn");
+
+    const drawerOpenBtn = document.getElementById("drawerOpenBtn");
+    const drawerCloseBtn = document.getElementById("drawerCloseBtn");
+    const drawerOverlay = document.getElementById("drawerOverlay");
+    const sideDrawer = document.getElementById("sideDrawer");
+    const drawerSessions = document.getElementById("drawerSessions");
+    const drawerConfig = document.getElementById("drawerConfig");
+    const configBoxEl = document.getElementById("configBox");
+    const configToggleBtn = document.getElementById("configToggleBtn");
+
+    const CONFIG_KEY = "claude_web_config_v1";
+
+    let conversations = [];
+    let activeConversationId = null;
+    let messages = [];
+    let sending = false;
+    let apiProfiles = [];
+    let activeProfileId = "";
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function enhanceCodeBlocks(root) {
+      if (window.hljs) {
+        root.querySelectorAll("pre code").forEach((block) => {
+          try {
+            hljs.highlightElement(block);
+          } catch (e) {}
+        });
+      }
+
+      root.querySelectorAll("pre").forEach((pre) => {
+        if (pre.querySelector(".copy-code-btn")) return;
+
+        const btn = document.createElement("button");
+        btn.className = "copy-code-btn";
+        btn.textContent = "复制";
+
+        btn.addEventListener("click", async () => {
+          const code = pre.querySelector("code");
+          const text = code ? code.innerText : pre.innerText;
+
+          try {
+            await navigator.clipboard.writeText(text);
+            btn.textContent = "已复制";
+            setTimeout(() => btn.textContent = "复制", 1200);
+          } catch (e) {
+            btn.textContent = "失败";
+            setTimeout(() => btn.textContent = "复制", 1200);
+          }
+        });
+
+        pre.appendChild(btn);
+      });
+    }
+
+    function renderMath(root) {
+      if (window.renderMathInElement) {
+        renderMathInElement(root, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false },
+            { left: "\\(", right: "\\)", display: false },
+            { left: "\\[", right: "\\]", display: true }
+          ],
+          throwOnError: false
+        });
+      }
+    }
+
+    function isImageFile(file) {
+      return file && file.type && file.type.startsWith("image/");
+    }
+
+    function clearFilePreview() {
+      fileInputEl.value = "";
+      fileNameEl.textContent = "";
+      previewEl.innerHTML = "";
+    }
+
+    function updateCustomModelVisibility() {
+      if (!apiModelSelectEl || !customModelBoxEl) return;
+      customModelBoxEl.style.display = apiModelSelectEl.value === "custom" ? "block" : "none";
+    }
+
+    function syncModelSelectFromInput() {
+      if (!apiModelSelectEl || !apiModelEl) return;
+
+      const current = apiModelEl.value.trim();
+      const exists = Array.from(apiModelSelectEl.options).some(opt => opt.value === current);
+
+      if (exists) {
+        apiModelSelectEl.value = current;
+      } else {
+        apiModelSelectEl.value = "custom";
+      }
+
+      updateCustomModelVisibility();
+    }
+
+    function setModelValue(model) {
+      if (!model) return;
+      apiModelEl.value = model;
+      syncModelSelectFromInput();
+      updateModelPill();
+      saveConfig();
+    }
+
+    function shortModelName(model) {
+      const m = (model || "claude-opus-4-7").toLowerCase();
+      if (m.includes("opus")) return "Opus 4.7 Adaptive⌄";
+      if (m.includes("sonnet")) return "Sonnet Adaptive⌄";
+      if (m.includes("haiku")) return "Haiku Adaptive⌄";
+      return (model || "Model") + "⌄";
+    }
+
+    function updateModelPill() {
+      if (modelPillEl) {
+        modelPillEl.textContent = shortModelName(apiModelEl.value.trim());
+      }
+    }
+
+    function saveConfig() {
+      try {
+        localStorage.setItem(CONFIG_KEY, JSON.stringify({
+          apiBaseUrl: apiBaseUrlEl.value.trim(),
+          apiAuthToken: apiAuthTokenEl.value.trim(),
+          apiModel: apiModelEl.value.trim() || "claude-opus-4-7"
+        }));
+      } catch (e) {}
+    }
+
+    function initDrawerLayout() {
+      if (drawerSessions && sessionBarEl && sessionBarEl.parentElement !== drawerSessions) {
+        drawerSessions.appendChild(sessionBarEl);
+      }
+
+      if (drawerConfig && configBoxEl && configBoxEl.parentElement !== drawerConfig) {
+        drawerConfig.appendChild(configBoxEl);
+        configBoxEl.classList.add("open");
+        if (configToggleBtn) {
+          configToggleBtn.textContent = "API";
+        }
+      }
+    }
+
+    function openDrawer() {
+      sideDrawer.classList.add("open");
+      drawerOverlay.classList.add("open");
+      document.body.classList.add("drawer-lock");
+    }
+
+    function closeDrawer() {
+      sideDrawer.classList.remove("open");
+      drawerOverlay.classList.remove("open");
+      document.body.classList.remove("drawer-lock");
+    }
+
+    async function loadApiProfiles() {
+      try {
+        const data = await apiGet("/api/profiles");
+        apiProfiles = data.profiles || [];
+
+        const saved = localStorage.getItem("claude_web_active_profile_id") || "";
+        const def = apiProfiles.find(p => p.is_default);
+        const savedProfile = apiProfiles.find(p => p.id === saved);
+
+        if (savedProfile) {
+          activeProfileId = savedProfile.id;
+        } else if (def) {
+          activeProfileId = def.id;
+        } else if (apiProfiles.length) {
+          activeProfileId = apiProfiles[0].id;
+        } else {
+          activeProfileId = "";
+        }
+
+        renderProfileSelect();
+        applyActiveProfileToForm();
+      } catch (e) {
+        console.log(e);
+      }
+    }
+
+    function renderProfileSelect() {
+      apiProfileSelectEl.innerHTML = "";
+
+      if (!apiProfiles.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "未保存接入商";
+        apiProfileSelectEl.appendChild(opt);
+        return;
+      }
+
+      apiProfiles.forEach((p) => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name + (p.is_default ? "（默认）" : "");
+        apiProfileSelectEl.appendChild(opt);
+      });
+
+      apiProfileSelectEl.value = activeProfileId || "";
+    }
+
+    function applyActiveProfileToForm() {
+      const p = apiProfiles.find(x => x.id === activeProfileId);
+      if (!p) return;
+
+      apiProfileNameEl.value = p.name || "";
+      apiBaseUrlEl.value = p.base_url || "";
+      apiAuthTokenEl.value = p.auth_token || "";
+      apiModelEl.value = p.model || "claude-opus-4-7";
+      localStorage.setItem("claude_web_active_profile_id", activeProfileId);
+      updateModelPill();
+    }
+
+    function readProfileForm() {
+      return {
+        name: apiProfileNameEl.value.trim() || "未命名接入商",
+        base_url: apiBaseUrlEl.value.trim(),
+        auth_token: apiAuthTokenEl.value.trim(),
+        model: apiModelEl.value.trim() || "claude-opus-4-7",
+        is_default: false
+      };
+    }
+
+    async function createNewProfile() {
+      apiProfileNameEl.value = "";
+      apiBaseUrlEl.value = "";
+      apiAuthTokenEl.value = "";
+      apiModelEl.value = "claude-opus-4-7";
+      activeProfileId = "";
+      apiProfileSelectEl.value = "";
+      updateModelPill();
+    }
+
+    async function saveCurrentProfile() {
+      const body = readProfileForm();
+
+      let data;
+      if (activeProfileId) {
+        data = await fetch(`/api/profiles/${activeProfileId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        }).then(r => r.json());
+      } else {
+        data = await apiPost("/api/profiles", body);
+      }
+
+      if (data.id) {
+        activeProfileId = data.id;
+        localStorage.setItem("claude_web_active_profile_id", activeProfileId);
+      }
+
+      await loadApiProfiles();
+    }
+
+    async function testCurrentProfile() {
+      const body = readProfileForm();
+
+      if (!body.base_url || !body.auth_token || !body.model) {
+        profileTestResultEl.textContent = "请先填写 URL / Key / 模型";
+        profileTestResultEl.className = "profile-test-result bad";
+        return;
+      }
+
+      profileTestResultEl.textContent = "测试中...";
+      profileTestResultEl.className = "profile-test-result";
+
+      try {
+        const data = await apiPost("/api/profiles/test", body);
+
+        if (data.ok) {
+          profileTestResultEl.textContent = data.reply || "可用";
+          profileTestResultEl.className = "profile-test-result good";
+        } else {
+          profileTestResultEl.textContent = "失败：" + (data.reply || "未知错误");
+          profileTestResultEl.className = "profile-test-result bad";
+        }
+      } catch (e) {
+        profileTestResultEl.textContent = "请求失败：" + e;
+        profileTestResultEl.className = "profile-test-result bad";
+      }
+    }
+
+    async function setDefaultProfile() {
+      if (!activeProfileId) {
+        await saveCurrentProfile();
+      }
+      if (!activeProfileId) return;
+
+      await apiPost(`/api/profiles/${activeProfileId}/default`, {});
+      await loadApiProfiles();
+    }
+
+    async function deleteCurrentProfile() {
+      if (!activeProfileId) return;
+      if (!confirm("确定删除当前接入商配置吗？此操作不可恢复。")) return;
+
+      await apiDelete(`/api/profiles/${activeProfileId}`);
+      activeProfileId = "";
+      localStorage.removeItem("claude_web_active_profile_id");
+      await loadApiProfiles();
+
+      if (!apiProfiles.length) {
+        apiProfileNameEl.value = "";
+        apiBaseUrlEl.value = "";
+        apiAuthTokenEl.value = "";
+        apiModelEl.value = "claude-opus-4-7";
+      }
+    }
+
+    function loadConfig() {
+      try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        if (!raw) return;
+        const cfg = JSON.parse(raw);
+        apiBaseUrlEl.value = cfg.apiBaseUrl || "";
+        apiAuthTokenEl.value = cfg.apiAuthToken || "";
+        apiModelEl.value = cfg.apiModel || "claude-opus-4-7";
+      } catch (e) {}
+      updateModelPill();
+    }
+
+    async function apiGet(url) {
+      const r = await fetch(url);
+      return await r.json();
+    }
+
+    async function apiPost(url, body) {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {})
+      });
+      return await r.json();
+    }
+
+    async function apiDelete(url) {
+      const r = await fetch(url, { method: "DELETE" });
+      return await r.json();
+    }
+
+    async function loadConversations() {
+      const data = await apiGet("/api/conversations");
+      conversations = data.conversations || [];
+
+      if (!conversations.length) {
+        const created = await apiPost("/api/conversations", { title: "新对话" });
+        activeConversationId = created.id;
+        await loadConversations();
+        return;
+      }
+
+      if (!activeConversationId || !conversations.find(c => c.id === activeConversationId)) {
+        activeConversationId = conversations[0].id;
+      }
+
+      await loadMessages(activeConversationId);
+      renderAll();
+    }
+
+    async function loadMessages(cid) {
+      const data = await apiGet(`/api/conversations/${cid}/messages`);
+      messages = data.messages || [];
+    }
+
+    function updateTopTitle() {
+      const current = conversations.find(c => c.id === activeConversationId);
+      if (topTitleEl) {
+        topTitleEl.textContent = current && current.title ? current.title : "新对话";
+      }
+    }
+
+    function renderSessionBar() {
+      sessionBarEl.innerHTML = "";
+
+      conversations.forEach((conv, index) => {
+        const btn = document.createElement("button");
+        btn.className = "session-chip" + (conv.id === activeConversationId ? " active" : "");
+        btn.textContent = conv.title || `对话 ${index + 1}`;
+        btn.addEventListener("click", async () => {
+          activeConversationId = conv.id;
+          await loadMessages(activeConversationId);
+          renderAll();
+        });
+        sessionBarEl.appendChild(btn);
+      });
+
+      const newBtn = document.createElement("button");
+      newBtn.className = "session-chip new";
+      newBtn.textContent = "+ 新对话";
+      newBtn.addEventListener("click", createNewConversation);
+      sessionBarEl.appendChild(newBtn);
+    }
+
+    function renderMessages() {
+      if (!messages.length) {
+        chatListEl.innerHTML = '<div class="empty">当前对话还没有消息</div>';
+        return;
+      }
+
+      chatListEl.innerHTML = "";
+
+      const lastAssistantIndex = (() => {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") return i;
+        }
+        return -1;
+      })();
+
+      messages.forEach((msg, index) => {
+        const wrap = document.createElement("div");
+        wrap.className = `msg-wrap ${msg.role}`;
+        wrap.dataset.index = String(index);
+
+        const row = document.createElement("div");
+        row.className = `msg ${msg.role}`;
+
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+
+        if (msg.role === "assistant") {
+          if ((msg.content || "").trim() === "思考中...") {
+            bubble.innerHTML = '<div class="thinking"><span></span><span></span><span></span><em>Thinking</em></div>';
+          } else {
+            bubble.innerHTML = marked.parse(msg.content || "");
+
+            if (typeof enhanceCodeBlocks === "function") {
+              enhanceCodeBlocks(bubble);
+            }
+
+            renderMath(bubble);
+
+            if (index === lastAssistantIndex) {
+              const actions = document.createElement("div");
+              actions.className = "assistant-actions";
+              actions.innerHTML = '<button class="regen-btn" title="重新回答">↻</button>';
+              bubble.appendChild(actions);
+            }
+          }
+        } else {
+          let html = "";
+
+          if (msg.content && msg.content.trim()) {
+            html += escapeHtml(msg.content).replace(/
+/g, "<br>");
+          }
+
+          if (msg.fileName && !msg.imagePreview) {
+            html += `<div class="file-chip">${escapeHtml(msg.fileName)}</div>`;
+          }
+
+          if (msg.imagePreview) {
+            html += `<div class="user-upload"><img src="${msg.imagePreview}" alt="uploaded image"></div>`;
+          }
+
+          bubble.innerHTML = html || " ";
+        }
+
+        row.appendChild(bubble);
+
+        const msgActions = document.createElement("div");
+        msgActions.className = "msg-actions";
+        msgActions.innerHTML = '<button class="delete-msg-btn" title="删除此处及之后消息">⌫</button>';
+
+        wrap.appendChild(row);
+        wrap.appendChild(msgActions);
+        chatListEl.appendChild(wrap);
+      });
+
+      requestAnimationFrame(() => {
+        const last = chatListEl.lastElementChild;
+        if (last) {
+          last.scrollIntoView({ behavior: "smooth", block: "end" });
+        }
+      });
+    }
+
+    function renderAll() {
+      updateTopTitle();
+      renderSessionBar();
+      renderMessages();
+    }
+
+    async function createNewConversation() {
+      const created = await apiPost("/api/conversations", { title: "新对话" });
+      activeConversationId = created.id;
+      messages = [];
+      clearFilePreview();
+      await loadConversations();
+    }
+
+    async function renameCurrentConversation() {
+      if (!activeConversationId) return;
+
+      const current = conversations.find(c => c.id === activeConversationId);
+      const oldTitle = current ? current.title : "";
+
+      const title = prompt("请输入新的对话名称", oldTitle || "新对话");
+      if (title === null) return;
+
+      const newTitle = title.trim();
+      if (!newTitle) return;
+
+      await apiPost(`/api/conversations/${activeConversationId}/rename`, {
+        title: newTitle
+      });
+
+      await loadConversations();
+    }
+
+    async function deleteCurrentConversation() {
+      if (!activeConversationId) return;
+
+      const current = conversations.find(c => c.id === activeConversationId);
+      const title = current && current.title ? current.title : "当前对话";
+
+      const ok = confirm(`确定删除「${title}」吗？此操作不可恢复。`);
+      if (!ok) return;
+
+      await apiDelete(`/api/conversations/${activeConversationId}`);
+      activeConversationId = null;
+      messages = [];
+      clearFilePreview();
+      await loadConversations();
+    }
+
+    document.querySelector(".attach-row").classList.add("attach-row-click-fileinput");
+    document.querySelector(".attach-row").addEventListener("click", (e) => {
+      if (e.target !== fileInputEl) fileInputEl.click();
+    });
+
+    fileInputEl.addEventListener("change", () => {
+      const file = fileInputEl.files[0];
+      fileNameEl.textContent = file ? `已选择: ${file.name}` : "";
+      previewEl.innerHTML = "";
+
+      if (file && isImageFile(file)) {
+        const url = URL.createObjectURL(file);
+        previewEl.innerHTML = `<img src="${url}" alt="preview">`;
+      }
+    });
+
+    [apiProfileNameEl, apiBaseUrlEl, apiAuthTokenEl, apiModelEl].forEach(el => {
+      el.addEventListener("input", () => {
+        saveConfig();
+        updateModelPill();
+      });
+      el.addEventListener("change", () => {
+        saveConfig();
+        updateModelPill();
+      });
+    });
+
+    apiProfileSelectEl.addEventListener("change", () => {
+      activeProfileId = apiProfileSelectEl.value;
+      applyActiveProfileToForm();
+    });
+
+    apiModelSelectEl.addEventListener("change", () => {
+      const value = apiModelSelectEl.value;
+
+      if (value === "custom") {
+        updateCustomModelVisibility();
+        apiModelEl.focus();
+        return;
+      }
+
+      setModelValue(value);
+      updateCustomModelVisibility();
+    });
+
+    newProfileBtn.addEventListener("click", createNewProfile);
+    saveProfileBtn.addEventListener("click", saveCurrentProfile);
+    testProfileBtn.addEventListener("click", testCurrentProfile);
+    defaultProfileBtn.addEventListener("click", setDefaultProfile);
+    deleteProfileBtn.addEventListener("click", deleteCurrentProfile);
+
+    apiModelEl.addEventListener("input", () => {
+      syncModelSelectFromInput();
+      updateModelPill();
+      saveConfig();
+    });
+
+    configToggleBtn.addEventListener("click", () => {
+      configBoxEl.classList.toggle("open");
+      configToggleBtn.textContent = configBoxEl.classList.contains("open") ? "收起" : "展开";
+    });
+
+    async function deleteMessageAndAfter(index) {
+      if (!activeConversationId) return;
+
+      const msg = messages[index];
+      if (!msg) return;
+
+      const ok = confirm("确定删除这条消息以及它之后的所有消息吗？此操作不可恢复。");
+      if (!ok) return;
+
+      // 如果是刚刚前端临时消息，还没有数据库 id，就只从前端截断
+      if (!msg.id) {
+        messages = messages.slice(0, index);
+        renderAll();
+        return;
+      }
+
+      try {
+        const data = await apiDelete(`/api/conversations/${activeConversationId}/messages/${msg.id}/after`);
+        if (!data.ok) {
+          alert(data.message || "删除失败");
+          return;
+        }
+
+        await loadMessages(activeConversationId);
+        await loadConversations();
+        renderAll();
+      } catch (e) {
+        alert("删除失败：" + e);
+      }
+    }
+
+    async function regenerateLastAnswer() {
+      if (sending) return;
+      if (!activeConversationId) return;
+
+      const apiBaseUrl = apiBaseUrlEl.value.trim();
+      const apiAuthToken = apiAuthTokenEl.value.trim();
+      const apiModel = apiModelEl.value.trim() || "claude-opus-4-7";
+
+      // 前端先删除最后一条助手回复
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "assistant") {
+          messages.splice(i, 1);
+          break;
+        }
+      }
+
+      messages.push({
+        role: "assistant",
+        content: "思考中..."
+      });
+
+      sending = true;
+      sendBtn.disabled = true;
+      renderAll();
+
+      try {
+        const resp = await fetch("/api/chat/regenerate_stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: activeConversationId,
+            api_base_url: apiBaseUrl,
+            api_auth_token: apiAuthToken,
+            api_model: apiModel
+          })
+        });
+
+        if (!resp.ok || !resp.body) {
+          messages[messages.length - 1].content = "重新回答失败";
+          renderAll();
+          return;
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let fullText = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          fullText += decoder.decode(value, { stream: true });
+          messages[messages.length - 1].content = fullText;
+          renderAll();
+        }
+
+        messages[messages.length - 1].content = fullText || "(无输出)";
+        renderAll();
+
+        await loadConversations();
+        await loadMessages(activeConversationId);
+        renderAll();
+      } catch (e) {
+        messages[messages.length - 1].content = "重新回答失败: " + e;
+        renderAll();
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+      }
+    }
+
+    async function sendPrompt() {
+      if (sending) return;
+
+      const prompt = promptEl.value.trim();
+      const file = fileInputEl.files[0];
+
+      const apiBaseUrl = apiBaseUrlEl.value.trim();
+      const apiAuthToken = apiAuthTokenEl.value.trim();
+      const apiModel = apiModelEl.value.trim() || "claude-opus-4-7";
+
+      if (!activeConversationId) return;
+      if (!prompt && !file) return;
+
+      sending = true;
+      sendBtn.disabled = true;
+
+      let imagePreview = null;
+      let fileName = null;
+
+      if (file) {
+        fileName = file.name;
+        if (isImageFile(file)) {
+          imagePreview = URL.createObjectURL(file);
+        }
+      }
+
+      messages.push({
+        role: "user",
+        content: prompt || "",
+        fileName,
+        imagePreview
+      });
+
+      messages.push({
+        role: "assistant",
+        content: "思考中..."
+      });
+
+      renderAll();
+      promptEl.value = "";
+      saveConfig();
+
+      try {
+        let resp;
+
+        if (file) {
+          const form = new FormData();
+          form.append("conversation_id", activeConversationId);
+          form.append("prompt", prompt);
+          form.append("api_base_url", apiBaseUrl);
+          form.append("api_auth_token", apiAuthToken);
+          form.append("api_model", apiModel);
+          form.append("file", file);
+
+          resp = await fetch("/api/chat/upload_stream", {
+            method: "POST",
+            body: form
+          });
+        } else {
+          resp = await fetch("/api/chat/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversation_id: activeConversationId,
+              prompt,
+              api_base_url: apiBaseUrl,
+              api_auth_token: apiAuthToken,
+              api_model: apiModel
+            })
+          });
+        }
+
+        if (!resp.ok || !resp.body) {
+          messages[messages.length - 1].content = "请求失败";
+          renderAll();
+          return;
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let fullText = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          fullText += decoder.decode(value, { stream: true });
+          messages[messages.length - 1].content = fullText;
+          renderAll();
+        }
+
+        messages[messages.length - 1].content = fullText || "(无输出)";
+        renderAll();
+
+        clearFilePreview();
+        await loadConversations();
+        await loadMessages(activeConversationId);
+        renderAll();
+      } catch (e) {
+        messages[messages.length - 1].content = "请求失败: " + e;
+        renderAll();
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+      }
+    }
+
+    drawerOpenBtn.addEventListener("click", openDrawer);
+    drawerCloseBtn.addEventListener("click", closeDrawer);
+    drawerOverlay.addEventListener("click", closeDrawer);
+
+    topMoreBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      topMenu.classList.toggle("open");
+    });
+
+    document.addEventListener("click", () => {
+      topMenu.classList.remove("open");
+    });
+
+    topMenu.addEventListener("click", (e) => {
+      e.stopPropagation();
+    });
+
+    topRenameBtn.addEventListener("click", async () => {
+      topMenu.classList.remove("open");
+      await renameCurrentConversation();
+    });
+
+    topExportBtn.addEventListener("click", () => {
+      topMenu.classList.remove("open");
+      if (!activeConversationId) return;
+      window.open(`/api/conversations/${activeConversationId}/export.md`, "_blank");
+    });
+
+    topDeleteBtn.addEventListener("click", async () => {
+      topMenu.classList.remove("open");
+      await deleteCurrentConversation();
+    });
+
+    scrollBottomBtn.addEventListener("click", () => {
+      window.scrollTo({
+        top: document.body.scrollHeight,
+        behavior: "smooth"
+      });
+    });
+
+    shareBtn.addEventListener("click", () => {
+      if (!activeConversationId) return;
+      window.open(`/api/conversations/${activeConversationId}/export.md`, "_blank");
+    });
+
+    chatListEl.addEventListener("click", (e) => {
+      const regenBtn = e.target.closest(".regen-btn");
+      if (regenBtn) {
+        regenerateLastAnswer();
+        return;
+      }
+
+      const delBtn = e.target.closest(".delete-msg-btn");
+      if (delBtn) {
+        const wrap = delBtn.closest(".msg-wrap");
+        if (!wrap) return;
+
+        const all = Array.from(chatListEl.querySelectorAll(".msg-wrap"));
+        const idx = all.indexOf(wrap);
+        if (idx >= 0) {
+          deleteMessageAndAfter(idx);
+        }
+      }
+    });
+
+    sendBtn.addEventListener("click", sendPrompt);
+    newChatBtn.addEventListener("click", createNewConversation);
+    renameChatBtn.addEventListener("click", renameCurrentConversation);
+    exportChatBtn.addEventListener("click", () => {
+      if (!activeConversationId) return;
+      window.open(`/api/conversations/${activeConversationId}/export.md`, "_blank");
+    });
+    deleteChatBtn.addEventListener("click", deleteCurrentConversation);
+
+    promptEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendPrompt();
+      }
+    });
+
+    async function bootAppSafely() {
+      try { initDrawerLayout(); } catch (e) { console.log("initDrawerLayout failed", e); }
+      try { loadConfig(); } catch (e) { console.log("loadConfig failed", e); }
+      try { if (typeof syncModelSelectFromInput === "function") syncModelSelectFromInput(); } catch (e) {}
+      try { if (typeof updateCustomModelVisibility === "function") updateCustomModelVisibility(); } catch (e) {}
+      try { await loadApiProfiles(); } catch (e) { console.log("loadApiProfiles failed", e); }
+      try { await loadConversations(); } catch (e) {
+        console.log("loadConversations failed", e);
+        chatListEl.innerHTML = '<div class="empty">加载对话失败，请检查前端脚本或刷新页面</div>';
+      }
+    }
+
+    bootAppSafely();
+  </script>
+
+
+
+
+
+
+
+<script id="model-choice-script-v2">
+(function () {
+  function ready(fn) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", fn);
+    } else {
+      fn();
+    }
+  }
+
+  ready(function () {
+    const modelInput = document.getElementById("apiModel");
+    const modelPill = document.getElementById("modelPill");
+    const group = document.getElementById("modelChoiceGroup");
+    const inputBox = document.getElementById("apiModelInputBox");
+
+    if (!modelInput) return;
+
+    let selectedModel = modelInput.value.trim() || "claude-opus-4-7";
+
+    function modelLabel(model) {
+      const m = (model || "").toLowerCase();
+
+      if (m === "claude-opus-4-7" || m.includes("opus-4-7")) {
+        return "Opus 4.7 Adaptive⌄";
+      }
+
+      if (m === "claude-opus-4-6" || m.includes("opus-4-6")) {
+        return "Opus 4.6 Adaptive⌄";
+      }
+
+      if (m === "claude-sonnet-4-6" || m.includes("sonnet-4-6")) {
+        return "Sonnet 4.6 Adaptive⌄";
+      }
+
+      if (m.includes("sonnet")) return "Sonnet Adaptive⌄";
+      if (m.includes("opus")) return "Opus Adaptive⌄";
+
+      return model ? model + "⌄" : "Opus 4.7 Adaptive⌄";
+    }
+
+    function setRealModel(model, customMode) {
+      if (!model) model = "claude-opus-4-7";
+
+      selectedModel = model;
+      modelInput.value = model;
+
+      modelInput.dispatchEvent(new Event("input", { bubbles: true }));
+      modelInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      if (modelPill) {
+        modelPill.textContent = modelLabel(model);
+      }
+
+      if (group) {
+        let matched = false;
+
+        group.querySelectorAll(".model-choice").forEach(btn => {
+          const bm = btn.dataset.model;
+          const active = bm && bm !== "custom" && bm === model;
+          if (active) matched = true;
+          btn.classList.toggle("active", active);
+        });
+
+        const customBtn = group.querySelector('.model-choice[data-model="custom"]');
+        if (customBtn) {
+          customBtn.classList.toggle("active", customMode || !matched);
+        }
+
+        if (inputBox) {
+          inputBox.style.display = customMode || !matched ? "block" : "none";
+        }
+      }
+
+      try {
+        localStorage.setItem("claude_web_selected_model", model);
+      } catch (e) {}
+    }
+
+    // 初始化：优先使用 localStorage 保存的模型
+    try {
+      const saved = localStorage.getItem("claude_web_selected_model");
+      if (saved) {
+        selectedModel = saved;
+      }
+    } catch (e) {}
+
+    setRealModel(selectedModel, false);
+
+    // 点击模型按钮时，强制修改真实模型输入框
+    if (group) {
+      group.addEventListener("click", function (e) {
+        const btn = e.target.closest(".model-choice");
+        if (!btn) return;
+
+        const model = btn.dataset.model;
+
+        if (model === "custom") {
+          if (inputBox) inputBox.style.display = "block";
+          modelInput.focus();
+          setRealModel(modelInput.value.trim() || selectedModel, true);
+          return;
+        }
+
+        setRealModel(model, false);
+      });
+    }
+
+    // 手动输入自定义模型时，更新真实模型
+    modelInput.addEventListener("input", function () {
+      setRealModel(modelInput.value.trim() || "claude-opus-4-7", true);
+    });
+
+    modelInput.addEventListener("change", function () {
+      setRealModel(modelInput.value.trim() || "claude-opus-4-7", true);
+    });
+
+    // 关键：拦截 fetch，发送前强制把 api_model 改成当前 selectedModel
+    const rawFetch = window.fetch;
+
+    window.fetch = function (url, options) {
+      try {
+        const u = String(url);
+
+        const isChat =
+          u.includes("/api/chat/stream") ||
+          u.includes("/api/chat/upload_stream") ||
+          u.includes("/api/chat/regenerate_stream") ||
+          u.includes("/api/echo");
+
+        if (isChat && options && options.body) {
+          const realModel = modelInput.value.trim() || selectedModel || "claude-opus-4-7";
+
+          // JSON 请求
+          if (typeof options.body === "string") {
+            try {
+              const data = JSON.parse(options.body);
+              data.api_model = realModel;
+              options.body = JSON.stringify(data);
+            } catch (e) {}
+          }
+
+          // FormData 请求
+          if (options.body instanceof FormData) {
+            options.body.set("api_model", realModel);
+          }
+
+          selectedModel = realModel;
+
+          if (modelPill) {
+            modelPill.textContent = modelLabel(realModel);
+          }
+        }
+      } catch (e) {}
+
+      return rawFetch.call(this, url, options);
+    };
+
+    // 周期同步，防止旧脚本或接入商切换把模型显示覆盖
+    setInterval(function () {
+      const real = modelInput.value.trim() || selectedModel || "claude-opus-4-7";
+      selectedModel = real;
+      if (modelPill) modelPill.textContent = modelLabel(real);
+    }, 500);
+  });
+})();
+</script>
+
+
+<script id="emergency-db-loader">
+(function () {
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text || "";
+    return div.innerHTML;
+  }
+
+  function renderSimpleMessages(messages) {
+    const chatListEl = document.getElementById("chatList");
+    if (!chatListEl) return;
+
+    if (!messages || !messages.length) {
+      chatListEl.innerHTML = '<div class="empty">当前对话还没有消息</div>';
+      return;
+    }
+
+    chatListEl.innerHTML = "";
+
+    messages.forEach((msg, index) => {
+      const wrap = document.createElement("div");
+      wrap.className = `msg-wrap ${msg.role || ""}`;
+      wrap.dataset.index = String(index);
+
+      const row = document.createElement("div");
+      row.className = `msg ${msg.role || ""}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+
+      if (msg.role === "assistant") {
+        if (window.marked) {
+          bubble.innerHTML = marked.parse(msg.content || "");
+        } else {
+          bubble.innerHTML = escapeHtml(msg.content || "").replace(/\n/g, "<br>");
+        }
+
+        if (window.renderMathInElement) {
+          try {
+            renderMathInElement(bubble, {
+              delimiters: [
+                { left: "$$", right: "$$", display: true },
+                { left: "$", right: "$", display: false },
+                { left: "\\(", right: "\\)", display: false },
+                { left: "\\[", right: "\\]", display: true }
+              ],
+              throwOnError: false
+            });
+          } catch (e) {}
+        }
+      } else {
+        let html = escapeHtml(msg.content || "").replace(/\n/g, "<br>");
+
+        if (msg.fileName && !msg.imagePreview) {
+          html += `<div class="file-chip">${escapeHtml(msg.fileName)}</div>`;
+        }
+
+        if (msg.imagePreview) {
+          html += `<div class="user-upload"><img src="${msg.imagePreview}" alt="uploaded image"></div>`;
+        }
+
+        bubble.innerHTML = html || " ";
+      }
+
+      row.appendChild(bubble);
+      wrap.appendChild(row);
+      chatListEl.appendChild(wrap);
+    });
+
+    setTimeout(() => {
+      const last = chatListEl.lastElementChild;
+      if (last) last.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 50);
+  }
+
+  async function emergencyLoad() {
+    const chatListEl = document.getElementById("chatList");
+    if (!chatListEl) return;
+
+    const text = chatListEl.innerText || "";
+    if (
+      !text.includes("正在加载本地数据库记录") &&
+      !text.includes("加载对话失败")
+    ) {
+      return;
+    }
+
+    try {
+      const convResp = await fetch("/api/conversations?ts=" + Date.now());
+      const convData = await convResp.json();
+      const conversations = convData.conversations || [];
+
+      if (!conversations.length) {
+        chatListEl.innerHTML = '<div class="empty">当前还没有对话</div>';
+        return;
+      }
+
+      const activeId = conversations[0].id;
+
+      const msgResp = await fetch(`/api/conversations/${activeId}/messages?ts=` + Date.now());
+      const msgData = await msgResp.json();
+
+      renderSimpleMessages(msgData.messages || []);
+
+      const titleEl = document.getElementById("topTitle");
+      if (titleEl) {
+        titleEl.textContent = conversations[0].title || "新对话";
+      }
+    } catch (e) {
+      chatListEl.innerHTML = '<div class="empty">兜底加载失败：' + escapeHtml(String(e)) + '</div>';
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", () => {
+    setTimeout(emergencyLoad, 800);
+    setTimeout(emergencyLoad, 2000);
+  });
+
+  setTimeout(emergencyLoad, 1200);
+})();
+</script>
+
+</body>
+</html>
