@@ -974,6 +974,9 @@
 
     let conversations = [];
     let autoScrollEnabled = true;
+    const AUTO_SCROLL_THRESHOLD = 140;
+    let userScrollActive = false;
+    let userScrollTimer = null;
     let activeConversationId = null;
     let messages = [];
     let profiles = [];
@@ -1271,11 +1274,14 @@
       return [];
     }
 
-    function renderMessages() {
+    function renderMessages(forceScroll = false) {
       if (!messages.length) {
         chatList.innerHTML = '<div class="empty">当前对话还没有消息</div>';
         return;
       }
+
+      const shouldAutoScroll = forceScroll || autoScrollEnabled;
+      const oldScrollY = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
 
       chatList.innerHTML = "";
 
@@ -1340,13 +1346,105 @@
         chatList.appendChild(wrap);
       });
 
-      requestAnimationFrame(() => {
-        if (!autoScrollEnabled) return;
-        window.scrollTo({
-          top: document.documentElement.scrollHeight,
-          behavior: "smooth"
+      if (shouldAutoScroll) {
+        scrollToBottomIfNeeded(forceScroll);
+      } else {
+        restoreScrollPosition(oldScrollY);
+      }
+    }
+
+
+
+    // ============================================================
+    // 流式输出性能优化：
+    // 不再每个 chunk 重绘整个聊天列表，只更新最后一个 assistant bubble。
+    // 这样可以显著降低手机端 DOM 重建、Markdown 渲染和滚动抖动。
+    // ============================================================
+    let streamingRenderQueued = false;
+    let pendingStreamingContent = "";
+
+    function getLastAssistantBubble() {
+      const assistantWraps = chatList.querySelectorAll(".msg-wrap.assistant");
+      if (!assistantWraps.length) return null;
+
+      const lastWrap = assistantWraps[assistantWraps.length - 1];
+      return lastWrap.querySelector(".bubble");
+    }
+
+    function renderAssistantContentIntoBubble(bubble, content, finalRender = false) {
+      if (!bubble) return false;
+
+      const text = content || "";
+
+      if (text.trim() === "思考中...") {
+        bubble.innerHTML = '<div class="thinking"><span></span><span></span><span></span></div>';
+        return true;
+      }
+
+      // 流式过程中只做 Markdown 渲染，不做每帧代码高亮和 MathJax，避免手机卡顿。
+      // 最后一帧 finalRender=true 时再补做增强。
+      bubble.innerHTML = marked.parse(text);
+
+      if (finalRender) {
+        enhanceCodeBlocks(bubble);
+        renderMath(bubble);
+      }
+
+      return true;
+    }
+
+    function followBottomDuringStreaming() {
+      // 兼容前面补过的智能滚动函数
+      if (typeof scrollToBottomIfNeeded === "function") {
+        scrollToBottomIfNeeded(false);
+        return;
+      }
+
+      // 兼容原始版本
+      if (typeof autoScrollEnabled !== "undefined" && autoScrollEnabled) {
+        requestAnimationFrame(() => {
+          window.scrollTo({
+            top: document.documentElement.scrollHeight || document.body.scrollHeight || 0,
+            behavior: "auto"
+          });
         });
+      }
+    }
+
+    function updateLastAssistantBubble(content, finalRender = false) {
+      const bubble = getLastAssistantBubble();
+
+      // 如果找不到最后一个 assistant bubble，说明 DOM 状态不完整，退回全量渲染。
+      if (!bubble) {
+        renderMessages();
+        return false;
+      }
+
+      renderAssistantContentIntoBubble(bubble, content, finalRender);
+      followBottomDuringStreaming();
+      return true;
+    }
+
+    function scheduleStreamingAssistantUpdate(content) {
+      pendingStreamingContent = content || "";
+
+      if (streamingRenderQueued) return;
+
+      streamingRenderQueued = true;
+
+      requestAnimationFrame(() => {
+        streamingRenderQueued = false;
+        const text = pendingStreamingContent;
+        pendingStreamingContent = "";
+        updateLastAssistantBubble(text, false);
       });
+    }
+
+    function flushStreamingAssistantUpdate(finalRender = true) {
+      streamingRenderQueued = false;
+      const text = pendingStreamingContent || (messages.length ? (messages[messages.length - 1].content || "") : "");
+      pendingStreamingContent = "";
+      updateLastAssistantBubble(text, finalRender);
     }
 
     function renderSessions() {
@@ -1399,16 +1497,97 @@
     }
 
 
-    function isNearBottom(threshold = 120) {
-      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
-      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-      const pageHeight = document.documentElement.scrollHeight || 0;
-      return pageHeight - (scrollTop + viewportHeight) < threshold;
+    function getPageHeight() {
+      return Math.max(
+        document.documentElement.scrollHeight || 0,
+        document.body.scrollHeight || 0
+      );
     }
 
-    window.addEventListener("scroll", () => {
-      autoScrollEnabled = isNearBottom();
+    function getScrollTop() {
+      return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+    }
+
+    function isNearBottom(threshold = AUTO_SCROLL_THRESHOLD) {
+      const scrollTop = getScrollTop();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const pageHeight = getPageHeight();
+      return pageHeight - (scrollTop + viewportHeight) <= threshold;
+    }
+
+    function scrollToBottomIfNeeded(force = false) {
+      if (!force && !autoScrollEnabled) return;
+
+      requestAnimationFrame(() => {
+        window.scrollTo({
+          top: getPageHeight(),
+          behavior: "auto"
+        });
+      });
+    }
+
+    function restoreScrollPosition(y) {
+      requestAnimationFrame(() => {
+        window.scrollTo({
+          top: y,
+          behavior: "auto"
+        });
+      });
+    }
+
+    function pauseAutoScrollByUser() {
+      // 用户一旦触摸/滚轮/按键，就立刻暂停自动跟随
+      autoScrollEnabled = false;
+      userScrollActive = true;
+
+      if (userScrollTimer) {
+        clearTimeout(userScrollTimer);
+      }
+
+      // 用户停止操作一小段时间后，如果此时已经在底部附近，才恢复自动跟随
+      userScrollTimer = setTimeout(() => {
+        userScrollActive = false;
+        if (isNearBottom()) {
+          autoScrollEnabled = true;
+        }
+      }, 700);
+    }
+
+    function maybeResumeAutoScroll() {
+      // 正在触摸/滑动时，不要恢复，否则会继续把用户拖到底部
+      if (userScrollActive) return;
+
+      if (isNearBottom()) {
+        autoScrollEnabled = true;
+      }
+    }
+
+    // 移动端主要靠 touchmove；PC/外接键盘靠 wheel/keydown
+    window.addEventListener("wheel", pauseAutoScrollByUser, { passive: true });
+    window.addEventListener("touchmove", pauseAutoScrollByUser, { passive: true });
+    window.addEventListener("pointermove", pauseAutoScrollByUser, { passive: true });
+
+    window.addEventListener("keydown", (e) => {
+      const keys = [
+        "ArrowUp",
+        "ArrowDown",
+        "PageUp",
+        "PageDown",
+        "Home",
+        "End",
+        " "
+      ];
+
+      if (keys.includes(e.key)) {
+        pauseAutoScrollByUser();
+      }
     }, { passive: true });
+
+    // 只有用户停止交互后，并且重新回到底部附近，才恢复自动跟随
+    window.addEventListener("scroll", () => {
+      maybeResumeAutoScroll();
+    }, { passive: true });
+
 
     function renderAll() {
       const c = conversations.find(x => x.id === activeConversationId);
@@ -1486,7 +1665,10 @@
         content: "思考中..."
       });
 
-      renderMessages();
+      // 用户主动启动 Agent 时，强制回到底部，并开启本轮自动跟随
+      autoScrollEnabled = true;
+      userScrollActive = false;
+      renderMessages(true);
       promptEl.value = "";
 
       try {
@@ -1567,7 +1749,11 @@
 
       messages.push({ role: "user", content: text, fileName, imagePreview });
       messages.push({ role: "assistant", content: "思考中..." });
-      renderMessages();
+
+      // 用户主动发送新消息时，强制回到底部，并开启本轮自动跟随
+      autoScrollEnabled = true;
+      userScrollActive = false;
+      renderMessages(true);
 
       promptEl.value = "";
 
@@ -1615,8 +1801,10 @@
           if (done) break;
           full += decoder.decode(value, { stream: true });
           messages[messages.length - 1].content = full;
-          renderMessages();
+          scheduleStreamingAssistantUpdate(full);
         }
+
+        flushStreamingAssistantUpdate(true);
 
         clearSelectedFiles();
 
@@ -1658,7 +1846,11 @@
 
       messages = messages.slice(0, idx);
       messages.push({ role: "assistant", content: "思考中..." });
-      renderMessages();
+
+      // 用户主动重新生成时，强制回到底部，并开启本轮自动跟随
+      autoScrollEnabled = true;
+      userScrollActive = false;
+      renderMessages(true);
 
       try {
         const resp = await fetch("/api/chat/regenerate_from_stream", {
@@ -1684,8 +1876,10 @@
           if (done) break;
           full += decoder.decode(value, { stream: true });
           messages[messages.length - 1].content = full;
-          renderMessages();
+          scheduleStreamingAssistantUpdate(full);
         }
+
+        flushStreamingAssistantUpdate(true);
 
         await loadMessages();
         renderAll();
@@ -1777,7 +1971,13 @@
       if (activeConversationId) window.open(`/api/conversations/${activeConversationId}/export.md`, "_blank");
     };
 
-    shareBtn.onclick = $("exportConvBtn").onclick;
+    shareBtn.onclick = () => {
+      if (!activeConversationId) {
+        alert("当前没有可分享的对话");
+        return;
+      }
+      window.open(`/api/conversations/${activeConversationId}/export.md`, "_blank");
+    };
 
     modelChoices.onclick = e => {
       const btn = e.target.closest(".model-choice");

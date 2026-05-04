@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import quote
 import os
 import subprocess
 import json
@@ -6,7 +7,7 @@ import uuid
 import time
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -710,6 +711,25 @@ def enhance_prompt_with_url_fetch(user_prompt: str) -> str:
     return "\n".join(parts)
 
 
+def build_api_url(base_url: str, endpoint: str) -> str:
+    """
+    兼容两种 base_url 写法：
+    1. https://api.xxx.com
+    2. https://api.xxx.com/v1
+
+    endpoint 示例：
+    /v1/chat/completions
+    /v1/messages
+    """
+    base = (base_url or "").strip().rstrip("/")
+    ep = endpoint if endpoint.startswith("/") else "/" + endpoint
+
+    if base.endswith("/v1") and ep.startswith("/v1/"):
+        return base + ep[3:]
+
+    return base + ep
+
+
 def stream_direct_api_text(
     prompt: str,
     api_base_url: str,
@@ -740,7 +760,7 @@ def stream_direct_api_text(
 
     # OpenAI-compatible / GPT-compatible
     if lower_model.startswith("gpt") or "gpt-" in lower_model:
-        url = base_url + "/v1/chat/completions"
+        url = build_api_url(base_url, "/v1/chat/completions")
         body = {
             "model": model,
             "messages": [
@@ -751,7 +771,9 @@ def stream_direct_api_text(
         }
         headers = {
             "Content-Type": "application/json",
+            "Accept": "text/event-stream, application/json, text/plain, */*",
             "Authorization": "Bearer " + token,
+            "User-Agent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         }
 
         req = urllib.request.Request(
@@ -788,14 +810,23 @@ def stream_direct_api_text(
 
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="ignore")
-            yield "\n[直连OpenAI流式接口失败]\n" + (err or str(e))
+            yield (
+                "\n[直连OpenAI流式接口失败]\n"
+                f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
+                f"请求地址: {url}\n"
+                + (err or str(e))
+            )
         except Exception as e:
-            yield "\n[直连OpenAI流式接口失败]\n" + str(e)
+            yield (
+                "\n[直连OpenAI流式接口失败]\n"
+                f"请求地址: {url}\n"
+                + str(e)
+            )
 
         return
 
     # Anthropic-compatible / Claude-compatible
-    url = base_url + "/v1/messages"
+    url = build_api_url(base_url, "/v1/messages")
     body = {
         "model": model,
         "max_tokens": 4096,
@@ -806,9 +837,11 @@ def stream_direct_api_text(
     }
     headers = {
         "Content-Type": "application/json",
+        "Accept": "text/event-stream, application/json, text/plain, */*",
         "x-api-key": token,
         "Authorization": "Bearer " + token,
         "anthropic-version": "2023-06-01",
+        "User-Agent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
     }
 
     req = urllib.request.Request(
@@ -854,9 +887,18 @@ def stream_direct_api_text(
 
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="ignore")
-        yield "\n[直连Claude流式接口失败]\n" + (err or str(e))
+        yield (
+            "\n[直连Claude流式接口失败]\n"
+            f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
+            f"请求地址: {url}\n"
+            + (err or str(e))
+        )
     except Exception as e:
-        yield "\n[直连Claude流式接口失败]\n" + str(e)
+        yield (
+            "\n[直连Claude流式接口失败]\n"
+            f"请求地址: {url}\n"
+            + str(e)
+        )
 
 
 def stream_direct_and_save(
@@ -1839,69 +1881,88 @@ async def chat_upload_stream(
 
 
 
+
 @app.get("/api/conversations/{conversation_id}/export.md")
 def export_conversation_markdown(conversation_id: str):
-    from fastapi.responses import Response
+    from fastapi.responses import Response, PlainTextResponse
 
-    conn = get_conn()
+    try:
+        conn = get_conn()
 
-    conv = conn.execute(
-        "SELECT title FROM conversations WHERE id=?",
-        (conversation_id,),
-    ).fetchone()
+        conv = conn.execute(
+            "SELECT title FROM conversations WHERE id=?",
+            (conversation_id,),
+        ).fetchone()
 
-    rows = conn.execute(
-        """
-        SELECT role, content, file_name, model, provider_name, created_at
-        FROM messages
-        WHERE conversation_id=?
-        ORDER BY id ASC
-        """,
-        (conversation_id,),
-    ).fetchall()
+        rows = conn.execute(
+            """
+            SELECT role, content, file_name, model, provider_name, created_at
+            FROM messages
+            WHERE conversation_id=?
+            ORDER BY id ASC
+            """,
+            (conversation_id,),
+        ).fetchall()
 
-    conn.close()
+        conn.close()
 
-    title = conv["title"] if conv else "对话导出"
+        title = "对话导出"
+        if conv and "title" in conv.keys() and conv["title"]:
+            title = conv["title"]
 
-    lines = []
-    lines.append(f"# {title}")
-    lines.append("")
-
-    for row in rows:
-        role = "用户" if row["role"] == "user" else "助手"
-        lines.append(f"## {role}")
+        lines = []
+        lines.append(f"# {title}")
         lines.append("")
 
-        if row["file_name"]:
-            lines.append(f"> 附件: {row['file_name']}")
+        for row in rows:
+            role = "用户" if row["role"] == "user" else "助手"
+            lines.append(f"## {role}")
             lines.append("")
 
-        if row["role"] == "assistant":
-            meta = []
-            if "provider_name" in row.keys() and row["provider_name"]:
-                meta.append(f"接入商: {row['provider_name']}")
-            if "model" in row.keys() and row["model"]:
-                meta.append(f"模型: {row['model']}")
-            if meta:
-                lines.append("> " + " · ".join(meta))
+            file_name = row["file_name"] if "file_name" in row.keys() else ""
+            if file_name:
+                lines.append(f"> 附件: {file_name}")
                 lines.append("")
 
-        lines.append(row["content"] or "")
-        lines.append("")
+            if row["role"] == "assistant":
+                meta = []
+                provider_name = row["provider_name"] if "provider_name" in row.keys() else ""
+                model = row["model"] if "model" in row.keys() else ""
 
-    md = "\\n".join(lines)
+                if provider_name:
+                    meta.append(f"接入商: {provider_name}")
+                if model:
+                    meta.append(f"模型: {model}")
+                if meta:
+                    lines.append("> " + " · ".join(meta))
+                    lines.append("")
 
-    safe_name = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in title)[:50] or conversation_id
+            lines.append(row["content"] or "")
+            lines.append("")
 
-    return Response(
-        content=md,
-        media_type="text/markdown; charset=utf-8",
-        headers={
-            "Content-Disposition": f'attachment; filename="{safe_name}.md"'
-        }
-    )
+        md = "\n".join(lines)
 
+        # HTTP Header 只能安全放 latin-1/ASCII，中文文件名必须用 filename*
+        ascii_name = "".join(
+            ch if ch.isascii() and (ch.isalnum() or ch in "-_.") else "_"
+            for ch in title
+        ).strip("._")[:50] or conversation_id or "conversation"
+
+        utf8_name = quote(f"{title}.md")
+
+        return Response(
+            content=md,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{ascii_name}.md\"; filename*=UTF-8''{utf8_name}"
+            }
+        )
+
+    except Exception as e:
+        return PlainTextResponse(
+            f"导出失败：{e}",
+            status_code=500
+        )
 
 @app.post("/api/terminal/run")
 def run_terminal_command(body: TerminalBody):
@@ -2258,3 +2319,590 @@ def run_local_agent(body: AgentBody):
         "answer": final_answer,
         "steps": steps,
     }
+
+
+
+# ===== CLAUDE WEB ADMIN BACKEND PATCH START =====
+# 管理员后台：请求日志、日志详情、接入商线路质量检测
+
+import urllib.request
+import urllib.error
+from fastapi import Request, Header, HTTPException, Query
+from fastapi.responses import PlainTextResponse
+
+ADMIN_TOKEN_FILE = BASE_DIR / "admin-token.txt"
+
+
+def get_admin_token_value() -> str:
+    if not ADMIN_TOKEN_FILE.exists():
+        token = uuid.uuid4().hex + uuid.uuid4().hex
+        ADMIN_TOKEN_FILE.write_text(token, encoding="utf-8")
+        return token
+    return ADMIN_TOKEN_FILE.read_text(encoding="utf-8").strip()
+
+
+ADMIN_TOKEN = get_admin_token_value()
+ADMIN_PASSWORD = "114514"
+
+
+def require_admin_token(x_admin_token: str = Header(default="")):
+    """
+    管理员后台认证。
+
+    当前认证方式：固定密码
+    密码：114514
+
+    注意：
+    为了兼容现有前端请求头，Header 名仍然叫 X-Admin-Token，
+    但实际上传递的是管理员密码。
+    """
+    if str(x_admin_token or "").strip() != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="管理员密码无效")
+    return True
+
+
+def admin_mask_secret_text(text: str, max_len: int = 2000) -> str:
+    if text is None:
+        return ""
+
+    import re
+
+    t = str(text)
+
+    patterns = [
+        r'("api_auth_token"\s*:\s*")[^"]+(")',
+        r'("auth_token"\s*:\s*")[^"]+(")',
+        r'("Authorization"\s*:\s*")[^"]+(")',
+        r'("authorization"\s*:\s*")[^"]+(")',
+        r'("x-api-key"\s*:\s*")[^"]+(")',
+        r'(Bearer\s+)[A-Za-z0-9_\-\.]+',
+        r'(sk-[A-Za-z0-9_\-]{8})[A-Za-z0-9_\-]+',
+    ]
+
+    for pat in patterns:
+        try:
+            t = re.sub(
+                pat,
+                lambda m: (
+                    m.group(1)
+                    + "[REDACTED]"
+                    + (m.group(2) if len(m.groups()) >= 2 else "")
+                ),
+                t,
+            )
+        except Exception:
+            pass
+
+    if len(t) > max_len:
+        t = t[:max_len] + f"\n...[truncated {len(t) - max_len} chars]"
+
+    return t
+
+
+def init_admin_tables():
+    conn = get_conn()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_request_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            method TEXT,
+            path TEXT,
+            query_string TEXT,
+            status_code INTEGER,
+            duration_ms INTEGER,
+            client_ip TEXT,
+            user_agent TEXT,
+            route_mode TEXT,
+            api_model TEXT,
+            api_profile_name TEXT,
+            request_summary TEXT,
+            error_message TEXT
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+init_admin_tables()
+
+
+def save_admin_request_log(
+    method: str,
+    path: str,
+    query_string: str = "",
+    status_code: int = 0,
+    duration_ms: int = 0,
+    client_ip: str = "",
+    user_agent: str = "",
+    route_mode: str = "",
+    api_model: str = "",
+    api_profile_name: str = "",
+    request_summary: str = "",
+    error_message: str = "",
+):
+    try:
+        conn = get_conn()
+        conn.execute(
+            """
+            INSERT INTO admin_request_logs
+            (
+                method,
+                path,
+                query_string,
+                status_code,
+                duration_ms,
+                client_ip,
+                user_agent,
+                route_mode,
+                api_model,
+                api_profile_name,
+                request_summary,
+                error_message
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                method,
+                path,
+                query_string,
+                status_code,
+                duration_ms,
+                client_ip,
+                user_agent,
+                route_mode,
+                api_model,
+                api_profile_name,
+                request_summary,
+                error_message,
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+@app.middleware("http")
+async def admin_request_logger(request: Request, call_next):
+    start_time = time.time()
+
+    method = request.method
+    path = request.url.path
+    query_string = request.url.query or ""
+    client_ip = request.client.host if request.client else ""
+    user_agent = request.headers.get("user-agent", "")
+
+    request_summary = ""
+    route_mode = ""
+    api_model = ""
+    api_profile_name = ""
+    error_message = ""
+    status_code = 0
+
+    skip_log = (
+        path.startswith("/static/")
+        or path.startswith("/uploads/")
+        or path == "/favicon.ico"
+    )
+
+    try:
+        content_type = request.headers.get("content-type", "")
+
+        if not skip_log and "multipart/form-data" not in content_type:
+            body = await request.body()
+            if body:
+                raw = body.decode("utf-8", errors="ignore")
+                request_summary = admin_mask_secret_text(raw, 2000)
+
+                try:
+                    data = json.loads(raw)
+                    route_mode = str(data.get("route_mode", "") or "")
+                    api_model = str(data.get("api_model", "") or "")
+                    api_profile_name = str(data.get("api_profile_name", "") or "")
+                except Exception:
+                    pass
+
+        elif not skip_log and "multipart/form-data" in content_type:
+            request_summary = "[multipart/form-data upload skipped]"
+
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+
+    except Exception as e:
+        status_code = 500
+        error_message = str(e)
+        raise
+
+    finally:
+        if not skip_log:
+            duration_ms = int((time.time() - start_time) * 1000)
+            save_admin_request_log(
+                method=method,
+                path=path,
+                query_string=query_string,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                client_ip=client_ip,
+                user_agent=user_agent,
+                route_mode=route_mode,
+                api_model=api_model,
+                api_profile_name=api_profile_name,
+                request_summary=request_summary,
+                error_message=error_message,
+            )
+
+
+@app.get("/admin")
+def admin_page():
+    return FileResponse(STATIC_DIR / "admin.html")
+
+
+@app.get("/api/admin/token-hint")
+def admin_token_hint():
+    return {
+        "ok": True,
+        "message": "管理员后台已启用。请输入管理员密码进入。"
+    }
+
+
+@app.get("/api/admin/stats")
+def admin_stats(_: bool = Depends(require_admin_token)):
+    conn = get_conn()
+
+    total = conn.execute(
+        "SELECT COUNT(*) AS c FROM admin_request_logs"
+    ).fetchone()["c"]
+
+    errors = conn.execute(
+        "SELECT COUNT(*) AS c FROM admin_request_logs WHERE status_code >= 400"
+    ).fetchone()["c"]
+
+    chat_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM admin_request_logs WHERE path LIKE '/api/chat%'"
+    ).fetchone()["c"]
+
+    avg_row = conn.execute(
+        "SELECT AVG(duration_ms) AS avg_ms FROM admin_request_logs"
+    ).fetchone()
+
+    recent = conn.execute(
+        """
+        SELECT created_at, method, path, status_code, duration_ms
+        FROM admin_request_logs
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+
+    conn.close()
+
+    return {
+        "total": total,
+        "errors": errors,
+        "chat_count": chat_count,
+        "avg_ms": int(avg_row["avg_ms"] or 0),
+        "recent": dict(recent) if recent else None,
+        "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@app.get("/api/admin/logs")
+def admin_logs(
+    _: bool = Depends(require_admin_token),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    only_errors: int = Query(default=0),
+    path: str = Query(default=""),
+):
+    conn = get_conn()
+
+    where = []
+    params = []
+
+    if only_errors:
+        where.append("status_code >= 400")
+
+    if path:
+        where.append("path LIKE ?")
+        params.append(f"%{path}%")
+
+    where_sql = ""
+    if where:
+        where_sql = "WHERE " + " AND ".join(where)
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            id,
+            created_at,
+            method,
+            path,
+            query_string,
+            status_code,
+            duration_ms,
+            client_ip,
+            route_mode,
+            api_model,
+            api_profile_name,
+            error_message
+        FROM admin_request_logs
+        {where_sql}
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (*params, limit, offset),
+    ).fetchall()
+
+    conn.close()
+
+    return {
+        "items": [dict(r) for r in rows],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/admin/logs/{log_id}")
+def admin_log_detail(log_id: int, _: bool = Depends(require_admin_token)):
+    conn = get_conn()
+    row = conn.execute(
+        """
+        SELECT *
+        FROM admin_request_logs
+        WHERE id=?
+        """,
+        (log_id,),
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Log not found")
+
+    return dict(row)
+
+
+@app.post("/api/admin/logs/clear")
+def admin_logs_clear(
+    _: bool = Depends(require_admin_token),
+    mode: str = Query(default="old"),
+):
+    conn = get_conn()
+
+    if mode == "all":
+        conn.execute("DELETE FROM admin_request_logs")
+        deleted_mode = "all"
+    else:
+        conn.execute(
+            """
+            DELETE FROM admin_request_logs
+            WHERE created_at < datetime('now', '-7 days')
+            """
+        )
+        deleted_mode = "older_than_7_days"
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "mode": deleted_mode,
+    }
+
+
+def admin_build_profile_test_url(base_url: str) -> str:
+    base = (base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if base.endswith("/v1"):
+        return base + "/models"
+    return base + "/v1/models"
+
+
+def admin_calc_quality_percent(status_code: int, latency_ms: int, error_text: str = "") -> int:
+    if 200 <= status_code < 300:
+        if latency_ms <= 500:
+            return 100
+        if latency_ms <= 1000:
+            return 92
+        if latency_ms <= 2000:
+            return 82
+        if latency_ms <= 3500:
+            return 70
+        if latency_ms <= 6000:
+            return 58
+        return 45
+
+    if status_code in (401, 403):
+        if latency_ms <= 2000:
+            return 55
+        return 40
+
+    if status_code in (404, 405):
+        return 35
+
+    if status_code >= 500:
+        return 25
+
+    if error_text:
+        return 10
+
+    return 20
+
+
+def admin_quality_color(percent: int, status_code: int = 0) -> str:
+    if 200 <= status_code < 300 and percent >= 75:
+        return "green"
+    if percent >= 45:
+        return "yellow"
+    return "red"
+
+
+def admin_quality_label(color: str) -> str:
+    if color == "green":
+        return "良好"
+    if color == "yellow":
+        return "一般"
+    return "不可用"
+
+
+def admin_test_one_api_profile(profile: dict) -> dict:
+    name = profile.get("name", "")
+    base_url = profile.get("base_url", "")
+    token = profile.get("auth_token", "")
+    model = profile.get("model", "")
+    test_url = admin_build_profile_test_url(base_url)
+
+    start = time.time()
+    status_code = 0
+    error_text = ""
+
+    if not test_url:
+        return {
+            "id": profile.get("id"),
+            "name": name,
+            "base_url": base_url,
+            "model": model,
+            "test_url": "",
+            "latency_ms": 0,
+            "status_code": 0,
+            "quality": 0,
+            "color": "red",
+            "label": "缺少地址",
+            "error": "base_url is empty",
+        }
+
+    try:
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        }
+
+        if token:
+            headers["Authorization"] = "Bearer " + token
+
+        req = urllib.request.Request(
+            test_url,
+            headers=headers,
+            method="GET",
+        )
+
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            status_code = getattr(resp, "status", 0) or resp.getcode()
+            try:
+                resp.read(512)
+            except Exception:
+                pass
+
+    except urllib.error.HTTPError as e:
+        status_code = getattr(e, "code", 0) or 0
+        try:
+            error_text = e.read().decode("utf-8", errors="ignore")[:500]
+        except Exception:
+            error_text = str(e)
+
+    except Exception as e:
+        error_text = str(e)
+
+    latency_ms = int((time.time() - start) * 1000)
+    percent = admin_calc_quality_percent(status_code, latency_ms, error_text)
+    color = admin_quality_color(percent, status_code)
+
+    return {
+        "id": profile.get("id"),
+        "name": name,
+        "base_url": base_url,
+        "model": model,
+        "test_url": test_url,
+        "latency_ms": latency_ms,
+        "status_code": status_code,
+        "quality": percent,
+        "color": color,
+        "label": admin_quality_label(color),
+        "error": admin_mask_secret_text(error_text, 500),
+    }
+
+
+@app.get("/api/admin/profile-health")
+def admin_profile_health(_: bool = Depends(require_admin_token)):
+    conn = get_conn()
+    rows = conn.execute(
+        """
+        SELECT id, name, base_url, auth_token, model, is_default
+        FROM api_profiles
+        ORDER BY is_default DESC, id ASC
+        """
+    ).fetchall()
+    conn.close()
+
+    results = []
+    for row in rows:
+        profile = dict(row)
+        result = admin_test_one_api_profile(profile)
+        result["is_default"] = profile.get("is_default", 0)
+        results.append(result)
+
+    return {
+        "items": results,
+        "tested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@app.get("/api/admin/system")
+def admin_system(_: bool = Depends(require_admin_token)):
+    db_size = 0
+    try:
+        db_file = BASE_DIR / "chat.db"
+        if db_file.exists():
+            db_size = db_file.stat().st_size
+    except Exception:
+        pass
+
+    upload_count = 0
+    try:
+        upload_count = len(list(UPLOAD_DIR.glob("*")))
+    except Exception:
+        pass
+
+    cloudflare_url = ""
+    try:
+        cf_file = BASE_DIR / "cloudflare-url.txt"
+        if cf_file.exists():
+            cloudflare_url = cf_file.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+
+    return {
+        "project_dir": str(BASE_DIR),
+        "static_dir": str(STATIC_DIR),
+        "upload_dir": str(UPLOAD_DIR),
+        "db_size": db_size,
+        "upload_count": upload_count,
+        "cloudflare_url": cloudflare_url,
+        "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+# ===== CLAUDE WEB ADMIN BACKEND PATCH END =====
+

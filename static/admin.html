@@ -1,0 +1,1294 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Claude Web Admin</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #141412;
+      color: #f1ece2;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      background: rgba(20,20,18,0.96);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(12px);
+    }
+
+    .brand {
+      flex: 1;
+      font-size: 19px;
+      font-weight: 800;
+      letter-spacing: .2px;
+    }
+
+    .tag {
+      font-size: 12px;
+      color: #9c968b;
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 5px 9px;
+      border-radius: 999px;
+    }
+
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 18px 14px 60px;
+    }
+
+    .login-card,
+    .card {
+      background: #1e1e1b;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+    }
+
+    .login-card {
+      max-width: 520px;
+      margin: 80px auto;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+    }
+
+    h2 {
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      font-size: 15px;
+      margin-bottom: 8px;
+      color: #d8d1c5;
+    }
+
+    .muted {
+      color: #928c82;
+      font-size: 13px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    input, select, button, textarea {
+      font: inherit;
+    }
+
+    input, select {
+      background: #282823;
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #f1ece2;
+      border-radius: 12px;
+      padding: 10px 12px;
+      outline: none;
+    }
+
+    input:focus, select:focus {
+      border-color: rgba(238, 221, 190, 0.45);
+    }
+
+    .token-input {
+      width: 100%;
+      margin: 14px 0 10px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      color: #161512;
+      background: #e9dfcf;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      color: #efe8dc;
+      background: #2d2d28;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    button.danger {
+      color: #fff4f4;
+      background: #7f2a2a;
+    }
+
+    button:active {
+      transform: scale(.98);
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .grid.stats {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .stat {
+      background: #20201d;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .stat .num {
+      font-size: 24px;
+      font-weight: 850;
+      margin-top: 8px;
+      color: #fff8eb;
+    }
+
+    .stat .label {
+      color: #999287;
+      font-size: 13px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .toolbar input {
+      flex: 1;
+      min-width: 160px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.07);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 860px;
+      background: #1a1a18;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      text-align: left;
+      font-size: 13px;
+      vertical-align: top;
+    }
+
+    th {
+      color: #aaa296;
+      font-weight: 750;
+      background: #20201d;
+      position: sticky;
+      top: 0;
+    }
+
+    tr:hover td {
+      background: rgba(255,255,255,0.025);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 750;
+      background: #33332d;
+      color: #ddd4c7;
+      white-space: nowrap;
+    }
+
+    .ok {
+      background: rgba(67, 160, 71, .18);
+      color: #7ee081;
+    }
+
+    .warn {
+      background: rgba(251, 192, 45, .18);
+      color: #ffd764;
+    }
+
+    .bad {
+      background: rgba(239, 83, 80, .18);
+      color: #ff8c88;
+    }
+
+    .method {
+      color: #9cc9ff;
+      font-weight: 800;
+    }
+
+    .path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #eee4d6;
+      word-break: break-all;
+    }
+
+    .small {
+      font-size: 12px;
+      color: #938d83;
+    }
+
+    .health-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    }
+
+    .health-card {
+      background: #20201d;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .health-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+      background: #777;
+      box-shadow: 0 0 12px rgba(255,255,255,.08);
+    }
+
+    .dot.green {
+      background: #52d273;
+      box-shadow: 0 0 14px rgba(82,210,115,.45);
+    }
+
+    .dot.yellow {
+      background: #f6c744;
+      box-shadow: 0 0 14px rgba(246,199,68,.4);
+    }
+
+    .dot.red {
+      background: #ef5350;
+      box-shadow: 0 0 14px rgba(239,83,80,.42);
+    }
+
+    .health-name {
+      font-weight: 850;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .percent {
+      font-size: 22px;
+      font-weight: 900;
+    }
+
+    .bar {
+      height: 9px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #30302b;
+      margin: 9px 0;
+    }
+
+    .bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: #777;
+    }
+
+    .bar-fill.green {
+      background: linear-gradient(90deg, #3cbf5b, #8bea9d);
+    }
+
+    .bar-fill.yellow {
+      background: linear-gradient(90deg, #dcae2e, #ffe082);
+    }
+
+    .bar-fill.red {
+      background: linear-gradient(90deg, #b73a37, #ff8a80);
+    }
+
+    .health-meta {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+      color: #a49d92;
+      word-break: break-all;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .modal-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.62);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+
+    .modal {
+      width: min(860px, 100%);
+      max-height: 86vh;
+      overflow: auto;
+      background: #1e1e1b;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.45);
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #11110f;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 12px;
+      color: #eee4d5;
+      font-size: 12px;
+      line-height: 1.55;
+      overflow-x: auto;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      background: #262621;
+      color: #fff4e6;
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 10px 14px;
+      border-radius: 999px;
+      z-index: 200;
+      box-shadow: 0 10px 30px rgba(0,0,0,.3);
+    }
+
+    @media (max-width: 760px) {
+      .grid.stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .topbar {
+        height: 58px;
+      }
+
+      .brand {
+        font-size: 17px;
+      }
+
+      .wrap {
+        padding: 14px 10px 50px;
+      }
+
+      .card {
+        border-radius: 16px;
+        padding: 13px;
+      }
+
+      .stat .num {
+        font-size: 21px;
+      }
+
+      button {
+        padding: 9px 11px;
+      }
+
+      .toolbar input {
+        width: 100%;
+      }
+    }
+  
+    /* ===== ADMIN MOBILE UI PATCH START ===== */
+    .mobile-only {
+      display: none;
+    }
+
+    .desktop-only {
+      display: initial;
+    }
+
+    .admin-subtitle {
+      color: #9b9488;
+      font-size: 13px;
+      line-height: 1.6;
+      margin-top: 6px;
+    }
+
+    .login-card {
+      width: min(520px, calc(100vw - 28px));
+    }
+
+    .login-card h2 {
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    .token-input {
+      font-size: 16px;
+      min-height: 48px;
+    }
+
+    .mobile-log-card {
+      display: none;
+    }
+
+    @media (max-width: 760px) {
+      html, body {
+        background: #151511;
+      }
+
+      .topbar {
+        height: 56px;
+        padding: 0 10px;
+        gap: 8px;
+      }
+
+      .brand {
+        font-size: 16px;
+        font-weight: 850;
+      }
+
+      .tag {
+        font-size: 11px;
+        padding: 4px 7px;
+      }
+
+      #logoutBtn {
+        padding: 8px 9px;
+        border-radius: 10px;
+        font-size: 13px;
+      }
+
+      .wrap {
+        padding: 10px 8px 44px;
+      }
+
+      .login-card {
+        margin: 46px auto;
+        padding: 18px;
+        border-radius: 20px;
+      }
+
+      .login-card h2 {
+        font-size: 21px;
+      }
+
+      .login-card .muted {
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      .token-input {
+        width: 100%;
+        min-height: 50px;
+        font-size: 16px;
+        border-radius: 15px;
+      }
+
+      .login-card .row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .login-card button {
+        width: 100%;
+        min-height: 46px;
+      }
+
+      .grid.stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 9px;
+      }
+
+      .stat {
+        padding: 12px;
+        border-radius: 15px;
+      }
+
+      .stat .label {
+        font-size: 12px;
+      }
+
+      .stat .num {
+        font-size: 20px;
+        margin-top: 5px;
+      }
+
+      .card {
+        padding: 12px;
+        border-radius: 17px;
+      }
+
+      .section-title {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 9px;
+      }
+
+      .section-title > .row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .section-title button {
+        width: 100%;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .toolbar input,
+      .toolbar select,
+      .toolbar button {
+        width: 100%;
+        min-width: 0;
+        min-height: 42px;
+        font-size: 14px;
+      }
+
+      .toolbar input {
+        grid-column: 1 / -1;
+      }
+
+      #clearAllBtn {
+        grid-column: 1 / -1;
+      }
+
+      .health-grid {
+        grid-template-columns: 1fr;
+        gap: 9px;
+      }
+
+      .health-card {
+        border-radius: 16px;
+        padding: 12px;
+      }
+
+      .percent {
+        font-size: 20px;
+      }
+
+      .health-meta {
+        font-size: 11px;
+      }
+
+      .table-wrap {
+        overflow: visible;
+        border: 0;
+        background: transparent;
+      }
+
+      table {
+        min-width: 0;
+        width: 100%;
+        background: transparent;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tbody {
+        display: grid;
+        gap: 10px;
+      }
+
+      tr {
+        display: block;
+        background: #20201d;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 16px;
+        padding: 10px;
+        box-shadow: 0 8px 22px rgba(0,0,0,.14);
+      }
+
+      tr:hover td {
+        background: transparent;
+      }
+
+      td {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid rgba(255,255,255,0.055);
+        padding: 8px 2px;
+        font-size: 13px;
+      }
+
+      td:last-child {
+        border-bottom: 0;
+      }
+
+      td::before {
+        content: attr(data-label);
+        color: #8f887d;
+        flex: 0 0 72px;
+        font-size: 12px;
+      }
+
+      td .path {
+        text-align: right;
+      }
+
+      td[data-label="路径"] {
+        display: block;
+      }
+
+      td[data-label="路径"]::before {
+        display: block;
+        margin-bottom: 5px;
+      }
+
+      td[data-label="路径"] .path,
+      td.path {
+        display: block;
+        text-align: left;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      td[data-label="操作"] {
+        display: block;
+      }
+
+      td[data-label="操作"]::before {
+        display: none;
+      }
+
+      td[data-label="操作"] button {
+        width: 100%;
+        min-height: 40px;
+      }
+
+      .badge {
+        font-size: 11px;
+        padding: 3px 7px;
+      }
+
+      .modal-mask {
+        align-items: flex-end;
+        padding: 0;
+      }
+
+      .modal {
+        width: 100%;
+        max-height: 88vh;
+        border-radius: 22px 22px 0 0;
+        padding: 14px;
+      }
+
+      .modal .section-title {
+        flex-direction: row;
+        align-items: center;
+      }
+
+      pre {
+        font-size: 11px;
+        line-height: 1.55;
+        max-height: 70vh;
+        overflow: auto;
+      }
+
+      .toast {
+        bottom: 16px;
+        max-width: calc(100vw - 32px);
+        white-space: normal;
+        text-align: center;
+        border-radius: 14px;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .grid.stats {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .toolbar input,
+      .toolbar select,
+      .toolbar button {
+        grid-column: 1 / -1;
+      }
+
+      .brand {
+        max-width: 52vw;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+    /* ===== ADMIN MOBILE UI PATCH END ===== */
+
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Claude Web Admin</div>
+    <div class="tag" id="adminState">未登录</div>
+    <button class="secondary" id="logoutBtn">退出</button>
+  </div>
+
+  <div class="wrap">
+    <section class="login-card" id="loginPanel">
+      <h2>管理员入口</h2>
+      <p class="muted">
+        请输入管理员密码进入后台。为了安全，页面不会展示密码。
+      </p>
+      <input class="token-input" id="tokenInput" type="password" placeholder="请输入管理员密码" />
+      <div class="row">
+        <button id="loginBtn">进入后台</button>
+        <button class="secondary" id="hintBtn">检查服务</button>
+      </div>
+      <p class="muted" id="loginMsg"></p>
+    </section>
+
+    <main class="grid hidden" id="adminPanel">
+      <section class="grid stats">
+        <div class="stat">
+          <div class="label">总请求</div>
+          <div class="num" id="statTotal">-</div>
+        </div>
+        <div class="stat">
+          <div class="label">错误请求</div>
+          <div class="num" id="statErrors">-</div>
+        </div>
+        <div class="stat">
+          <div class="label">聊天请求</div>
+          <div class="num" id="statChats">-</div>
+        </div>
+        <div class="stat">
+          <div class="label">平均耗时</div>
+          <div class="num" id="statAvg">-</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <div>
+            <h2>系统状态</h2>
+            <div class="muted" id="serverTime">-</div>
+          </div>
+          <button class="secondary" id="refreshSystemBtn">刷新</button>
+        </div>
+        <div class="grid" style="gap:8px;">
+          <div class="small">项目目录：<span id="sysProject">-</span></div>
+          <div class="small">数据库大小：<span id="sysDb">-</span></div>
+          <div class="small">上传文件数：<span id="sysUploads">-</span></div>
+          <div class="small">Cloudflare 链接：<span id="sysCf">-</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <div>
+            <h2>接入商线路质量</h2>
+            <div class="muted" id="healthTime">点击检测后显示延迟和可用质量</div>
+          </div>
+          <button id="testHealthBtn">检测线路</button>
+        </div>
+        <div class="health-grid" id="healthGrid">
+          <div class="muted">暂无检测结果</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <div>
+            <h2>请求日志</h2>
+            <div class="muted">记录每次请求路径、耗时、状态码、线路和模型信息</div>
+          </div>
+          <div class="row">
+            <button class="secondary" id="refreshBtn">刷新</button>
+            <button class="secondary" id="autoBtn">自动刷新：关</button>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <input id="pathFilter" placeholder="按路径筛选，例如 /api/chat" />
+          <select id="errorFilter">
+            <option value="0">全部请求</option>
+            <option value="1">只看错误</option>
+          </select>
+          <select id="limitSelect">
+            <option value="50">最近 50 条</option>
+            <option value="100" selected>最近 100 条</option>
+            <option value="200">最近 200 条</option>
+            <option value="500">最近 500 条</option>
+          </select>
+          <button class="secondary" id="applyFilterBtn">应用</button>
+          <button class="secondary" id="clearOldBtn">清理 7 天前</button>
+          <button class="danger" id="clearAllBtn">清空全部</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>时间</th>
+                <th>方法</th>
+                <th>路径</th>
+                <th>状态</th>
+                <th>耗时</th>
+                <th>线路</th>
+                <th>模型</th>
+                <th>接入商</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="logsBody">
+              <tr>
+                <td colspan="10" class="muted">暂无数据</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-mask hidden" id="modalMask">
+    <div class="modal">
+      <div class="section-title">
+        <h2>日志详情</h2>
+        <button class="secondary" id="closeModalBtn">关闭</button>
+      </div>
+      <pre id="detailPre"></pre>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script>
+
+    try {
+      localStorage.removeItem("claude_web_admin_token");
+    } catch (e) {}
+
+    const $ = (id) => document.getElementById(id);
+
+    const loginPanel = $("loginPanel");
+    const adminPanel = $("adminPanel");
+    const tokenInput = $("tokenInput");
+    const loginBtn = $("loginBtn");
+    const logoutBtn = $("logoutBtn");
+    const hintBtn = $("hintBtn");
+    const loginMsg = $("loginMsg");
+    const adminState = $("adminState");
+
+    const statTotal = $("statTotal");
+    const statErrors = $("statErrors");
+    const statChats = $("statChats");
+    const statAvg = $("statAvg");
+    const serverTime = $("serverTime");
+
+    const sysProject = $("sysProject");
+    const sysDb = $("sysDb");
+    const sysUploads = $("sysUploads");
+    const sysCf = $("sysCf");
+
+    const healthGrid = $("healthGrid");
+    const healthTime = $("healthTime");
+
+    const logsBody = $("logsBody");
+    const pathFilter = $("pathFilter");
+    const errorFilter = $("errorFilter");
+    const limitSelect = $("limitSelect");
+
+    const modalMask = $("modalMask");
+    const detailPre = $("detailPre");
+    const toastEl = $("toast");
+
+    let adminToken = localStorage.getItem("claude_web_admin_password") || "";
+    let autoRefreshTimer = null;
+
+    function toast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.remove("hidden");
+      setTimeout(() => {
+        toastEl.classList.add("hidden");
+      }, 2200);
+    }
+
+    function formatBytes(n) {
+      n = Number(n || 0);
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+      return (n / 1024 / 1024 / 1024).toFixed(1) + " GB";
+    }
+
+    function statusClass(code) {
+      code = Number(code || 0);
+      if (code >= 200 && code < 300) return "ok";
+      if (code >= 300 && code < 400) return "warn";
+      return "bad";
+    }
+
+    function colorClass(color) {
+      if (color === "green") return "green";
+      if (color === "yellow") return "yellow";
+      return "red";
+    }
+
+    async function api(path, opts = {}) {
+      const headers = opts.headers || {};
+      headers["X-Admin-Token"] = adminToken;
+
+      const res = await fetch(path, {
+        ...opts,
+        headers
+      });
+
+      if (res.status === 401) {
+        localStorage.removeItem("claude_web_admin_password");
+        showLogin();
+        throw new Error("管理员密码 无效");
+      }
+
+      let data;
+      const text = await res.text();
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { raw: text };
+      }
+
+      if (!res.ok) {
+        throw new Error(data.detail || data.raw || ("HTTP " + res.status));
+      }
+
+      return data;
+    }
+
+    function showLogin() {
+      loginPanel.classList.remove("hidden");
+      adminPanel.classList.add("hidden");
+      adminState.textContent = "未登录";
+    }
+
+    function showAdmin() {
+      loginPanel.classList.add("hidden");
+      adminPanel.classList.remove("hidden");
+      adminState.textContent = "已登录";
+    }
+
+    async function loadStats() {
+      const data = await api("/api/admin/stats");
+      statTotal.textContent = data.total ?? 0;
+      statErrors.textContent = data.errors ?? 0;
+      statChats.textContent = data.chat_count ?? 0;
+      statAvg.textContent = (data.avg_ms ?? 0) + "ms";
+      serverTime.textContent = "服务器时间：" + (data.server_time || "-");
+    }
+
+    async function loadSystem() {
+      const data = await api("/api/admin/system");
+      sysProject.textContent = data.project_dir || "-";
+      sysDb.textContent = formatBytes(data.db_size || 0);
+      sysUploads.textContent = data.upload_count ?? 0;
+
+      if (data.cloudflare_url) {
+        sysCf.innerHTML = `<a href="${data.cloudflare_url}" target="_blank" style="color:#9cc9ff;">${data.cloudflare_url}</a>`;
+      } else {
+        sysCf.textContent = "暂无";
+      }
+    }
+
+    async function loadLogs() {
+      const limit = encodeURIComponent(limitSelect.value || "100");
+      const onlyErrors = encodeURIComponent(errorFilter.value || "0");
+      const path = encodeURIComponent(pathFilter.value || "");
+
+      const data = await api(`/api/admin/logs?limit=${limit}&only_errors=${onlyErrors}&path=${path}`);
+      const items = data.items || [];
+
+      if (!items.length) {
+        logsBody.innerHTML = `<tr><td colspan="10" class="muted">暂无日志</td></tr>`;
+        return;
+      }
+
+      logsBody.innerHTML = items.map(item => {
+        const code = item.status_code || 0;
+        return `
+          <tr>
+            <td data-label="ID">${item.id}</td>
+            <td data-label="时间" class="small">${item.created_at || ""}</td>
+            <td data-label="方法"><span class="method">${item.method || ""}</span></td>
+            <td data-label="路径" class="path">${escapeHtml(item.path || "")}${item.query_string ? `<div class="small">?${escapeHtml(item.query_string)}</div>` : ""}</td>
+            <td data-label="状态"><span class="badge ${statusClass(code)}">${code}</span></td>
+            <td data-label="耗时">${item.duration_ms || 0}ms</td>
+            <td data-label="线路">${escapeHtml(item.route_mode || "-")}</td>
+            <td data-label="模型">${escapeHtml(item.api_model || "-")}</td>
+            <td data-label="接入商">${escapeHtml(item.api_profile_name || "-")}</td>
+            <td data-label="操作"><button class="secondary" onclick="showDetail(${item.id})">详情</button></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function loadHealth() {
+      healthGrid.innerHTML = `<div class="muted">正在检测线路质量...</div>`;
+      healthTime.textContent = "检测中，请稍等...";
+
+      const data = await api("/api/admin/profile-health");
+      const items = data.items || [];
+      healthTime.textContent = "检测时间：" + (data.tested_at || "-");
+
+      if (!items.length) {
+        healthGrid.innerHTML = `<div class="muted">暂无接入商配置</div>`;
+        return;
+      }
+
+      healthGrid.innerHTML = items.map(item => {
+        const color = colorClass(item.color);
+        const quality = Number(item.quality || 0);
+        const isDefault = Number(item.is_default || 0) ? `<span class="badge ok">默认</span>` : "";
+        const statusText = item.status_code ? `HTTP ${item.status_code}` : "无响应";
+        const error = item.error ? `<div>错误：${escapeHtml(item.error)}</div>` : "";
+
+        return `
+          <div class="health-card">
+            <div class="health-head">
+              <span class="dot ${color}"></span>
+              <div class="health-name">${escapeHtml(item.name || "未命名接入商")}</div>
+              ${isDefault}
+            </div>
+
+            <div class="row" style="justify-content:space-between;">
+              <div>
+                <div class="percent">${quality}%</div>
+                <div class="small">${escapeHtml(item.label || "")}</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="badge ${item.color === "green" ? "ok" : item.color === "yellow" ? "warn" : "bad"}">${statusText}</div>
+                <div class="small" style="margin-top:6px;">${item.latency_ms || 0}ms</div>
+              </div>
+            </div>
+
+            <div class="bar">
+              <div class="bar-fill ${color}" style="width:${Math.max(0, Math.min(100, quality))}%"></div>
+            </div>
+
+            <div class="health-meta">
+              <div>模型：${escapeHtml(item.model || "-")}</div>
+              <div>Base：${escapeHtml(item.base_url || "-")}</div>
+              <div>测试：${escapeHtml(item.test_url || "-")}</div>
+              ${error}
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function showDetail(id) {
+      try {
+        const data = await api(`/api/admin/logs/${id}`);
+        detailPre.textContent = JSON.stringify(data, null, 2);
+        modalMask.classList.remove("hidden");
+      } catch (e) {
+        toast("读取详情失败：" + e.message);
+      }
+    }
+
+    window.showDetail = showDetail;
+
+    async function clearLogs(mode) {
+      const text = mode === "all" ? "确定要清空全部日志吗？" : "确定要清理 7 天前日志吗？";
+      if (!confirm(text)) return;
+
+      await api(`/api/admin/logs/clear?mode=${mode}`, {
+        method: "POST"
+      });
+
+      toast("清理完成");
+      await refreshAll(false);
+    }
+
+    async function refreshAll(includeHealth = false) {
+      try {
+        await Promise.all([
+          loadStats(),
+          loadSystem(),
+          loadLogs()
+        ]);
+
+        if (includeHealth) {
+          await loadHealth();
+        }
+      } catch (e) {
+        toast("刷新失败：" + e.message);
+      }
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function startAutoRefresh() {
+      stopAutoRefresh();
+      autoRefreshTimer = setInterval(() => {
+        refreshAll(false);
+      }, 5000);
+      $("autoBtn").textContent = "自动刷新：开";
+    }
+
+    function stopAutoRefresh() {
+      if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+      }
+      $("autoBtn").textContent = "自动刷新：关";
+    }
+
+    loginBtn.onclick = async () => {
+      const token = tokenInput.value.trim();
+      if (!token) {
+        loginMsg.textContent = "请输入密码";
+        return;
+      }
+
+      adminToken = token;
+      localStorage.setItem("claude_web_admin_password", token);
+
+      try {
+        await loadStats();
+        showAdmin();
+        await refreshAll(false);
+        toast("登录成功");
+      } catch (e) {
+        loginMsg.textContent = "登录失败：" + e.message;
+        localStorage.removeItem("claude_web_admin_password");
+      }
+    };
+
+    logoutBtn.onclick = () => {
+      stopAutoRefresh();
+      localStorage.removeItem("claude_web_admin_password");
+      adminToken = "";
+      tokenInput.value = "";
+      showLogin();
+    };
+
+    hintBtn.onclick = async () => {
+      try {
+        const res = await fetch("/api/admin/token-hint");
+        const data = await res.json();
+        loginMsg.textContent = data.message || "后台服务可用";
+      } catch (e) {
+        loginMsg.textContent = "后台接口不可用：" + e.message;
+      }
+    };
+
+    $("refreshBtn").onclick = () => refreshAll(false);
+    $("refreshSystemBtn").onclick = () => refreshAll(false);
+    $("applyFilterBtn").onclick = () => loadLogs();
+    $("testHealthBtn").onclick = () => loadHealth();
+    $("clearOldBtn").onclick = () => clearLogs("old");
+    $("clearAllBtn").onclick = () => clearLogs("all");
+
+    $("autoBtn").onclick = () => {
+      if (autoRefreshTimer) {
+        stopAutoRefresh();
+      } else {
+        startAutoRefresh();
+      }
+    };
+
+    $("closeModalBtn").onclick = () => {
+      modalMask.classList.add("hidden");
+    };
+
+    modalMask.onclick = (e) => {
+      if (e.target === modalMask) {
+        modalMask.classList.add("hidden");
+      }
+    };
+
+    pathFilter.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        loadLogs();
+      }
+    });
+
+    if (adminToken) {
+      tokenInput.value = adminToken;
+      showAdmin();
+      refreshAll(false).catch(() => {
+        showLogin();
+      });
+    } else {
+      showLogin();
+    }
+  </script>
+</body>
+</html>

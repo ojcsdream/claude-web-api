@@ -26,3 +26,4 @@ app.py.bak*
 static/index.html.bak*
 .env
 *.key
+.claude/settings.local.json
