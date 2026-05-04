@@ -757,6 +757,54 @@
   }
 </style>
 
+
+<style id="terminal-panel-style">
+  .terminal-command {
+    width: 100%;
+    min-height: 76px;
+    border-radius: 11px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: #1f1f1d;
+    color: #f0ece3;
+    padding: 10px;
+    font-size: 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    outline: none;
+    resize: vertical;
+  }
+
+  .terminal-output {
+    margin-top: 10px;
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: #111110;
+    color: #d7e2f0;
+    padding: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+</style>
+
+
+<style id="agent-button-style">
+  .agent-btn {
+    background: rgba(255,255,255,0.10) !important;
+    color: #e8ddcc !important;
+    font-size: 19px !important;
+    margin-right: 4px;
+  }
+
+  .agent-btn:active {
+    transform: scale(0.94);
+    background: rgba(255,255,255,0.16) !important;
+  }
+</style>
+
 </head>
 
 <body>
@@ -789,6 +837,14 @@
 
     <div class="section">
       <div class="section-title">模型</div>
+      <div class="field">
+        <label>线路</label>
+        <select id="routeMode">
+          <option value="cc">CC 本地代理：可控制 Ubuntu</option>
+          <option value="direct">专用直连流式：更快，不控制本地</option>
+        </select>
+      </div>
+
       <div id="modelChoices" class="grid2">
         <button class="model-choice active" data-model="claude-opus-4-7">Opus 4.7</button>
         <button class="model-choice" data-model="claude-opus-4-6">Opus 4.6</button>
@@ -805,6 +861,23 @@
       <button id="fetchModelsBtn" class="drawer-btn" type="button">拉取当前接入商模型</button>
       <div id="fetchModelsStatus" class="fetch-models-status"></div>
       <div id="fetchedModelsList" class="fetched-models-list"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">本地终端</div>
+
+      <div class="field">
+        <label>工作目录</label>
+        <input id="terminalCwd" value="/root" />
+      </div>
+
+      <div class="field">
+        <label>命令</label>
+        <textarea id="terminalCommand" class="terminal-command" placeholder="例如：ls -la"></textarea>
+      </div>
+
+      <button id="runTerminalBtn" class="drawer-btn">执行命令</button>
+      <pre id="terminalOutput" class="terminal-output">终端输出会显示在这里</pre>
     </div>
 
     <div class="section">
@@ -854,6 +927,7 @@
         <button id="plusBtn" class="plus-btn">+</button>
         <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf" />
         <button id="modelPill" class="model-pill">Opus 4.7⌄</button>
+        <button id="agentBtn" class="send-btn agent-btn" title="AI执行本地终端任务">⚙</button>
         <button id="sendBtn" class="send-btn">↑</button>
       </div>
     </div>
@@ -871,11 +945,17 @@
     const sessionList = $("sessionList");
     const profileSelect = $("profileSelect");
 
+    const terminalCwd = $("terminalCwd");
+    const terminalCommand = $("terminalCommand");
+    const runTerminalBtn = $("runTerminalBtn");
+    const terminalOutput = $("terminalOutput");
+
 
     const profileName = $("profileName");
     const apiUrl = $("apiUrl");
     const apiKey = $("apiKey");
     const apiModel = $("apiModel");
+    const routeMode = $("routeMode");
 
     const modelChoices = $("modelChoices");
     const customModelBox = $("customModelBox");
@@ -886,12 +966,14 @@
 
     const promptEl = $("prompt");
     const sendBtn = $("sendBtn");
+    const agentBtn = $("agentBtn");
     const fileInput = $("fileInput");
     const fileInfo = $("fileInfo");
     const preview = $("preview");
     const clearFilesBtn = $("clearFilesBtn");
 
     let conversations = [];
+    let autoScrollEnabled = true;
     let activeConversationId = null;
     let messages = [];
     let profiles = [];
@@ -1259,8 +1341,11 @@
       });
 
       requestAnimationFrame(() => {
-        const last = chatList.lastElementChild;
-        if (last) last.scrollIntoView({ behavior: "smooth", block: "end" });
+        if (!autoScrollEnabled) return;
+        window.scrollTo({
+          top: document.documentElement.scrollHeight,
+          behavior: "smooth"
+        });
       });
     }
 
@@ -1313,6 +1398,18 @@
       loadProviderModels();
     }
 
+
+    function isNearBottom(threshold = 120) {
+      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const pageHeight = document.documentElement.scrollHeight || 0;
+      return pageHeight - (scrollTop + viewportHeight) < threshold;
+    }
+
+    window.addEventListener("scroll", () => {
+      autoScrollEnabled = isNearBottom();
+    }, { passive: true });
+
     function renderAll() {
       const c = conversations.find(x => x.id === activeConversationId);
       topTitle.textContent = c && c.title ? c.title : "Claude Web";
@@ -1358,6 +1455,87 @@
 
       renderProfiles();
       applyProfile();
+    }
+
+    async function runAgentTask() {
+      if (sending) return;
+
+      const task = promptEl.value.trim();
+
+      if (!task) return;
+
+      const ok = confirm(
+        "你即将让 AI 自动执行本地 Linux 终端命令。\n\n" +
+        "它拥有当前 Ubuntu 容器内的完整 shell 权限。\n\n" +
+        "是否继续？"
+      );
+
+      if (!ok) return;
+
+      sending = true;
+      sendBtn.disabled = true;
+      agentBtn.disabled = true;
+
+      messages.push({
+        role: "user",
+        content: "本地终端 Agent 任务：\n" + task
+      });
+
+      messages.push({
+        role: "assistant",
+        content: "思考中..."
+      });
+
+      renderMessages();
+      promptEl.value = "";
+
+      try {
+        const data = await api("POST", "/api/agent/run", {
+          conversation_id: activeConversationId,
+          task,
+          cwd: "/root",
+          max_steps: 8,
+          timeout: 120,
+          api_base_url: apiUrl.value.trim(),
+          api_auth_token: apiKey.value.trim(),
+          api_model: apiModel.value.trim() || "claude-opus-4-7",
+          api_profile_name: providerName()
+        });
+
+        if (!data.ok) {
+          messages[messages.length - 1].content = "Agent 执行失败：" + (data.answer || "未知错误");
+          renderMessages();
+          return;
+        }
+
+        let text = "本地终端 Agent 执行完成。\n\n";
+
+        for (const step of data.steps || []) {
+          text += "### 步骤 " + step.step + "\n";
+          if (step.reason) text += "原因: " + step.reason + "\n";
+          text += "cwd: " + step.cwd + "\n";
+          text += "命令:\n```bash\n" + step.command + "\n```\n";
+          text += "退出码: " + step.code + "\n";
+          text += "输出:\n```text\n" + step.output + "\n```\n\n";
+        }
+
+        text += "### 最终结果\n";
+        text += data.answer || "";
+
+        messages[messages.length - 1].content = text;
+        renderMessages();
+
+        await loadConversations();
+        await loadMessages();
+        renderAll();
+      } catch (e) {
+        messages[messages.length - 1].content = "Agent 请求失败：" + e;
+        renderMessages();
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+        agentBtn.disabled = false;
+      }
     }
 
     async function sendPrompt() {
@@ -1407,6 +1585,7 @@
           form.append("api_auth_token", apiKey.value.trim());
           form.append("api_model", model);
           form.append("api_profile_name", providerName());
+          form.append("route_mode", routeMode.value);
 
           for (const f of files) form.append("files", f);
 
@@ -1421,7 +1600,8 @@
               api_base_url: apiUrl.value.trim(),
               api_auth_token: apiKey.value.trim(),
               api_model: model,
-              api_profile_name: providerName()
+              api_profile_name: providerName(),
+              route_mode: routeMode.value
             })
           });
         }
@@ -1490,7 +1670,8 @@
             api_base_url: apiUrl.value.trim(),
             api_auth_token: apiKey.value.trim(),
             api_model: apiModel.value.trim() || "claude-opus-4-7",
-            api_profile_name: providerName()
+            api_profile_name: providerName(),
+            route_mode: routeMode.value
           })
         });
 
@@ -1514,6 +1695,39 @@
       }
     }
 
+    async function runTerminalCommand() {
+      const command = terminalCommand.value.trim();
+      const cwd = terminalCwd.value.trim() || "/root";
+
+      if (!command) {
+        terminalOutput.textContent = "请输入命令";
+        return;
+      }
+
+      terminalOutput.textContent = "执行中...";
+
+      try {
+        const data = await api("POST", "/api/terminal/run", {
+          command,
+          cwd,
+          timeout: 120
+        });
+
+        let text = "";
+
+        text += "$ " + command + "\n";
+        text += "cwd: " + (data.cwd || cwd) + "\n";
+        text += "exit code: " + data.code + "\n";
+        text += "time: " + data.elapsed + "s\n";
+        text += "\n";
+        text += data.output || "";
+
+        terminalOutput.textContent = text;
+      } catch (e) {
+        terminalOutput.textContent = "请求失败：" + e;
+      }
+    }
+
     function openDrawer() {
       drawer.classList.add("open");
       overlay.classList.add("open");
@@ -1523,6 +1737,15 @@
       drawer.classList.remove("open");
       overlay.classList.remove("open");
     }
+
+    runTerminalBtn.onclick = runTerminalCommand;
+
+    terminalCommand.addEventListener("keydown", e => {
+      if (e.key === "Enter" && e.ctrlKey) {
+        e.preventDefault();
+        runTerminalCommand();
+      }
+    });
 
     $("openDrawer").onclick = openDrawer;
     $("closeDrawer").onclick = closeDrawer;
@@ -1580,6 +1803,12 @@
     };
 
     apiModel.oninput = () => setModel(apiModel.value.trim() || "claude-opus-4-7");
+
+    routeMode.value = localStorage.getItem("route_mode") || "cc";
+    routeMode.onchange = () => {
+      localStorage.setItem("route_mode", routeMode.value);
+    };
+
 
     modelPill.onclick = openDrawer;
 
@@ -1658,6 +1887,7 @@
       });
     };
 
+    agentBtn.onclick = runAgentTask;
     sendBtn.onclick = sendPrompt;
 
     promptEl.onkeydown = e => {

@@ -68,6 +68,7 @@ class ChatBody(BaseModel):
     api_auth_token: str = ""
     api_model: str = DEFAULT_MODEL
     api_profile_name: str = ""
+    route_mode: str = "cc"  # cc=Claude Code本地代理, direct=第三方API直连流式
 
 
 class ConversationCreateBody(BaseModel):
@@ -76,6 +77,24 @@ class ConversationCreateBody(BaseModel):
 
 class ConversationRenameBody(BaseModel):
     title: str
+
+class TerminalBody(BaseModel):
+    command: str
+    cwd: str = "/root"
+    timeout: int = 60
+
+class AgentBody(BaseModel):
+    conversation_id: str = ""
+    task: str
+    cwd: str = "/root"
+    max_steps: int = 8
+    timeout: int = 120
+    api_base_url: str = ""
+    api_auth_token: str = ""
+    api_model: str = DEFAULT_MODEL
+    api_profile_name: str = ""
+
+
 
 
 class ConversationPinBody(BaseModel):
@@ -497,7 +516,7 @@ def run_claude(
     api_model: str = DEFAULT_MODEL,
 ) -> str:
     proc = subprocess.run(
-        ["claude", "--model", api_model or DEFAULT_MODEL, "-p", prompt],
+        ["claude", "--dangerously-skip-permissions", "--model", api_model or DEFAULT_MODEL, "-p", prompt],
         capture_output=True,
         text=True,
         timeout=300,
@@ -521,7 +540,7 @@ def stream_claude_text(
     api_model: str = DEFAULT_MODEL,
 ):
     proc = subprocess.Popen(
-        ["claude", "--model", api_model or DEFAULT_MODEL, "-p", prompt],
+        ["claude", "--dangerously-skip-permissions", "--model", api_model or DEFAULT_MODEL, "-p", prompt],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -569,6 +588,306 @@ def stream_and_save(
         provider_name=provider_name,
         token_count=token_count,
     )
+
+
+
+def extract_urls_from_text(text: str, max_urls: int = 3):
+    """
+    从文本中提取 http/https 链接。
+    """
+    import re
+    urls = re.findall(r'https?://[^\s\]\)\}，。、“”‘’<>"]+', text or "")
+    result = []
+    for u in urls:
+        u = u.rstrip(".,;:!?，。；：！？")
+        if u and u not in result:
+            result.append(u)
+    return result[:max_urls]
+
+
+def fetch_webpage_text(url: str, max_chars: int = 12000) -> str:
+    """
+    读取网页并提取正文纯文本。
+    只使用 Python 标准库，避免新增依赖。
+    """
+    import urllib.request
+    import re
+    from html.parser import HTMLParser
+
+    class SimpleTextParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.parts = []
+            self.skip_tag = None
+
+        def handle_starttag(self, tag, attrs):
+            tag = tag.lower()
+            if tag in ("script", "style", "noscript", "svg"):
+                self.skip_tag = tag
+            if tag in ("p", "br", "div", "section", "article", "li", "h1", "h2", "h3"):
+                self.parts.append("\n")
+
+        def handle_endtag(self, tag):
+            tag = tag.lower()
+            if self.skip_tag == tag:
+                self.skip_tag = None
+            if tag in ("p", "div", "section", "article", "li"):
+                self.parts.append("\n")
+
+        def handle_data(self, data):
+            if self.skip_tag:
+                return
+            data = data.strip()
+            if data:
+                self.parts.append(data + " ")
+
+        def get_text(self):
+            return "".join(self.parts)
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 Claude-Web/1.0",
+                "Accept": "text/html,text/plain,*/*",
+            },
+            method="GET",
+        )
+
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            content_type = resp.headers.get("Content-Type", "")
+            raw = resp.read(1024 * 1024 * 2)
+
+        charset = "utf-8"
+        m = re.search(r"charset=([\w\-]+)", content_type, re.I)
+        if m:
+            charset = m.group(1)
+
+        html = raw.decode(charset, errors="ignore")
+
+        if "text/plain" in content_type:
+            text = html
+        else:
+            parser = SimpleTextParser()
+            parser.feed(html)
+            text = parser.get_text()
+
+        text = re.sub(r"\s+", " ", text).strip()
+
+        if not text:
+            return "[网页读取成功，但没有提取到有效正文]"
+
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n\n[网页内容过长，已截断]"
+
+        return text
+
+    except Exception as e:
+        return f"[读取网页失败：{e}]"
+
+
+def enhance_prompt_with_url_fetch(user_prompt: str) -> str:
+    """
+    直连模式专用：
+    如果用户输入里包含 URL，则读取网页内容并拼接到 prompt。
+    """
+    urls = extract_urls_from_text(user_prompt)
+    if not urls:
+        return user_prompt
+
+    parts = []
+    parts.append("用户输入中包含网页链接。以下是后端自动读取到的网页内容，请结合这些内容回答。")
+    parts.append("")
+
+    for i, url in enumerate(urls, 1):
+        parts.append(f"【网页 {i}】{url}")
+        parts.append(fetch_webpage_text(url))
+        parts.append("")
+
+    parts.append("用户原始问题：")
+    parts.append(user_prompt)
+
+    return "\n".join(parts)
+
+
+def stream_direct_api_text(
+    prompt: str,
+    api_base_url: str,
+    api_auth_token: str,
+    api_model: str = DEFAULT_MODEL,
+):
+    """
+    第三方 API 直连真流式。
+    - GPT/OpenAI兼容模型：走 /v1/chat/completions stream
+    - Claude/Anthropic兼容模型：走 /v1/messages stream
+    注意：这条线路不经过 Claude Code，所以不能操作本地文件。
+    """
+    import urllib.request
+    import urllib.error
+
+    base_url = api_base_url.strip().rstrip("/")
+    token = api_auth_token.strip()
+    model = (api_model or DEFAULT_MODEL).strip()
+
+    if not base_url:
+        yield "直连模式缺少 API URL"
+        return
+    if not token:
+        yield "直连模式缺少 API Key"
+        return
+
+    lower_model = model.lower()
+
+    # OpenAI-compatible / GPT-compatible
+    if lower_model.startswith("gpt") or "gpt-" in lower_model:
+        url = base_url + "/v1/chat/completions"
+        body = {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.3,
+            "stream": True,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token,
+        }
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                for raw in resp:
+                    line = raw.decode("utf-8", errors="ignore").strip()
+                    if not line:
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+
+                    try:
+                        obj = json.loads(data)
+                        delta = (
+                            obj.get("choices", [{}])[0]
+                            .get("delta", {})
+                            .get("content", "")
+                        )
+                        if delta:
+                            yield delta
+                    except Exception:
+                        continue
+
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="ignore")
+            yield "\n[直连OpenAI流式接口失败]\n" + (err or str(e))
+        except Exception as e:
+            yield "\n[直连OpenAI流式接口失败]\n" + str(e)
+
+        return
+
+    # Anthropic-compatible / Claude-compatible
+    url = base_url + "/v1/messages"
+    body = {
+        "model": model,
+        "max_tokens": 4096,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "stream": True,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": token,
+        "Authorization": "Bearer " + token,
+        "anthropic-version": "2023-06-01",
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+
+                if not line.startswith("data:"):
+                    continue
+
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+
+                try:
+                    obj = json.loads(data)
+                    typ = obj.get("type")
+
+                    # Anthropic 标准流式文本增量
+                    if typ == "content_block_delta":
+                        delta = obj.get("delta", {})
+                        text = delta.get("text", "")
+                        if text:
+                            yield text
+
+                    # 兼容某些代理把文本放在 completion/content 里
+                    elif "completion" in obj:
+                        text = obj.get("completion") or ""
+                        if text:
+                            yield text
+
+                except Exception:
+                    continue
+
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="ignore")
+        yield "\n[直连Claude流式接口失败]\n" + (err or str(e))
+    except Exception as e:
+        yield "\n[直连Claude流式接口失败]\n" + str(e)
+
+
+def stream_direct_and_save(
+    conversation_id: str,
+    final_prompt: str,
+    api_base_url: str,
+    api_auth_token: str,
+    api_model: str,
+    provider_name: str = "",
+):
+    full = ""
+    for chunk in stream_direct_api_text(
+        final_prompt,
+        api_base_url,
+        api_auth_token,
+        api_model,
+    ):
+        full += chunk
+        yield chunk
+
+    token_count = estimate_round_tokens(final_prompt, full)
+
+    db_add_message(
+        conversation_id,
+        "assistant",
+        full,
+        model=api_model,
+        provider_name=(provider_name or "") + "｜直连流式",
+        token_count=token_count,
+    )
+
 
 
 
@@ -1136,10 +1455,27 @@ def chat_stream(body: ChatBody):
     cid = db_ensure_conversation(body.conversation_id)
     history = db_get_messages(cid)
 
-    final_prompt = build_chat_prompt(history, body.prompt)
+    effective_prompt = body.prompt
+    if (body.route_mode or "cc") == "direct":
+        effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
+
+    final_prompt = build_chat_prompt(history, effective_prompt)
 
     db_add_message(cid, "user", body.prompt)
     db_update_title_if_needed(cid, body.prompt)
+
+    if (body.route_mode or "cc") == "direct":
+        return StreamingResponse(
+            stream_direct_and_save(
+                cid,
+                final_prompt,
+                body.api_base_url,
+                body.api_auth_token,
+                body.api_model or DEFAULT_MODEL,
+                body.api_profile_name or "",
+            ),
+            media_type="text/plain; charset=utf-8",
+        )
 
     return StreamingResponse(
         stream_and_save(
@@ -1203,6 +1539,19 @@ def regenerate_from_stream(body: ChatBody):
         prompt=last_user_prompt,
     )
 
+    if (body.route_mode or "cc") == "direct":
+        return StreamingResponse(
+            stream_direct_and_save(
+                cid,
+                final_prompt,
+                body.api_base_url,
+                body.api_auth_token,
+                body.api_model or DEFAULT_MODEL,
+                body.api_profile_name or "",
+            ),
+            media_type="text/plain; charset=utf-8",
+        )
+
     return StreamingResponse(
         stream_and_save(
             cid,
@@ -1247,6 +1596,19 @@ def regenerate_stream(body: ChatBody):
         prompt=last_user_prompt,
     )
 
+    if (body.route_mode or "cc") == "direct":
+        return StreamingResponse(
+            stream_direct_and_save(
+                cid,
+                final_prompt,
+                body.api_base_url,
+                body.api_auth_token,
+                body.api_model or DEFAULT_MODEL,
+                body.api_profile_name or "",
+            ),
+            media_type="text/plain; charset=utf-8",
+        )
+
     return StreamingResponse(
         stream_and_save(
             cid,
@@ -1269,6 +1631,7 @@ async def chat_upload_stream(
     api_auth_token: str = Form(""),
     api_model: str = Form(DEFAULT_MODEL),
     api_profile_name: str = Form(""),
+    route_mode: str = Form("cc"),
     files: list[UploadFile] = File([]),
 ):
     cid = db_ensure_conversation(conversation_id)
@@ -1368,8 +1731,9 @@ async def chat_upload_stream(
                     api_model or DEFAULT_MODEL,
                 )
 
+                route_label = "专用直连视觉" if (route_mode or "cc") == "direct" else "CC线路视觉"
                 debug = (
-                    f"【视觉接口已调用｜图片数: {len(local_image_paths)}"
+                    f"【{route_label}已调用｜图片数: {len(local_image_paths)}"
                     f"｜模型: {api_model or DEFAULT_MODEL}"
                     f"｜接入商: {api_profile_name or api_base_url}】\n\n"
                 )
@@ -1423,7 +1787,7 @@ async def chat_upload_stream(
             media_type="text/plain; charset=utf-8",
         )
 
-    # 没有图片时，文本文件继续走 claude CLI
+    # 没有图片时：文本文件/普通文字根据线路分流
     extra_parts = []
 
     if text_files:
@@ -1446,6 +1810,21 @@ async def chat_upload_stream(
         prompt=final_user_prompt,
     )
 
+    # 专用直连线路：文本文件也走真流式 API
+    if (route_mode or "cc") == "direct":
+        return StreamingResponse(
+            stream_direct_and_save(
+                cid,
+                final_prompt,
+                api_base_url,
+                api_auth_token,
+                api_model or DEFAULT_MODEL,
+                api_profile_name or "",
+            ),
+            media_type="text/plain; charset=utf-8",
+        )
+
+    # CC 本地代理线路：继续走 Claude Code
     return StreamingResponse(
         stream_and_save(
             cid,
@@ -1522,3 +1901,360 @@ def export_conversation_markdown(conversation_id: str):
             "Content-Disposition": f'attachment; filename="{safe_name}.md"'
         }
     )
+
+
+@app.post("/api/terminal/run")
+def run_terminal_command(body: TerminalBody):
+    import subprocess
+    import os
+    import time
+
+    command = (body.command or "").strip()
+    cwd = (body.cwd or "/root").strip()
+    timeout = int(body.timeout or 60)
+
+    if not command:
+        return {
+            "ok": False,
+            "output": "命令为空"
+        }
+
+    if timeout < 1:
+        timeout = 1
+    if timeout > 300:
+        timeout = 300
+
+    if not os.path.exists(cwd):
+        cwd = "/root"
+
+    start = time.time()
+
+    try:
+        proc = subprocess.run(
+            ["bash", "-lc", command],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=os.environ.copy(),
+        )
+
+        elapsed = round(time.time() - start, 3)
+
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+
+        output = ""
+        if stdout:
+            output += stdout
+        if stderr:
+            if output:
+                output += "\\n"
+            output += stderr
+
+        return {
+            "ok": proc.returncode == 0,
+            "code": proc.returncode,
+            "cwd": cwd,
+            "elapsed": elapsed,
+            "output": output or "(无输出)"
+        }
+
+    except subprocess.TimeoutExpired as e:
+        out = ""
+        if e.stdout:
+            out += e.stdout
+        if e.stderr:
+            out += "\\n" + e.stderr
+
+        return {
+            "ok": False,
+            "code": -1,
+            "cwd": cwd,
+            "elapsed": timeout,
+            "output": "命令超时。\\n" + out
+        }
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "code": -2,
+            "cwd": cwd,
+            "elapsed": 0,
+            "output": "执行失败：" + str(e)
+        }
+
+
+def execute_agent_shell(command: str, cwd: str = "/root", timeout: int = 120):
+    import subprocess
+    import os
+    import time
+
+    command = (command or "").strip()
+    cwd = (cwd or "/root").strip()
+
+    if not command:
+        return {
+            "ok": False,
+            "code": -2,
+            "cwd": cwd,
+            "elapsed": 0,
+            "output": "命令为空"
+        }
+
+    if not os.path.exists(cwd):
+        cwd = "/root"
+
+    timeout = max(1, min(int(timeout or 120), 300))
+
+    start = time.time()
+
+    try:
+        proc = subprocess.run(
+            ["bash", "-lc", command],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=os.environ.copy(),
+        )
+
+        elapsed = round(time.time() - start, 3)
+        output = ""
+
+        if proc.stdout:
+            output += proc.stdout
+        if proc.stderr:
+            if output:
+                output += "\\n"
+            output += proc.stderr
+
+        # 防止一次输出过大撑爆上下文
+        if len(output) > 20000:
+            output = output[:20000] + "\\n...[输出过长，已截断]"
+
+        return {
+            "ok": proc.returncode == 0,
+            "code": proc.returncode,
+            "cwd": cwd,
+            "elapsed": elapsed,
+            "output": output or "(无输出)"
+        }
+
+    except subprocess.TimeoutExpired as e:
+        output = ""
+        if e.stdout:
+            output += e.stdout
+        if e.stderr:
+            output += "\\n" + e.stderr
+
+        return {
+            "ok": False,
+            "code": -1,
+            "cwd": cwd,
+            "elapsed": timeout,
+            "output": "命令超时。\\n" + output
+        }
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "code": -3,
+            "cwd": cwd,
+            "elapsed": 0,
+            "output": "执行失败：" + str(e)
+        }
+
+
+def extract_agent_json(text: str):
+    import json
+    import re
+
+    raw = (text or "").strip()
+
+    # 优先解析 ```json ... ```
+    m = re.search(r"```json\\s*([\\s\\S]*?)```", raw)
+    if m:
+        raw = m.group(1).strip()
+    else:
+        # 否则找第一个 JSON 对象
+        m = re.search(r"\\{[\\s\\S]*\\}", raw)
+        if m:
+            raw = m.group(0).strip()
+
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {
+            "action": "final",
+            "answer": text
+        }
+
+
+def build_agent_prompt(task: str, cwd: str, transcript: list):
+    parts = []
+
+    parts.append("你现在是一个拥有本地 Ubuntu Linux 终端完整权限的 AI Agent。")
+    parts.append("你运行在用户手机 Termux/proot Ubuntu 容器中。")
+    parts.append("用户已经明确授权你使用本地终端执行命令、读写文件、联网、安装依赖、修改项目。")
+    parts.append("你可以根据任务自主决定下一步要执行的 shell 命令。")
+    parts.append("")
+    parts.append("重要规则：")
+    parts.append("1. 如果需要操作终端，必须只输出 JSON。")
+    parts.append("2. 不要输出 Markdown，不要解释 JSON 外的内容。")
+    parts.append("3. 每次最多执行一条命令。")
+    parts.append("4. 如果任务已经完成，输出 final。")
+    parts.append("")
+    parts.append("JSON 格式只能是以下两种之一：")
+    parts.append("")
+    parts.append('{"action":"run","cwd":"/root","command":"ls -la","reason":"查看当前目录"}')
+    parts.append("")
+    parts.append('{"action":"final","answer":"任务完成，结果是..."}')
+    parts.append("")
+    parts.append(f"当前默认工作目录: {cwd}")
+    parts.append("")
+    parts.append("用户任务：")
+    parts.append(task)
+    parts.append("")
+
+    if transcript:
+        parts.append("此前执行记录：")
+        for i, item in enumerate(transcript, 1):
+            parts.append(f"步骤 {i}:")
+            parts.append("命令:")
+            parts.append(item.get("command", ""))
+            parts.append("退出码:")
+            parts.append(str(item.get("code", "")))
+            parts.append("输出:")
+            parts.append(item.get("output", ""))
+            parts.append("")
+
+    parts.append("请给出下一步 JSON。")
+
+    return "\\n".join(parts)
+
+
+@app.post("/api/agent/run")
+def run_local_agent(body: AgentBody):
+    task = (body.task or "").strip()
+
+    if not task:
+        return {
+            "ok": False,
+            "answer": "任务为空",
+            "steps": []
+        }
+
+    cid = db_ensure_conversation(body.conversation_id)
+    cwd = body.cwd or "/root"
+    max_steps = max(1, min(int(body.max_steps or 8), 20))
+    timeout = max(1, min(int(body.timeout or 120), 300))
+
+    steps = []
+    final_answer = ""
+
+    # 保存用户任务
+    db_add_message(
+        cid,
+        "user",
+        task,
+        file_name=None,
+        image_preview=None,
+    )
+
+    for step_index in range(max_steps):
+        prompt = build_agent_prompt(task, cwd, steps)
+
+        model_reply = run_claude(
+            prompt,
+            api_base_url=body.api_base_url,
+            api_auth_token=body.api_auth_token,
+            api_model=body.api_model or DEFAULT_MODEL,
+        )
+
+        action = extract_agent_json(model_reply)
+
+        if action.get("action") == "final":
+            final_answer = action.get("answer") or model_reply
+            break
+
+        if action.get("action") != "run":
+            final_answer = model_reply
+            break
+
+        command = (action.get("command") or "").strip()
+        step_cwd = (action.get("cwd") or cwd or "/root").strip()
+        reason = action.get("reason") or ""
+
+        result = execute_agent_shell(
+            command=command,
+            cwd=step_cwd,
+            timeout=timeout,
+        )
+
+        cwd = result.get("cwd") or step_cwd
+
+        steps.append({
+            "step": step_index + 1,
+            "reason": reason,
+            "cwd": cwd,
+            "command": command,
+            "ok": result.get("ok"),
+            "code": result.get("code"),
+            "elapsed": result.get("elapsed"),
+            "output": result.get("output"),
+        })
+
+    if not final_answer:
+        # 如果达到最大步骤还没 final，让模型总结一次
+        summary_prompt = []
+        summary_prompt.append("请根据以下终端执行记录，总结任务当前完成情况。")
+        summary_prompt.append("如果已经完成，请说明结果；如果未完成，请说明卡在哪里。")
+        summary_prompt.append("")
+        summary_prompt.append("用户任务：")
+        summary_prompt.append(task)
+        summary_prompt.append("")
+        summary_prompt.append("执行记录：")
+        for item in steps:
+            summary_prompt.append(f"步骤 {item['step']}: {item['command']}")
+            summary_prompt.append(f"退出码: {item['code']}")
+            summary_prompt.append("输出:")
+            summary_prompt.append(item["output"])
+            summary_prompt.append("")
+
+        final_answer = run_claude(
+            "\\n".join(summary_prompt),
+            api_base_url=body.api_base_url,
+            api_auth_token=body.api_auth_token,
+            api_model=body.api_model or DEFAULT_MODEL,
+        )
+
+    # 保存 AI Agent 最终回答
+    answer_for_db = "本地终端 Agent 执行完成。\\n\\n"
+
+    for item in steps:
+        answer_for_db += f"### 步骤 {item['step']}\\n"
+        if item.get("reason"):
+            answer_for_db += f"原因: {item['reason']}\\n"
+        answer_for_db += f"cwd: {item['cwd']}\\n"
+        answer_for_db += f"命令:\\n```bash\\n{item['command']}\\n```\\n"
+        answer_for_db += f"退出码: {item['code']}\\n"
+        answer_for_db += f"输出:\\n```text\\n{item['output']}\\n```\\n\\n"
+
+    answer_for_db += "### 最终结果\\n"
+    answer_for_db += final_answer
+
+    db_add_message(
+        cid,
+        "assistant",
+        answer_for_db,
+        model=body.api_model or DEFAULT_MODEL,
+        provider_name=body.api_profile_name or "",
+    )
+
+    return {
+        "ok": True,
+        "conversation_id": cid,
+        "answer": final_answer,
+        "steps": steps,
+    }
