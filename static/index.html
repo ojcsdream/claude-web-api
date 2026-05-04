@@ -96,7 +96,7 @@
     #chatList {
       display: flex;
       flex-direction: column;
-      gap: 26px;
+      gap: 18px;
     }
 
     .empty {
@@ -109,7 +109,7 @@
     .msg-wrap {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 4px;
     }
 
     .msg-wrap.user {
@@ -140,7 +140,7 @@
     }
 
     .user .bubble {
-      max-width: min(84%, 540px);
+      max-width: min(80%, 540px);
       background: #11110f;
       color: #f5f1e8;
       border-radius: 18px;
@@ -152,25 +152,43 @@
 
     .assistant .bubble {
       color: #eee9df;
-      font-size: 18px;
-      line-height: 1.85;
+      font-size: 17px;
+      line-height: 1.68;
+      max-width: 100%;
     }
 
+    @media (max-width: 760px) {
+      .assistant .bubble {
+        font-size: 16px;
+        line-height: 1.62;
+        max-width: 100%;
+      }
+
+      .assistant .bubble p {
+        margin: 0.24em 0;
+      }
+
+      #chatList {
+        gap: 16px;
+      }
+    }
+
+
     .assistant .bubble p {
-      margin: 0.55em 0;
+      margin: 0.28em 0;
     }
 
     .assistant .bubble pre {
       background: #111110;
       border: 1px solid rgba(255,255,255,0.10);
       border-radius: 14px;
-      padding: 14px;
+      padding: 12px;
       overflow-x: auto;
-      font-size: 14px;
+      font-size: 13px;
     }
 
     .answer-meta {
-      margin-top: 12px;
+      margin-top: 8px;
       color: #8f887d;
       font-size: 12px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -2004,7 +2022,7 @@
 
     apiModel.oninput = () => setModel(apiModel.value.trim() || "claude-opus-4-7");
 
-    routeMode.value = localStorage.getItem("route_mode") || "cc";
+    routeMode.value = localStorage.getItem("route_mode") || "direct";
     routeMode.onchange = () => {
       localStorage.setItem("route_mode", routeMode.value);
     };
@@ -2090,10 +2108,11 @@
     agentBtn.onclick = runAgentTask;
     sendBtn.onclick = sendPrompt;
 
+    // 输入框回车只换行，不发送消息。
+    // 发送消息只通过右侧发送按钮触发。
     promptEl.onkeydown = e => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendPrompt();
+      if (e.key === "Enter") {
+        return;
       }
     };
 

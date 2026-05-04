@@ -82,3 +82,15 @@ def init_db():
 if __name__ == "__main__":
     init_db()
     print(f"DB created: {DB_PATH}")
+
+
+def ensure_api_profiles_route_mode_column(conn):
+    try:
+        rows = conn.execute("PRAGMA table_info(api_profiles)").fetchall()
+        cols = {row[1] for row in rows}
+        if "route_mode" not in cols:
+            conn.execute("ALTER TABLE api_profiles ADD COLUMN route_mode TEXT DEFAULT 'direct'")
+            conn.commit()
+    except Exception:
+        pass
+

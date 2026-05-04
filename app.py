@@ -69,7 +69,7 @@ class ChatBody(BaseModel):
     api_auth_token: str = ""
     api_model: str = DEFAULT_MODEL
     api_profile_name: str = ""
-    route_mode: str = "cc"  # cc=Claude Code本地代理, direct=第三方API直连流式
+    route_mode: str = "direct"  # cc=Claude Code本地代理, direct=第三方API直连流式
 
 
 class ConversationCreateBody(BaseModel):
@@ -1498,7 +1498,7 @@ def chat_stream(body: ChatBody):
     history = db_get_messages(cid)
 
     effective_prompt = body.prompt
-    if (body.route_mode or "cc") == "direct":
+    if (body.route_mode or "direct") == "direct":
         effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
 
     final_prompt = build_chat_prompt(history, effective_prompt)
@@ -1506,7 +1506,7 @@ def chat_stream(body: ChatBody):
     db_add_message(cid, "user", body.prompt)
     db_update_title_if_needed(cid, body.prompt)
 
-    if (body.route_mode or "cc") == "direct":
+    if (body.route_mode or "direct") == "direct":
         return StreamingResponse(
             stream_direct_and_save(
                 cid,
@@ -1581,7 +1581,7 @@ def regenerate_from_stream(body: ChatBody):
         prompt=last_user_prompt,
     )
 
-    if (body.route_mode or "cc") == "direct":
+    if (body.route_mode or "direct") == "direct":
         return StreamingResponse(
             stream_direct_and_save(
                 cid,
@@ -1638,7 +1638,7 @@ def regenerate_stream(body: ChatBody):
         prompt=last_user_prompt,
     )
 
-    if (body.route_mode or "cc") == "direct":
+    if (body.route_mode or "direct") == "direct":
         return StreamingResponse(
             stream_direct_and_save(
                 cid,
@@ -1673,7 +1673,7 @@ async def chat_upload_stream(
     api_auth_token: str = Form(""),
     api_model: str = Form(DEFAULT_MODEL),
     api_profile_name: str = Form(""),
-    route_mode: str = Form("cc"),
+    route_mode: str = Form("direct"),
     files: list[UploadFile] = File([]),
 ):
     cid = db_ensure_conversation(conversation_id)
@@ -1773,7 +1773,7 @@ async def chat_upload_stream(
                     api_model or DEFAULT_MODEL,
                 )
 
-                route_label = "专用直连视觉" if (route_mode or "cc") == "direct" else "CC线路视觉"
+                route_label = "专用直连视觉" if (route_mode or "direct") == "direct" else "CC线路视觉"
                 debug = (
                     f"【{route_label}已调用｜图片数: {len(local_image_paths)}"
                     f"｜模型: {api_model or DEFAULT_MODEL}"
@@ -1853,7 +1853,7 @@ async def chat_upload_stream(
     )
 
     # 专用直连线路：文本文件也走真流式 API
-    if (route_mode or "cc") == "direct":
+    if (route_mode or "direct") == "direct":
         return StreamingResponse(
             stream_direct_and_save(
                 cid,
