@@ -11,7 +11,10 @@ uploads/
 app.py.bak*
 static/index.html.bak*
 .env
+.cc-proxy.env
+ngrok-url.txt
 *.key
+.claude/
 
 __pycache__/
 *.pyc
@@ -25,5 +28,7 @@ uploads/
 app.py.bak*
 static/index.html.bak*
 .env
+.cc-proxy.env
+ngrok-url.txt
 *.key
-.claude/settings.local.json
+.claude/

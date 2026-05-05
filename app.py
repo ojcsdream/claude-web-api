@@ -11,8 +11,9 @@ from fastapi import FastAPI, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from cc_protocol_proxy import router as cc_protocol_proxy_router
 from db import init_db, get_conn
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -47,6 +48,7 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+app.include_router(cc_protocol_proxy_router)
 
 
 class MessageItem(BaseModel):
@@ -55,6 +57,7 @@ class MessageItem(BaseModel):
     content: str
     fileName: Optional[str] = None
     imagePreview: Optional[str] = None
+    fileContext: Optional[str] = None
     model: Optional[str] = None
     providerName: Optional[str] = None
     tokenCount: Optional[int] = None
@@ -63,7 +66,7 @@ class MessageItem(BaseModel):
 class ChatBody(BaseModel):
     conversation_id: str = ""
     prompt: str = ""
-    messages: List[MessageItem] = []
+    messages: List[MessageItem] = Field(default_factory=list)
     message_id: Optional[int] = None
     api_base_url: str = ""
     api_auth_token: str = ""
@@ -126,7 +129,7 @@ def estimate_tokens(text: str) -> int:
     other = 0
 
     for ch in text:
-        if "\\u4e00" <= ch <= "\\u9fff":
+        if "\u4e00" <= ch <= "\u9fff":
             chinese += 1
         else:
             other += 1
@@ -178,6 +181,7 @@ def db_add_message(
     content: str,
     file_name: Optional[str] = None,
     image_preview: Optional[str] = None,
+    file_context: Optional[str] = None,
     model: Optional[str] = None,
     provider_name: Optional[str] = None,
     token_count: Optional[int] = None,
@@ -186,10 +190,10 @@ def db_add_message(
     conn = get_conn()
     conn.execute(
         """
-        INSERT INTO messages (conversation_id, role, content, file_name, image_preview, model, provider_name, token_count, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (conversation_id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (conversation_id, role, content or "", file_name, image_preview, model, provider_name, token_count, ts),
+        (conversation_id, role, content or "", file_name, image_preview, file_context, model, provider_name, token_count, ts),
     )
     conn.execute(
         "UPDATE conversations SET updated_at=? WHERE id=?",
@@ -314,6 +318,21 @@ def db_delete_last_assistant_message(conversation_id: str):
     conn.close()
 
 
+def message_item_from_row(row) -> MessageItem:
+    keys = row.keys()
+    return MessageItem(
+        id=row["id"],
+        role=row["role"],
+        content=row["content"],
+        fileName=row["file_name"],
+        imagePreview=row["image_preview"],
+        fileContext=row["file_context"] if "file_context" in keys else None,
+        model=row["model"] if "model" in keys else None,
+        providerName=row["provider_name"] if "provider_name" in keys else None,
+        tokenCount=row["token_count"] if "token_count" in keys else None,
+    )
+
+
 def db_get_regenerate_history(conversation_id: str) -> List[MessageItem]:
     """
     用于重新回答：
@@ -326,24 +345,12 @@ def db_get_regenerate_history(conversation_id: str) -> List[MessageItem]:
 def db_get_messages(conversation_id: str) -> List[MessageItem]:
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, role, content, file_name, image_preview, model, provider_name, token_count FROM messages WHERE conversation_id=? ORDER BY id ASC",
+        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count FROM messages WHERE conversation_id=? ORDER BY id ASC",
         (conversation_id,),
     ).fetchall()
     conn.close()
 
-    return [
-        MessageItem(
-            id=row["id"],
-            role=row["role"],
-            content=row["content"],
-            fileName=row["file_name"],
-            imagePreview=row["image_preview"],
-            model=row["model"] if "model" in row.keys() else None,
-            providerName=row["provider_name"] if "provider_name" in row.keys() else None,
-            tokenCount=row["token_count"] if "token_count" in row.keys() else None,
-        )
-        for row in rows
-    ]
+    return [message_item_from_row(row) for row in rows]
 
 
 
@@ -375,24 +382,12 @@ def db_get_message_by_id(conversation_id: str, message_id: int):
 def db_get_messages_before_id(conversation_id: str, message_id: int) -> List[MessageItem]:
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, role, content, file_name, image_preview, model, provider_name, token_count FROM messages WHERE conversation_id=? AND id<? ORDER BY id ASC",
+        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count FROM messages WHERE conversation_id=? AND id<? ORDER BY id ASC",
         (conversation_id, message_id),
     ).fetchall()
     conn.close()
 
-    return [
-        MessageItem(
-            id=row["id"],
-            role=row["role"],
-            content=row["content"],
-            fileName=row["file_name"],
-            imagePreview=row["image_preview"],
-            model=row["model"] if "model" in row.keys() else None,
-            providerName=row["provider_name"] if "provider_name" in row.keys() else None,
-            tokenCount=row["token_count"] if "token_count" in row.keys() else None,
-        )
-        for row in rows
-    ]
+    return [message_item_from_row(row) for row in rows]
 
 
 def is_image_file(filename: str) -> bool:
@@ -421,6 +416,7 @@ def trim_context_messages(messages: List[MessageItem]) -> List[MessageItem]:
                 content=content,
                 fileName=getattr(msg, "fileName", None),
                 imagePreview=getattr(msg, "imagePreview", None),
+                fileContext=getattr(msg, "fileContext", None),
             )
         )
         total += len(content)
@@ -430,17 +426,71 @@ def trim_context_messages(messages: List[MessageItem]) -> List[MessageItem]:
 
 
 
+def parse_image_preview_paths(image_preview: Optional[str]) -> list[str]:
+    if not image_preview:
+        return []
+
+    try:
+        paths = json.loads(image_preview)
+    except Exception:
+        paths = [image_preview]
+
+    if not isinstance(paths, list):
+        paths = [paths]
+
+    local_paths = []
+    for path in paths:
+        if not isinstance(path, str) or not path.strip():
+            continue
+        p = path.strip()
+        if p.startswith("./uploads/"):
+            local_paths.append(p)
+        elif p.startswith("/uploads/"):
+            local_paths.append("." + p)
+
+    return local_paths
+
+
+def collect_history_image_paths(messages: List[MessageItem]) -> list[str]:
+    paths = []
+    for msg in messages[-VISION_CONTEXT_MESSAGES:]:
+        if msg.role != "user":
+            continue
+        for path in parse_image_preview_paths(getattr(msg, "imagePreview", None)):
+            if path not in paths:
+                paths.append(path)
+    return paths
+
+
+def format_message_for_context(msg: MessageItem) -> str:
+    text = (msg.content or "").strip()
+    pieces = [text] if text else []
+
+    file_name = getattr(msg, "fileName", None)
+    file_context = getattr(msg, "fileContext", None)
+    image_paths = parse_image_preview_paths(getattr(msg, "imagePreview", None))
+
+    if file_context:
+        pieces.append(f"[历史上传文件: {file_name or '未命名文件'}]\n{file_context}")
+
+    if image_paths:
+        pieces.append(
+            "[历史上传图片]\n"
+            + (f"文件名: {file_name}\n" if file_name else "")
+            + "本地图片路径: "
+            + ", ".join(image_paths)
+        )
+
+    return "\n\n".join(pieces).strip()
+
+
 def build_vision_text_history(messages: List[MessageItem]) -> str:
-    """
-    图片请求时附带最近文字上下文。
-    不重复发送历史图片，只发送当前用户上传的图片。
-    """
     recent = messages[-VISION_CONTEXT_MESSAGES:]
     parts = []
     total = 0
 
     for msg in recent:
-        text = (msg.content or "").strip()
+        text = format_message_for_context(msg)
         if not text:
             continue
 
@@ -455,7 +505,7 @@ def build_vision_text_history(messages: List[MessageItem]) -> str:
         parts.append(f"{role}: {text}")
         total += len(text)
 
-    return "\\n".join(parts).strip()
+    return "\n".join(parts).strip()
 
 
 def build_chat_prompt(
@@ -470,14 +520,16 @@ def build_chat_prompt(
     parts = [
         "基于下面最近的聊天上下文继续回答。",
         "请直接回答，不要重复角色标签。",
-        "如果涉及数学公式，请使用标准 LaTeX。独立公式必须用 $$...$$ 包裹，行内公式用 $...$。分式必须使用 \frac{分子}{分母}，不要使用 a/b 这种斜杠分式；平方根必须使用 \sqrt{}；推导公式尽量使用 align 环境。",
+        r"如果涉及数学公式，请使用标准 LaTeX。独立公式必须用 $$...$$ 包裹，行内公式用 $...$。分式必须使用 \frac{分子}{分母}，不要使用 a/b 这种斜杠分式；平方根必须使用 \sqrt{}；推导公式尽量使用 align 环境。",
         ""
     ]
 
     for msg in messages:
         role = "用户" if msg.role == "user" else "助手"
-        parts.append(f"{role}: {msg.content}")
-        parts.append("")
+        content = format_message_for_context(msg)
+        if content:
+            parts.append(f"{role}: {content}")
+            parts.append("")
 
     if image_rel_path:
         parts.append(f"用户上传了图片文件: {file_name}")
@@ -501,8 +553,37 @@ def build_chat_prompt(
     return "\n".join(parts).strip()
 
 
+def load_claude_settings_env() -> dict:
+    env = {}
+    settings_paths = [
+        Path.home() / ".claude" / "settings.json",
+        Path.home() / ".claude" / "settings.local.json",
+        BASE_DIR / ".claude" / "settings.json",
+        BASE_DIR / ".claude" / "settings.local.json",
+    ]
+
+    for path in settings_paths:
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        values = data.get("env", {})
+        if not isinstance(values, dict):
+            continue
+
+        for key, value in values.items():
+            if isinstance(key, str) and isinstance(value, str):
+                env[key] = value
+
+    return env
+
+
 def make_env(api_base_url: str = "", api_auth_token: str = ""):
     env = os.environ.copy()
+    env.update(load_claude_settings_env())
     if api_base_url.strip():
         env["ANTHROPIC_BASE_URL"] = api_base_url.strip()
     if api_auth_token.strip():
@@ -1110,6 +1191,19 @@ async def read_uploaded_text(file: UploadFile) -> str:
     return text or "(文件为空，或不是可直接按 UTF-8 读取的文本文件)"
 
 
+def load_uploaded_text_from_path(local_path: str) -> str:
+    abs_path = local_upload_path_to_abs(local_path)
+    try:
+        raw = abs_path.read_bytes()
+    except Exception:
+        return ""
+
+    if len(raw) > 1024 * 1024:
+        raw = raw[:1024 * 1024]
+
+    return raw.decode("utf-8", errors="ignore").strip()
+
+
 
 
 async def save_uploaded_file_dual_paths(file: UploadFile) -> tuple[str, str, str]:
@@ -1501,10 +1595,76 @@ def chat_stream(body: ChatBody):
     if (body.route_mode or "direct") == "direct":
         effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
 
-    final_prompt = build_chat_prompt(history, effective_prompt)
+    history_image_paths = collect_history_image_paths(history)
 
     db_add_message(cid, "user", body.prompt)
     db_update_title_if_needed(cid, body.prompt)
+
+    if history_image_paths:
+        vision_prompt = build_vision_text_history(history)
+        if vision_prompt:
+            vision_prompt += "\n\n"
+        vision_prompt += "用户问题：" + (effective_prompt.strip() or "请继续结合历史图片回答。")
+
+        _api_base_url = body.api_base_url
+        _api_auth_token = body.api_auth_token
+        _api_model = body.api_model or DEFAULT_MODEL
+        _api_profile_name = body.api_profile_name or ""
+        _cid = cid
+
+        def gen_history_vision():
+            try:
+                answer = call_direct_vision_api(
+                    vision_prompt,
+                    history_image_paths,
+                    _api_base_url,
+                    _api_auth_token,
+                    _api_model,
+                )
+                debug = (
+                    f"【历史视觉上下文｜图片数: {len(history_image_paths)}"
+                    f"｜模型: {_api_model}"
+                    f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
+                )
+                final_answer = debug + answer
+                token_count = estimate_round_tokens(vision_prompt, final_answer, image_count=len(history_image_paths))
+                db_add_message(
+                    _cid, "assistant", final_answer,
+                    model=_api_model,
+                    provider_name=_api_profile_name,
+                    token_count=token_count,
+                )
+                yield final_answer
+            except Exception as e:
+                final_answer = (
+                    "【历史视觉接口调用失败】\n\n"
+                    + str(e)
+                    + "\n\n将改用普通文字上下文继续回答。"
+                )
+                fallback_prompt = build_chat_prompt(history, effective_prompt)
+                fallback_full = ""
+                for chunk in stream_direct_api_text(
+                    fallback_prompt,
+                    _api_base_url,
+                    _api_auth_token,
+                    _api_model,
+                ):
+                    fallback_full += chunk
+                    yield chunk
+                if fallback_full:
+                    db_add_message(
+                        _cid, "assistant", fallback_full,
+                        model=_api_model,
+                        provider_name=(_api_profile_name or "") + "｜直连流式",
+                        token_count=estimate_round_tokens(fallback_prompt, fallback_full),
+                    )
+                else:
+                    db_add_message(_cid, "assistant", final_answer, model=_api_model, provider_name=_api_profile_name)
+                    yield final_answer
+
+        return StreamingResponse(gen_history_vision(), media_type="text/plain; charset=utf-8")
+
+    final_prompt = build_chat_prompt(history, effective_prompt)
 
     if (body.route_mode or "direct") == "direct":
         return StreamingResponse(
@@ -1571,10 +1731,78 @@ def regenerate_from_stream(body: ChatBody):
         )
 
     context_messages = before[:last_user_index]
-    last_user_prompt = before[last_user_index].content
+    last_user_msg = before[last_user_index]
+    last_user_prompt = last_user_msg.content
+    last_image_preview = last_user_msg.imagePreview
 
     # 删除目标消息以及之后所有消息
     db_delete_message_and_after_raw(cid, body.message_id)
+
+    # 如果上一条用户消息带有图片，走视觉流程重新回答
+    if last_image_preview:
+        try:
+            web_paths = json.loads(last_image_preview)
+            # /uploads/xxx.jpg → ./uploads/xxx.jpg，供 call_direct_vision_api 定位本地文件
+            local_image_paths = ["." + p for p in web_paths if p.startswith("/")]
+        except Exception:
+            local_image_paths = []
+
+        if local_image_paths:
+            vision_prompt_parts = []
+            text_history = build_vision_text_history(context_messages)
+            if text_history:
+                vision_prompt_parts.append("以下是最近的文字对话历史，仅用于理解用户问题，不可替代图片内容：")
+                vision_prompt_parts.append(text_history)
+                vision_prompt_parts.append("")
+
+            vision_prompt_parts.append(f"用户本次上传了 {len(local_image_paths)} 张图片。")
+            vision_prompt_parts.append("你必须读取当前上传图片的像素内容，并结合上面的文字历史回答。")
+            vision_prompt_parts.append("不要只根据聊天历史、文件名、路径或上下文猜测图片内容。")
+            vision_prompt_parts.append("如果你没有看到图片内容，请明确回复：我没有读取到图片内容。")
+            vision_prompt_parts.append("")
+            vision_prompt_parts.append("用户问题：" + (last_user_prompt.strip() or "请分析我上传的图片。"))
+            vision_prompt = "\n".join(vision_prompt_parts)
+
+            _api_base_url = body.api_base_url
+            _api_auth_token = body.api_auth_token
+            _api_model = body.api_model or DEFAULT_MODEL
+            _api_profile_name = body.api_profile_name or ""
+            _cid = cid
+
+            def gen_vision():
+                try:
+                    answer = call_direct_vision_api(
+                        vision_prompt,
+                        local_image_paths,
+                        _api_base_url,
+                        _api_auth_token,
+                        _api_model,
+                    )
+                    debug = (
+                        f"【重新回答｜视觉直连｜图片数: {len(local_image_paths)}"
+                        f"｜模型: {_api_model}"
+                        f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
+                    )
+                    final_answer = debug + answer
+                    token_count = estimate_round_tokens(vision_prompt, final_answer, image_count=len(local_image_paths))
+                    db_add_message(
+                        _cid, "assistant", final_answer,
+                        model=_api_model,
+                        provider_name=_api_profile_name,
+                        token_count=token_count,
+                    )
+                    yield final_answer
+                except Exception as e:
+                    final_answer = (
+                        "【视觉接口调用失败】\n\n"
+                        + str(e)
+                        + "\n\n这说明当前接入商或模型可能不支持图片视觉输入，"
+                        + "或者它的视觉接口格式不是 OpenAI/Anthropic 标准格式。"
+                    )
+                    db_add_message(_cid, "assistant", final_answer, model=_api_model, provider_name=_api_profile_name)
+                    yield final_answer
+
+            return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
     final_prompt = build_chat_prompt(
         messages=context_messages,
@@ -1631,7 +1859,62 @@ def regenerate_stream(body: ChatBody):
 
     # 上下文是最后一个用户消息之前的所有消息
     context_messages = history[:last_user_index]
-    last_user_prompt = history[last_user_index].content
+    last_user_msg = history[last_user_index]
+    last_user_prompt = last_user_msg.content
+
+    history_images = collect_history_image_paths(context_messages)
+    last_user_images = parse_image_preview_paths(getattr(last_user_msg, "imagePreview", None))
+    all_history_images = []
+    for path_item in history_images + last_user_images:
+        if path_item not in all_history_images:
+            all_history_images.append(path_item)
+
+    if all_history_images:
+        vision_prompt = build_vision_text_history(context_messages)
+        if vision_prompt:
+            vision_prompt += "\n\n"
+        vision_prompt += "用户问题：" + (last_user_prompt.strip() or "请分析我上传的图片。")
+
+        _api_base_url = body.api_base_url
+        _api_auth_token = body.api_auth_token
+        _api_model = body.api_model or DEFAULT_MODEL
+        _api_profile_name = body.api_profile_name or ""
+        _cid = cid
+
+        def gen_vision():
+            try:
+                answer = call_direct_vision_api(
+                    vision_prompt,
+                    all_history_images,
+                    _api_base_url,
+                    _api_auth_token,
+                    _api_model,
+                )
+                debug = (
+                    f"【重新回答｜历史视觉上下文｜图片数: {len(all_history_images)}"
+                    f"｜模型: {_api_model}"
+                    f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
+                )
+                final_answer = debug + answer
+                token_count = estimate_round_tokens(vision_prompt, final_answer, image_count=len(all_history_images))
+                db_add_message(
+                    _cid, "assistant", final_answer,
+                    model=_api_model,
+                    provider_name=_api_profile_name,
+                    token_count=token_count,
+                )
+                yield final_answer
+            except Exception as e:
+                final_answer = (
+                    "【视觉接口调用失败】\n\n"
+                    + str(e)
+                    + "\n\n这说明当前接入商或模型可能不支持图片视觉输入，"
+                    + "或者它的视觉接口格式不是 OpenAI/Anthropic 标准格式。"
+                )
+                db_add_message(_cid, "assistant", final_answer, model=_api_model, provider_name=_api_profile_name)
+                yield final_answer
+
+        return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
     final_prompt = build_chat_prompt(
         messages=context_messages,
@@ -1705,12 +1988,17 @@ async def chat_upload_stream(
             web_image_paths.append(web_path)
             local_image_paths.append(local_path)
         else:
-            text = await read_uploaded_text(file)
+            original, local_path, web_path = await save_uploaded_file_dual_paths(file)
+            text = load_uploaded_text_from_path(local_path)
+            if not text:
+                text = "(文件为空，或不是可直接按 UTF-8 读取的文本文件)"
             text_files.append({
-                "name": fname,
+                "name": original,
                 "text": text,
+                "local_path": local_path,
+                "web_path": web_path,
             })
-            all_names.append(fname)
+            all_names.append(original)
 
     user_prompt = prompt.strip() or "请分析我上传的文件/图片。"
 
@@ -1720,13 +2008,25 @@ async def chat_upload_stream(
     if web_image_paths:
         image_preview_db = json.dumps(web_image_paths, ensure_ascii=False)
 
-    # 先保存用户消息，让网页里能看到图片
+    file_context_db = None
+    if text_files:
+        file_context_parts = []
+        for item in text_files:
+            file_context_parts.append(f"文件名: {item['name']}")
+            file_context_parts.append("本地文件路径: " + item["local_path"])
+            file_context_parts.append("文件内容：")
+            file_context_parts.append(item["text"])
+            file_context_parts.append("")
+        file_context_db = "\n".join(file_context_parts).strip()
+
+    # 先保存用户消息，让网页里能看到图片，也让后续上下文能读取附件
     db_add_message(
         cid,
         "user",
         prompt,
         file_name=file_names_str,
         image_preview=image_preview_db,
+        file_context=file_context_db,
     )
 
     db_update_title_if_needed(cid, prompt or file_names_str or "新对话")
@@ -2906,3 +3206,170 @@ def admin_system(_: bool = Depends(require_admin_token)):
 
 # ===== CLAUDE WEB ADMIN BACKEND PATCH END =====
 
+
+
+
+# ===== CC DEBUG PATCH START =====
+import shutil
+from fastapi import Query
+
+CC_DEBUG_LOG = BASE_DIR / "logs" / "cc-debug.log"
+CC_DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
+
+def _cc_redact_env_value(key: str, value: str) -> str:
+    k = (key or "").upper()
+    if any(x in k for x in ["KEY", "TOKEN", "SECRET", "PASSWORD", "AUTH"]):
+        return "[REDACTED]"
+    return value
+
+def _cc_env_snapshot(source_env=None):
+    source_env = source_env or os.environ
+    keys = [
+        "HOME",
+        "PATH",
+        "TERM",
+        "SHELL",
+        "USER",
+        "LOGNAME",
+        "PWD",
+        "LANG",
+        "LC_ALL",
+        "XDG_RUNTIME_DIR",
+        "DISPLAY",
+        "SSH_AUTH_SOCK",
+        "CLAUDE_HOME",
+        "ANTHROPIC_API_KEY",
+    ]
+    env = {}
+    for k in keys:
+        v = source_env.get(k, "")
+        if v:
+            env[k] = _cc_redact_env_value(k, v)
+
+    # 额外记录所有和 Claude 相关的环境变量名，但做脱敏
+    for k, v in source_env.items():
+        ku = k.upper()
+        if "CLAUDE" in ku or "ANTHROPIC" in ku:
+            env[k] = _cc_redact_env_value(k, v)
+
+    return env
+
+def _write_cc_debug_log(title: str, payload: dict):
+    try:
+        CC_DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(CC_DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(f"\n=== {title} ===\n")
+            f.write(json.dumps(payload, ensure_ascii=False, indent=2))
+            f.write("\n")
+    except Exception:
+        pass
+
+@app.get("/api/debug/cc-env")
+def debug_cc_env():
+    claude_path = shutil.which("claude")
+    version = ""
+    version_err = ""
+
+    if claude_path:
+        try:
+            r = subprocess.run(
+                [claude_path, "--version"],
+                cwd=str(BASE_DIR),
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=os.environ.copy(),
+            )
+            version = (r.stdout or "").strip() or (r.stderr or "").strip()
+            if not version:
+                version = f"exit={r.returncode}"
+        except Exception as e:
+            version_err = str(e)
+
+    data = {
+        "ok": True,
+        "cwd": str(Path.cwd()),
+        "project_dir": str(BASE_DIR),
+        "claude_path": claude_path,
+        "claude_version": version,
+        "claude_version_error": version_err,
+        "process_env": _cc_env_snapshot(),
+        "effective_claude_env": _cc_env_snapshot(make_env()),
+    }
+
+    _write_cc_debug_log("cc-env", data)
+    return data
+
+@app.post("/api/debug/cc-test")
+def debug_cc_test(prompt: str = Query(default="只回复：OK")):
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        data = {
+            "ok": False,
+            "error": "claude not found in PATH",
+            "cwd": str(Path.cwd()),
+            "project_dir": str(BASE_DIR),
+            "env": _cc_env_snapshot(),
+        }
+        _write_cc_debug_log("cc-test-missing", data)
+        return data
+
+    env = make_env()
+    env.setdefault("TERM", "xterm-256color")
+    env.setdefault("HOME", str(Path.home()))
+    env.setdefault("PWD", str(BASE_DIR))
+
+    cmd = [claude_path, "-p", prompt]
+    start = time.time()
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(BASE_DIR),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        data = {
+            "ok": proc.returncode == 0,
+            "cmd": cmd,
+            "cwd": str(BASE_DIR),
+            "returncode": proc.returncode,
+            "elapsed_ms": int((time.time() - start) * 1000),
+            "stdout": (proc.stdout or "").strip(),
+            "stderr": (proc.stderr or "").strip(),
+            "env": _cc_env_snapshot(),
+        }
+        _write_cc_debug_log("cc-test", data)
+        return data
+
+    except subprocess.TimeoutExpired as e:
+        data = {
+            "ok": False,
+            "cmd": cmd,
+            "cwd": str(BASE_DIR),
+            "timeout": True,
+            "elapsed_ms": int((time.time() - start) * 1000),
+            "stdout": (e.stdout or "").strip() if isinstance(e.stdout, str) else "",
+            "stderr": (e.stderr or "").strip() if isinstance(e.stderr, str) else "",
+            "env": _cc_env_snapshot(),
+            "error": "timeout",
+        }
+        _write_cc_debug_log("cc-test-timeout", data)
+        return data
+
+    except Exception as e:
+        data = {
+            "ok": False,
+            "cmd": cmd,
+            "cwd": str(BASE_DIR),
+            "elapsed_ms": int((time.time() - start) * 1000),
+            "error": str(e),
+            "env": _cc_env_snapshot(),
+        }
+        _write_cc_debug_log("cc-test-exception", data)
+        return data
+
+# ===== CC DEBUG PATCH END =====

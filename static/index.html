@@ -1267,8 +1267,20 @@
     function renderMath(root) {
       repairMath(root);
       if (window.MathJax && MathJax.typesetPromise) {
-        MathJax.typesetPromise([root]).catch(() => {});
+        const run = () => MathJax.typesetPromise([root]).catch(() => {});
+        if (window.requestIdleCallback) {
+          requestIdleCallback(run, { timeout: 1200 });
+        } else {
+          setTimeout(run, 0);
+        }
       }
+    }
+
+    function renderMarkdown(text) {
+      if (window.marked && marked.parse) {
+        return marked.parse(text || "");
+      }
+      return escapeHtml(text || "").replace(/\n/g, "<br>");
     }
 
     function parseImagePreviewList(value) {
@@ -1317,7 +1329,7 @@
           if ((msg.content || "").trim() === "思考中...") {
             bubble.innerHTML = '<div class="thinking"><span></span><span></span><span></span></div>';
           } else {
-            bubble.innerHTML = marked.parse(msg.content || "");
+            bubble.innerHTML = renderMarkdown(msg.content || "");
             enhanceCodeBlocks(bubble);
             renderMath(bubble);
 
@@ -1401,7 +1413,7 @@
 
       // 流式过程中只做 Markdown 渲染，不做每帧代码高亮和 MathJax，避免手机卡顿。
       // 最后一帧 finalRender=true 时再补做增强。
-      bubble.innerHTML = marked.parse(text);
+      bubble.innerHTML = renderMarkdown(text);
 
       if (finalRender) {
         enhanceCodeBlocks(bubble);
@@ -1808,6 +1820,18 @@
               route_mode: routeMode.value
             })
           });
+        }
+
+        if (!resp.ok) {
+          const errorText = await resp.text().catch(() => "");
+          throw new Error(`HTTP ${resp.status}: ${errorText || resp.statusText}`);
+        }
+
+        if (!resp.body || !resp.body.getReader) {
+          const textBody = await resp.text();
+          messages[messages.length - 1].content = textBody || "响应为空";
+          flushStreamingAssistantUpdate(true);
+          return;
         }
 
         const reader = resp.body.getReader();
