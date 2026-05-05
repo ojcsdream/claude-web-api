@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Claude Web Lite</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: #181816;
+      color: #f1ede4;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+    }
+    .top {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px;
+      background: #181816;
+      border-bottom: 1px solid #33302b;
+    }
+    select, input, textarea, button {
+      font: inherit;
+      border-radius: 8px;
+      border: 1px solid #3c3932;
+      background: #24231f;
+      color: #f1ede4;
+      padding: 8px;
+    }
+    select { max-width: 42vw; }
+    button {
+      background: #e8dcc8;
+      color: #171511;
+      font-weight: 700;
+      border: 0;
+    }
+    button:disabled { opacity: .55; }
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 12px 12px 150px;
+    }
+    .status {
+      color: #a9a197;
+      font-size: 13px;
+      padding: 8px 0;
+      min-height: 30px;
+    }
+    .msg {
+      white-space: pre-wrap;
+      line-height: 1.55;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .role {
+      color: #aaa197;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .composer {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 10px;
+      background: #181816;
+      border-top: 1px solid #33302b;
+    }
+    .composer-inner {
+      max-width: 860px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+    textarea {
+      min-height: 48px;
+      max-height: 140px;
+      resize: vertical;
+    }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <strong>Lite</strong>
+    <select id="profile"></select>
+    <select id="route">
+      <option value="direct">直连</option>
+      <option value="cc">CC</option>
+    </select>
+    <button id="newBtn">新对话</button>
+  </div>
+  <main class="wrap">
+    <div id="status" class="status">启动中...</div>
+    <div id="chat"></div>
+  </main>
+  <div class="composer">
+    <div class="composer-inner">
+      <textarea id="prompt" placeholder="输入消息"></textarea>
+      <button id="sendBtn">发送</button>
+    </div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const chat = $("chat");
+    const statusEl = $("status");
+    const profileEl = $("profile");
+    const routeEl = $("route");
+    const promptEl = $("prompt");
+    const sendBtn = $("sendBtn");
+    let profiles = [];
+    let conversationId = localStorage.getItem("lite_conversation") || "";
+    let sending = false;
+    let streamController = null;
+
+    function status(text) {
+      statusEl.textContent = text || "";
+    }
+
+    async function api(method, url, body) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      try {
+        const opt = { method, signal: controller.signal };
+        if (body !== undefined) {
+          opt.headers = { "Content-Type": "application/json" };
+          opt.body = JSON.stringify(body);
+        }
+        const res = await fetch(url, opt);
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : {};
+        if (!res.ok) throw new Error(data.detail || data.error || "HTTP " + res.status);
+        return data;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    function render(messages) {
+      chat.innerHTML = "";
+      if (!messages.length) {
+        chat.innerHTML = '<div class="status">当前对话为空</div>';
+        return;
+      }
+      for (const msg of messages) {
+        const box = document.createElement("div");
+        box.className = "msg";
+        const role = msg.role === "user" ? "用户" : "助手";
+        box.innerHTML = '<div class="role">' + role + '</div>';
+        const body = document.createElement("div");
+        body.textContent = msg.content || "";
+        box.appendChild(body);
+        chat.appendChild(box);
+      }
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+
+    async function loadProfiles() {
+      const data = await api("GET", "/api/profiles");
+      profiles = data.profiles || [];
+      profileEl.innerHTML = "";
+      for (const p of profiles) {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = (p.is_default ? "默认 " : "") + p.name + " · " + p.model;
+        profileEl.appendChild(opt);
+      }
+      const def = profiles.find(p => p.is_default) || profiles[0];
+      if (def) profileEl.value = def.id;
+    }
+
+    async function ensureConversation() {
+      if (conversationId) return conversationId;
+      const data = await api("POST", "/api/conversations", { title: "Lite 对话" });
+      conversationId = data.id;
+      localStorage.setItem("lite_conversation", conversationId);
+      return conversationId;
+    }
+
+    async function loadMessages() {
+      await ensureConversation();
+      const data = await api("GET", "/api/conversations/" + conversationId + "/messages");
+      render(data.messages || []);
+    }
+
+    async function init() {
+      try {
+        await api("GET", "/api/health");
+        status("加载配置...");
+        await loadProfiles();
+        status("加载对话...");
+        await loadMessages();
+        status("就绪");
+      } catch (e) {
+        status("加载失败：" + e.message);
+      }
+    }
+
+    async function send() {
+      if (sending) return;
+      const text = promptEl.value.trim();
+      if (!text) return;
+      const p = profiles.find(x => x.id === profileEl.value) || {};
+      if (streamController) streamController.abort();
+      streamController = new AbortController();
+      const streamTimer = setTimeout(() => streamController.abort(), 45000);
+      sending = true;
+      sendBtn.disabled = true;
+      promptEl.value = "";
+
+      status("发送中...");
+
+      try {
+        await ensureConversation();
+        const res = await fetch("/api/chat/stream", {
+          method: "POST",
+          signal: streamController.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: conversationId,
+            prompt: text,
+            api_base_url: p.base_url || "",
+            api_auth_token: p.auth_token || "",
+            api_model: p.model || "claude-opus-4-7",
+            api_profile_name: p.name || "",
+            route_mode: routeEl.value
+          })
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status + ": " + await res.text());
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let full = "";
+        const userBox = document.createElement("div");
+        userBox.className = "msg";
+        userBox.innerHTML = '<div class="role">用户</div>';
+        const userText = document.createElement("div");
+        userText.textContent = text;
+        userBox.appendChild(userText);
+        chat.appendChild(userBox);
+
+        const assistantBox = document.createElement("div");
+        assistantBox.className = "msg";
+        assistantBox.innerHTML = '<div class="role">助手</div>';
+        const live = document.createElement("div");
+        assistantBox.appendChild(live);
+        chat.appendChild(assistantBox);
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          full += decoder.decode(value, { stream: true });
+          live.textContent = full;
+          window.scrollTo(0, document.body.scrollHeight);
+        }
+        status("完成");
+      } catch (e) {
+        status((e && e.name === "AbortError") ? "发送超时，已自动断开" : "发送失败：" + e.message);
+      } finally {
+        clearTimeout(streamTimer);
+        streamController = null;
+        sending = false;
+        sendBtn.disabled = false;
+      }
+    }
+
+    $("newBtn").onclick = async () => {
+      const data = await api("POST", "/api/conversations", { title: "Lite 对话" });
+      conversationId = data.id;
+      localStorage.setItem("lite_conversation", conversationId);
+      await loadMessages();
+      status("新对话已创建");
+    };
+    sendBtn.onclick = send;
+    promptEl.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+    init();
+  </script>
+</body>
+</html>
