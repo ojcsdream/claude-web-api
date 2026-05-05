@@ -56,6 +56,7 @@ def init_db():
         ("messages", "provider_name", "TEXT"),
         ("messages", "token_count", "INTEGER"),
         ("messages", "file_context", "TEXT"),
+        ("messages", "superseded_by", "INTEGER"),
         ("conversations", "is_pinned", "INTEGER NOT NULL DEFAULT 0"),
     ]:
         add_column_if_missing(cur, table, column, definition)
@@ -135,22 +136,25 @@ def db_add_message(
     model: Optional[str] = None,
     provider_name: Optional[str] = None,
     token_count: Optional[int] = None,
+    superseded_by: Optional[int] = None,
 ):
     ts = now_ms()
     conn = get_conn()
     conn.execute(
         """
-        INSERT INTO messages (conversation_id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (conversation_id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, superseded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (conversation_id, role, content or "", file_name, image_preview, file_context, model, provider_name, token_count, ts),
+        (conversation_id, role, content or "", file_name, image_preview, file_context, model, provider_name, token_count, superseded_by, ts),
     )
     conn.execute(
         "UPDATE conversations SET updated_at=? WHERE id=?",
         (ts, conversation_id),
     )
+    new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.commit()
     conn.close()
+    return new_id
 
 
 def db_update_title_if_needed(conversation_id: str, title_source: str):
@@ -276,6 +280,7 @@ def message_item_from_row(row) -> MessageItem:
         model=row["model"] if "model" in keys else None,
         providerName=row["provider_name"] if "provider_name" in keys else None,
         tokenCount=row["token_count"] if "token_count" in keys else None,
+        supersededBy=row["superseded_by"] if "superseded_by" in keys else None,
     )
 
 
@@ -291,7 +296,7 @@ def db_get_regenerate_history(conversation_id: str) -> list[MessageItem]:
 def db_get_messages(conversation_id: str) -> list[MessageItem]:
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count FROM messages WHERE conversation_id=? ORDER BY id ASC",
+        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, superseded_by FROM messages WHERE conversation_id=? ORDER BY id ASC",
         (conversation_id,),
     ).fetchall()
     conn.close()
@@ -326,9 +331,40 @@ def db_get_message_by_id(conversation_id: str, message_id: int):
 def db_get_messages_before_id(conversation_id: str, message_id: int) -> list[MessageItem]:
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count FROM messages WHERE conversation_id=? AND id<? ORDER BY id ASC",
+        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, superseded_by FROM messages WHERE conversation_id=? AND id<? ORDER BY id ASC",
         (conversation_id, message_id),
     ).fetchall()
     conn.close()
 
     return [message_item_from_row(row) for row in rows]
+
+
+def db_mark_message_superseded(message_id: int, superseded_by: int):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT conversation_id FROM messages WHERE id=?",
+        (message_id,),
+    ).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE messages SET superseded_by=? WHERE id=?",
+            (superseded_by, message_id),
+        )
+        conn.execute(
+            "UPDATE conversations SET updated_at=? WHERE id=?",
+            (now_ms(), row["conversation_id"]),
+        )
+    conn.commit()
+    conn.close()
+
+
+def db_get_message_superseded_by(message_id: int):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT superseded_by FROM messages WHERE id=?",
+        (message_id,),
+    ).fetchone()
+    conn.close()
+    if row:
+        return row["superseded_by"]
+    return None

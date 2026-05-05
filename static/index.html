@@ -460,6 +460,21 @@
       justify-content: space-between;
     }
 
+    .section-title-btn {
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      color: #cfc7ba;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .model-choices-collapsed .model-choice:not(.active):not([data-model="custom"]) {
+      display: none;
+    }
+
     .session-item, .drawer-btn, .model-choice {
       width: 100%;
       min-height: 38px;
@@ -891,39 +906,6 @@
 </style>
 
 
-<style id="terminal-panel-style">
-  .terminal-command {
-    width: 100%;
-    min-height: 76px;
-    border-radius: 11px;
-    border: 1px solid rgba(255,255,255,0.10);
-    background: #1f1f1d;
-    color: #f0ece3;
-    padding: 10px;
-    font-size: 14px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    outline: none;
-    resize: vertical;
-  }
-
-  .terminal-output {
-    margin-top: 10px;
-    max-height: 260px;
-    overflow: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-    border-radius: 12px;
-    border: 1px solid rgba(255,255,255,0.10);
-    background: #111110;
-    color: #d7e2f0;
-    padding: 10px;
-    font-size: 12px;
-    line-height: 1.5;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-</style>
-
-
 <style id="agent-button-style">
   .agent-btn {
     background: rgba(255,255,255,0.10) !important;
@@ -935,6 +917,65 @@
   .agent-btn:active {
     transform: scale(0.94);
     background: rgba(255,255,255,0.16) !important;
+  }
+</style>
+
+<style id="version-toggle-styles">
+  .version-section {
+    margin-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding-top: 4px;
+  }
+  .version-toggle-btn {
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.04);
+    color: #bdb6aa;
+    border-radius: 10px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    cursor: pointer;
+  }
+  .version-toggle-btn:active {
+    background: rgba(255,255,255,0.09);
+  }
+  .alt-version {
+    border-left: 2px solid rgba(255,255,255,0.10);
+    margin: 8px 0;
+    padding-left: 12px;
+  }
+  .alt-version-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .alt-version-header .small-btn {
+    width: 26px;
+    height: 26px;
+    font-size: 13px;
+    margin-left: auto;
+  }
+  .alt-version-badge {
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.045);
+    color: #aaa397;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .alt-version-badge.current {
+    color: #c8e0c8;
+    border-color: rgba(160,200,160,0.25);
+    background: rgba(160,200,160,0.08);
+  }
+  .msg-actions .small-btn.copy-msg {
+    font-size: 16px;
+  }
+  .msg-actions .small-btn.copy-msg.copied {
+    color: #a0c8a0;
+    border-color: rgba(160,200,160,0.25);
   }
 </style>
 
@@ -974,7 +1015,10 @@
 
 
     <div class="section">
-      <div class="section-title">模型</div>
+      <div class="section-title">
+        <span>模型</span>
+        <button id="toggleModelListBtn" class="section-title-btn" type="button">展开</button>
+      </div>
       <div class="field">
         <label>线路</label>
         <select id="routeMode">
@@ -999,23 +1043,6 @@
       <button id="fetchModelsBtn" class="drawer-btn" type="button">拉取当前接入商模型</button>
       <div id="fetchModelsStatus" class="fetch-models-status"></div>
       <div id="fetchedModelsList" class="fetched-models-list"></div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">本地终端</div>
-
-      <div class="field">
-        <label>工作目录</label>
-        <input id="terminalCwd" value="/root" />
-      </div>
-
-      <div class="field">
-        <label>命令</label>
-        <textarea id="terminalCommand" class="terminal-command" placeholder="例如：ls -la"></textarea>
-      </div>
-
-      <button id="runTerminalBtn" class="drawer-btn">执行命令</button>
-      <pre id="terminalOutput" class="terminal-output">终端输出会显示在这里</pre>
     </div>
 
     <div class="section">
@@ -1084,12 +1111,6 @@
     const sessionSearch = $("sessionSearch");
     const profileSelect = $("profileSelect");
 
-    const terminalCwd = $("terminalCwd");
-    const terminalCommand = $("terminalCommand");
-    const runTerminalBtn = $("runTerminalBtn");
-    const terminalOutput = $("terminalOutput");
-
-
     const profileName = $("profileName");
     const apiUrl = $("apiUrl");
     const apiKey = $("apiKey");
@@ -1097,6 +1118,7 @@
     const routeMode = $("routeMode");
 
     const modelChoices = $("modelChoices");
+    const toggleModelListBtn = $("toggleModelListBtn");
     const customModelBox = $("customModelBox");
     const modelPill = $("modelPill");
     const fetchModelsBtn = $("fetchModelsBtn");
@@ -1201,6 +1223,13 @@
 
       localStorage.setItem("last_model_global", apiModel.value);
       localStorage.setItem(currentModelKey(), apiModel.value);
+    }
+
+    function setModelChoicesCollapsed(collapsed) {
+      modelChoices.classList.toggle("model-choices-collapsed", collapsed);
+      toggleModelListBtn.textContent = collapsed ? "展开" : "折叠";
+      toggleModelListBtn.title = collapsed ? "展开完整模型列表" : "折叠模型列表";
+      localStorage.setItem("model_choices_collapsed", collapsed ? "1" : "0");
     }
 
     function restoreModel() {
@@ -1456,9 +1485,37 @@
 
     let renderMessagesJob = 0;
 
+    function getMessageId(msg) {
+      return msg && msg.id !== undefined && msg.id !== null ? String(msg.id) : "";
+    }
+
+    function isThinkingMessage(msg) {
+      return (msg && (msg.content || "").trim()) === "思考中...";
+    }
+
+    function messageHasCopyableText(msg) {
+      return !!((msg && msg.content) || "").trim() && !isThinkingMessage(msg);
+    }
+
+    function makeMessageButton(className, title, text, msg, idx) {
+      const btn = document.createElement("button");
+      btn.className = "small-btn " + className;
+      btn.type = "button";
+      btn.title = title;
+      btn.textContent = text;
+      btn.dataset.msgId = getMessageId(msg);
+      btn.dataset.idx = String(idx);
+      return btn;
+    }
+
     function createMessageElement(msg, idx, lightweight = false) {
       const wrap = document.createElement("div");
       wrap.className = "msg-wrap " + msg.role;
+      if (msg.supersededBy) {
+        wrap.classList.add("superseded-msg");
+        wrap.dataset.supersededBy = msg.supersededBy;
+      }
+      wrap.dataset.msgId = getMessageId(msg);
 
       const row = document.createElement("div");
       row.className = "msg " + msg.role;
@@ -1507,15 +1564,74 @@
       }
 
       row.appendChild(bubble);
+      wrap.appendChild(row);
 
       const actions = document.createElement("div");
       actions.className = "msg-actions";
-      actions.innerHTML = `<button class="small-btn delete-msg" data-idx="${idx}">⌫</button>`;
-      if (msg.role === "assistant" && msg.id && (msg.content || "").trim() !== "思考中...") {
-        actions.innerHTML += `<button class="small-btn regen-msg" data-idx="${idx}">↻</button>`;
+
+      actions.appendChild(makeMessageButton("delete-msg", "删除这条及之后消息", "⌫", msg, idx));
+      if (messageHasCopyableText(msg)) {
+        actions.appendChild(makeMessageButton("copy-msg", "复制消息", "📋", msg, idx));
+      }
+      if (msg.role === "assistant" && getMessageId(msg) && !isThinkingMessage(msg)) {
+        actions.appendChild(makeMessageButton("regen-msg", "重新回答", "↻", msg, idx));
       }
 
-      wrap.appendChild(row);
+      if (msg._versions && msg._versions.length > 0) {
+        const versionSection = document.createElement("div");
+        versionSection.className = "version-section";
+
+        const toggleBtn = document.createElement("button");
+        toggleBtn.className = "version-toggle-btn";
+        toggleBtn.type = "button";
+        const totalVersions = msg._versions.length + 1;
+        toggleBtn.textContent = `历史版本 (${msg._versions.length}) / 共 ${totalVersions} 个`;
+        toggleBtn.dataset.openText = `收起版本 (${msg._versions.length}) / 共 ${totalVersions} 个`;
+        toggleBtn.dataset.closedText = toggleBtn.textContent;
+        toggleBtn.dataset.msgId = getMessageId(msg);
+        versionSection.appendChild(toggleBtn);
+
+        const altContainer = document.createElement("div");
+        altContainer.className = "alt-versions-container";
+        altContainer.hidden = true;
+
+        msg._versions.forEach((alt, altIdx) => {
+          const altWrap = document.createElement("div");
+          altWrap.className = "alt-version";
+          altWrap.dataset.altMsgId = alt.id || "";
+
+          const altHeader = document.createElement("div");
+          altHeader.className = "alt-version-header";
+          const badge = document.createElement("span");
+          badge.className = "alt-version-badge";
+          badge.textContent = "v" + (altIdx + 2);
+          altHeader.appendChild(badge);
+
+          if (alt.model || alt.providerName) {
+            const altMeta = document.createElement("span");
+            altMeta.style.cssText = "font-size:11px;color:#8f887d;";
+            altMeta.textContent = (alt.providerName || "") + " · " + (alt.model || "");
+            altHeader.appendChild(altMeta);
+          }
+
+          if (messageHasCopyableText(alt)) {
+            altHeader.appendChild(makeMessageButton("copy-msg", "复制历史版本", "📋", alt, -1));
+          }
+
+          altWrap.appendChild(altHeader);
+
+          const altBubble = document.createElement("div");
+          altBubble.className = "bubble";
+          altBubble.innerHTML = renderMarkdown(alt.content || "");
+          altWrap.appendChild(altBubble);
+
+          altContainer.appendChild(altWrap);
+        });
+
+        versionSection.appendChild(altContainer);
+        wrap.appendChild(versionSection);
+      }
+
       wrap.appendChild(actions);
       return wrap;
     }
@@ -1550,6 +1666,51 @@
       else requestAnimationFrame(() => run(null));
     }
 
+    function buildVersionChains(msgs) {
+      const byId = {};
+      msgs.forEach(m => {
+        const id = getMessageId(m);
+        if (id) byId[id] = m;
+        m._versions = [];
+      });
+
+      const supersededIds = new Set();
+      msgs.forEach(m => {
+        const id = getMessageId(m);
+        if (id && m.supersededBy) supersededIds.add(id);
+      });
+
+      function findLatest(msgId) {
+        let current = String(msgId);
+        while (byId[current] && byId[current].supersededBy && byId[String(byId[current].supersededBy)]) {
+          current = String(byId[current].supersededBy);
+        }
+        return current;
+      }
+
+      const versionGroups = {};
+      msgs.forEach(m => {
+        const id = getMessageId(m);
+        if (id && m.supersededBy) {
+          const latestId = findLatest(id);
+          if (!versionGroups[latestId]) versionGroups[latestId] = [];
+          if (!versionGroups[latestId].some(v => getMessageId(v) === id)) {
+            versionGroups[latestId].push(m);
+          }
+        }
+      });
+
+      Object.values(versionGroups).forEach(group => {
+        group.sort((a, b) => (a.id || 0) - (b.id || 0));
+      });
+
+      msgs.forEach(m => {
+        m._versions = versionGroups[getMessageId(m)] || [];
+      });
+
+      return msgs.filter(m => !supersededIds.has(getMessageId(m)));
+    }
+
     function renderMessages(forceScroll = false) {
       const jobId = ++renderMessagesJob;
 
@@ -1563,8 +1724,10 @@
 
       chatList.innerHTML = "";
 
+      const displayMessages = buildVersionChains(messages);
+
       const fragment = document.createDocumentFragment();
-      messages.forEach((msg, idx) => {
+      displayMessages.forEach((msg, idx) => {
         fragment.appendChild(createMessageElement(msg, idx, true));
       });
       chatList.appendChild(fragment);
@@ -2140,12 +2303,12 @@
     async function regenerateFrom(idx) {
       const msg = messages[idx];
       if (!msg || msg.role !== "assistant" || !msg.id) return;
-      if (!confirm("确定从这里重新回答吗？这条回复以及之后消息都会删除。")) return;
+      if (!confirm("确定重新回答吗？旧回复将保留并可随时查看。")) return;
 
       sending = true;
       sendBtn.disabled = true;
 
-      messages = messages.slice(0, idx);
+      // 添加占位消息用于流式输出
       messages.push({ role: "assistant", content: "思考中..." });
 
       // 用户主动重新生成时，强制回到底部，并开启本轮自动跟随
@@ -2160,6 +2323,7 @@
           body: JSON.stringify({
             conversation_id: activeConversationId,
             message_id: msg.id,
+            keep_old: true,
             api_base_url: apiUrl.value.trim(),
             api_auth_token: apiKey.value.trim(),
             api_model: apiModel.value.trim() || "claude-opus-4-7",
@@ -2190,39 +2354,6 @@
       }
     }
 
-    async function runTerminalCommand() {
-      const command = terminalCommand.value.trim();
-      const cwd = terminalCwd.value.trim() || "/root";
-
-      if (!command) {
-        terminalOutput.textContent = "请输入命令";
-        return;
-      }
-
-      terminalOutput.textContent = "执行中...";
-
-      try {
-        const data = await api("POST", "/api/terminal/run", {
-          command,
-          cwd,
-          timeout: 120
-        });
-
-        let text = "";
-
-        text += "$ " + command + "\n";
-        text += "cwd: " + (data.cwd || cwd) + "\n";
-        text += "exit code: " + data.code + "\n";
-        text += "time: " + data.elapsed + "s\n";
-        text += "\n";
-        text += data.output || "";
-
-        terminalOutput.textContent = text;
-      } catch (e) {
-        terminalOutput.textContent = "请求失败：" + e;
-      }
-    }
-
     function openDrawer() {
       drawer.classList.add("open");
       overlay.classList.add("open");
@@ -2232,15 +2363,6 @@
       drawer.classList.remove("open");
       overlay.classList.remove("open");
     }
-
-    runTerminalBtn.onclick = runTerminalCommand;
-
-    terminalCommand.addEventListener("keydown", e => {
-      if (e.key === "Enter" && e.ctrlKey) {
-        e.preventDefault();
-        runTerminalCommand();
-      }
-    });
 
     $("openDrawer").onclick = openDrawer;
     $("closeDrawer").onclick = closeDrawer;
@@ -2290,6 +2412,10 @@
       } else {
         setModel(btn.dataset.model);
       }
+    };
+
+    toggleModelListBtn.onclick = () => {
+      setModelChoicesCollapsed(!modelChoices.classList.contains("model-choices-collapsed"));
     };
 
     fetchModelsBtn.onclick = fetchModelsFromProvider;
@@ -2400,12 +2526,95 @@
       }
     };
 
+    function findMsgIdxById(msgId) {
+      for (let i = 0; i < messages.length; i++) {
+        if (getMessageId(messages[i]) === String(msgId)) return i;
+      }
+      return -1;
+    }
+
+    function findMessageByButton(btn) {
+      const msgId = btn.dataset.msgId || "";
+      if (msgId) {
+        const idx = findMsgIdxById(msgId);
+        if (idx >= 0) return { msg: messages[idx], idx };
+      }
+
+      const idx = Number(btn.dataset.idx);
+      if (Number.isInteger(idx) && idx >= 0 && idx < messages.length) {
+        return { msg: messages[idx], idx };
+      }
+
+      return { msg: null, idx: -1 };
+    }
+
+    function markCopied(btn) {
+      btn.classList.add("copied");
+      btn.textContent = "✓";
+      setTimeout(() => {
+        btn.classList.remove("copied");
+        btn.textContent = "📋";
+      }, 1500);
+    }
+
+    async function copyTextFromButton(copyBtn, text) {
+      if (!text) return;
+
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+        }
+        markCopied(copyBtn);
+      } catch (_) {}
+    }
+
     chatList.onclick = e => {
       const del = e.target.closest(".delete-msg");
-      if (del) return deleteMessageAfter(Number(del.dataset.idx));
+      if (del) {
+        const found = findMessageByButton(del);
+        if (found.idx >= 0) return deleteMessageAfter(found.idx);
+        return;
+      }
 
       const regen = e.target.closest(".regen-msg");
-      if (regen) return regenerateFrom(Number(regen.dataset.idx));
+      if (regen) {
+        const found = findMessageByButton(regen);
+        if (found.idx >= 0) return regenerateFrom(found.idx);
+        return;
+      }
+
+      const copyBtn = e.target.closest(".copy-msg");
+      if (copyBtn) {
+        const found = findMessageByButton(copyBtn);
+        const text = found.msg ? (found.msg.content || "").trim() : "";
+        copyTextFromButton(copyBtn, text);
+        return;
+      }
+
+      const versionToggle = e.target.closest(".version-toggle-btn");
+      if (versionToggle) {
+        const versionSection = versionToggle.closest(".version-section");
+        if (versionSection) {
+          const container = versionSection.querySelector(".alt-versions-container");
+          if (container) {
+            const willOpen = container.hidden;
+            container.hidden = !willOpen;
+            versionToggle.textContent = willOpen
+              ? versionToggle.dataset.openText
+              : versionToggle.dataset.closedText;
+          }
+        }
+        return;
+      }
     };
 
     async function initPage() {
@@ -2422,6 +2631,7 @@
         if (seq !== loadSeq) return;
         restoreModel();
         loadProviderModels();
+        setModelChoicesCollapsed(localStorage.getItem("model_choices_collapsed") !== "0");
         await loadConversations();
       } catch (e) {
         if (seq === loadSeq) showLoadError(e.message || String(e));

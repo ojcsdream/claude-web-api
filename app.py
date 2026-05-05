@@ -33,6 +33,7 @@ from db import (
     db_get_messages_before_id,
     db_get_regenerate_history,
     db_list_api_profiles,
+    db_mark_message_superseded,
     db_save_api_profile,
     db_set_default_api_profile,
     db_update_title_if_needed,
@@ -47,7 +48,6 @@ from schemas import (
     ConversationCreateBody,
     ConversationPinBody,
     ConversationRenameBody,
-    TerminalBody,
 )
 from services import (
     call_direct_vision_api,
@@ -57,6 +57,7 @@ from services import (
     run_claude,
     save_uploaded_file_dual_paths,
     stream_and_save,
+    stream_claude_text,
     stream_direct_and_save,
     stream_direct_api_text,
 )
@@ -77,12 +78,18 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 @app.get("/")
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/lite")
 def lite_index():
-    return FileResponse(STATIC_DIR / "lite.html")
+    return FileResponse(
+        STATIC_DIR / "lite.html",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/api/health")
@@ -536,6 +543,29 @@ def chat_stream(body: ChatBody):
 
 
 
+def _save_regenerated_answer(cid, answer, api_model, provider_name, old_message_id, final_prompt="", image_count=0):
+    token_count = estimate_round_tokens(final_prompt, answer, image_count=image_count)
+    new_id = db_add_message(
+        cid,
+        "assistant",
+        answer,
+        model=api_model,
+        provider_name=provider_name,
+        token_count=token_count,
+    )
+    if old_message_id:
+        db_mark_message_superseded(old_message_id, new_id)
+    return new_id
+
+
+def _stream_and_save_regenerated_answer(inner_gen, cid, api_model, provider_name, old_message_id, final_prompt=""):
+    full = ""
+    for chunk in inner_gen:
+        full += chunk
+        yield chunk
+    _save_regenerated_answer(cid, full, api_model, provider_name, old_message_id, final_prompt)
+
+
 @app.post("/api/chat/regenerate_from_stream")
 def regenerate_from_stream(body: ChatBody):
     cid = db_ensure_conversation(body.conversation_id)
@@ -575,8 +605,10 @@ def regenerate_from_stream(body: ChatBody):
     last_user_prompt = last_user_msg.content
     last_image_preview = last_user_msg.imagePreview
 
-    # 删除目标消息以及之后所有消息
-    db_delete_message_and_after_raw(cid, body.message_id)
+    # 如果不保留旧版本，删除目标消息以及之后所有消息
+    keep_old = body.keep_old
+    if not keep_old:
+        db_delete_message_and_after_raw(cid, body.message_id)
 
     # 如果上一条用户消息带有图片，走视觉流程重新回答
     if last_image_preview:
@@ -609,6 +641,9 @@ def regenerate_from_stream(body: ChatBody):
             _api_profile_name = body.api_profile_name or ""
             _cid = cid
 
+            _keep_old = keep_old
+            _old_msg_id = body.message_id
+
             def gen_vision():
                 try:
                     answer = call_direct_vision_api(
@@ -624,12 +659,14 @@ def regenerate_from_stream(body: ChatBody):
                         f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
                     )
                     final_answer = debug + answer
-                    token_count = estimate_round_tokens(vision_prompt, final_answer, image_count=len(local_image_paths))
-                    db_add_message(
-                        _cid, "assistant", final_answer,
-                        model=_api_model,
-                        provider_name=_api_profile_name,
-                        token_count=token_count,
+                    _save_regenerated_answer(
+                        _cid,
+                        final_answer,
+                        _api_model,
+                        _api_profile_name,
+                        _old_msg_id if _keep_old else None,
+                        vision_prompt,
+                        image_count=len(local_image_paths),
                     )
                     yield final_answer
                 except Exception as e:
@@ -639,7 +676,14 @@ def regenerate_from_stream(body: ChatBody):
                         + "\n\n这说明当前接入商或模型可能不支持图片视觉输入，"
                         + "或者它的视觉接口格式不是 OpenAI/Anthropic 标准格式。"
                     )
-                    db_add_message(_cid, "assistant", final_answer, model=_api_model, provider_name=_api_profile_name)
+                    _save_regenerated_answer(
+                        _cid,
+                        final_answer,
+                        _api_model,
+                        _api_profile_name,
+                        _old_msg_id if _keep_old else None,
+                        vision_prompt,
+                    )
                     yield final_answer
 
             return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
@@ -649,6 +693,39 @@ def regenerate_from_stream(body: ChatBody):
         prompt=last_user_prompt,
     )
 
+    _api_model = body.api_model or DEFAULT_MODEL
+    _api_profile_name = body.api_profile_name or ""
+
+    if keep_old:
+        if (body.route_mode or "direct") == "direct":
+            def gen_direct():
+                inner = stream_direct_api_text(
+                    final_prompt,
+                    body.api_base_url,
+                    body.api_auth_token,
+                    _api_model,
+                )
+                yield from _stream_and_save_regenerated_answer(
+                    inner, cid, _api_model,
+                    (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
+                    body.message_id, final_prompt,
+                )
+            return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
+        else:
+            def gen_cc():
+                inner = stream_claude_text(
+                    final_prompt,
+                    body.api_base_url,
+                    body.api_auth_token,
+                    _api_model,
+                )
+                yield from _stream_and_save_regenerated_answer(
+                    inner, cid, _api_model,
+                    _api_profile_name or "",
+                    body.message_id, final_prompt,
+                )
+            return StreamingResponse(gen_cc(), media_type="text/plain; charset=utf-8")
+
     if (body.route_mode or "direct") == "direct":
         return StreamingResponse(
             stream_direct_and_save(
@@ -656,8 +733,8 @@ def regenerate_from_stream(body: ChatBody):
                 final_prompt,
                 body.api_base_url,
                 body.api_auth_token,
-                body.api_model or DEFAULT_MODEL,
-                body.api_profile_name or "",
+                _api_model,
+                _api_profile_name,
             ),
             media_type="text/plain; charset=utf-8",
         )
@@ -668,8 +745,8 @@ def regenerate_from_stream(body: ChatBody):
             final_prompt,
             body.api_base_url,
             body.api_auth_token,
-            body.api_model or DEFAULT_MODEL,
-            body.api_profile_name or "",
+            _api_model,
+            _api_profile_name,
         ),
         media_type="text/plain; charset=utf-8",
     )
@@ -679,8 +756,22 @@ def regenerate_from_stream(body: ChatBody):
 def regenerate_stream(body: ChatBody):
     cid = db_ensure_conversation(body.conversation_id)
 
-    # 删除当前对话最后一条助手回复，让新模型重新回答
-    db_delete_last_assistant_message(cid)
+    keep_old = body.keep_old
+    old_assistant_id = None
+
+    if keep_old:
+        # 获取最后一条助手消息的ID，用于后续标记
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT id FROM messages WHERE conversation_id=? AND role='assistant' ORDER BY id DESC LIMIT 1",
+            (cid,),
+        ).fetchone()
+        conn.close()
+        if row:
+            old_assistant_id = row["id"]
+    else:
+        # 删除当前对话最后一条助手回复，让新模型重新回答
+        db_delete_last_assistant_message(cid)
 
     history = db_get_regenerate_history(cid)
 
@@ -720,6 +811,8 @@ def regenerate_stream(body: ChatBody):
         _api_model = body.api_model or DEFAULT_MODEL
         _api_profile_name = body.api_profile_name or ""
         _cid = cid
+        _keep_old = keep_old
+        _old_id = old_assistant_id
 
         def gen_vision():
             try:
@@ -736,12 +829,14 @@ def regenerate_stream(body: ChatBody):
                     f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
                 )
                 final_answer = debug + answer
-                token_count = estimate_round_tokens(vision_prompt, final_answer, image_count=len(all_history_images))
-                db_add_message(
-                    _cid, "assistant", final_answer,
-                    model=_api_model,
-                    provider_name=_api_profile_name,
-                    token_count=token_count,
+                _save_regenerated_answer(
+                    _cid,
+                    final_answer,
+                    _api_model,
+                    _api_profile_name,
+                    _old_id if _keep_old else None,
+                    vision_prompt,
+                    image_count=len(all_history_images),
                 )
                 yield final_answer
             except Exception as e:
@@ -751,7 +846,14 @@ def regenerate_stream(body: ChatBody):
                     + "\n\n这说明当前接入商或模型可能不支持图片视觉输入，"
                     + "或者它的视觉接口格式不是 OpenAI/Anthropic 标准格式。"
                 )
-                db_add_message(_cid, "assistant", final_answer, model=_api_model, provider_name=_api_profile_name)
+                _save_regenerated_answer(
+                    _cid,
+                    final_answer,
+                    _api_model,
+                    _api_profile_name,
+                    _old_id if _keep_old else None,
+                    vision_prompt,
+                )
                 yield final_answer
 
         return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
@@ -761,6 +863,39 @@ def regenerate_stream(body: ChatBody):
         prompt=last_user_prompt,
     )
 
+    _api_model = body.api_model or DEFAULT_MODEL
+    _api_profile_name = body.api_profile_name or ""
+
+    if keep_old and old_assistant_id:
+        if (body.route_mode or "direct") == "direct":
+            def gen_direct():
+                inner = stream_direct_api_text(
+                    final_prompt,
+                    body.api_base_url,
+                    body.api_auth_token,
+                    _api_model,
+                )
+                yield from _stream_and_save_regenerated_answer(
+                    inner, cid, _api_model,
+                    (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
+                    old_assistant_id, final_prompt,
+                )
+            return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
+        else:
+            def gen_cc():
+                inner = stream_claude_text(
+                    final_prompt,
+                    body.api_base_url,
+                    body.api_auth_token,
+                    _api_model,
+                )
+                yield from _stream_and_save_regenerated_answer(
+                    inner, cid, _api_model,
+                    _api_profile_name or "",
+                    old_assistant_id, final_prompt,
+                )
+            return StreamingResponse(gen_cc(), media_type="text/plain; charset=utf-8")
+
     if (body.route_mode or "direct") == "direct":
         return StreamingResponse(
             stream_direct_and_save(
@@ -768,8 +903,8 @@ def regenerate_stream(body: ChatBody):
                 final_prompt,
                 body.api_base_url,
                 body.api_auth_token,
-                body.api_model or DEFAULT_MODEL,
-                body.api_profile_name or "",
+                _api_model,
+                _api_profile_name,
             ),
             media_type="text/plain; charset=utf-8",
         )
@@ -780,8 +915,8 @@ def regenerate_stream(body: ChatBody):
             final_prompt,
             body.api_base_url,
             body.api_auth_token,
-            body.api_model or DEFAULT_MODEL,
-            body.api_profile_name or "",
+            _api_model,
+            _api_profile_name,
         ),
         media_type="text/plain; charset=utf-8",
     )
@@ -1107,88 +1242,6 @@ def export_conversation_markdown(conversation_id: str):
             f"导出失败：{e}",
             status_code=500
         )
-
-@app.post("/api/terminal/run")
-def run_terminal_command(body: TerminalBody):
-    import subprocess
-    import os
-    import time
-
-    command = (body.command or "").strip()
-    cwd = (body.cwd or "/root").strip()
-    timeout = int(body.timeout or 60)
-
-    if not command:
-        return {
-            "ok": False,
-            "output": "命令为空"
-        }
-
-    if timeout < 1:
-        timeout = 1
-    if timeout > 300:
-        timeout = 300
-
-    if not os.path.exists(cwd):
-        cwd = "/root"
-
-    start = time.time()
-
-    try:
-        proc = subprocess.run(
-            ["bash", "-lc", command],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=os.environ.copy(),
-        )
-
-        elapsed = round(time.time() - start, 3)
-
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
-
-        output = ""
-        if stdout:
-            output += stdout
-        if stderr:
-            if output:
-                output += "\\n"
-            output += stderr
-
-        return {
-            "ok": proc.returncode == 0,
-            "code": proc.returncode,
-            "cwd": cwd,
-            "elapsed": elapsed,
-            "output": output or "(无输出)"
-        }
-
-    except subprocess.TimeoutExpired as e:
-        out = ""
-        if e.stdout:
-            out += e.stdout
-        if e.stderr:
-            out += "\\n" + e.stderr
-
-        return {
-            "ok": False,
-            "code": -1,
-            "cwd": cwd,
-            "elapsed": timeout,
-            "output": "命令超时。\\n" + out
-        }
-
-    except Exception as e:
-        return {
-            "ok": False,
-            "code": -2,
-            "cwd": cwd,
-            "elapsed": 0,
-            "output": "执行失败：" + str(e)
-        }
-
 
 def execute_agent_shell(command: str, cwd: str = "/root", timeout: int = 120):
     import subprocess

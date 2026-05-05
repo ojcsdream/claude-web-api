@@ -13,7 +13,7 @@
 - Markdown 导出
 - 会话搜索、固定、重命名、删除
 - API 接入商管理
-- 本地终端和 Agent 执行能力
+- Agent 执行能力
 - 管理后台请求日志和系统状态页
 
 默认项目路径：
@@ -223,7 +223,6 @@ chat.db
 
 高风险能力包括：
 
-- `/api/terminal/run` 可以执行本地 shell 命令
 - `/api/agent/run` 可以让模型规划并执行命令
 - Claude Code 线路可访问本地文件系统
 - API Key 保存在本地 SQLite

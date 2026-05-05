@@ -56,10 +56,81 @@
       padding: 10px 0;
       border-bottom: 1px solid rgba(255,255,255,.06);
     }
+    .msg-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .msg-content {
+      flex: 1;
+      min-width: 0;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }
     .role {
       color: #aaa197;
       font-size: 12px;
       margin-bottom: 4px;
+    }
+    .msg-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+      opacity: 0.6;
+      padding-top: 2px;
+    }
+    .small-btn {
+      min-width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.06);
+      color: #bdb6aa;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 0 6px;
+    }
+    .small-btn:active {
+      background: rgba(255,255,255,0.14);
+    }
+    .small-btn.copied {
+      color: #a0c8a0;
+      border-color: rgba(160,200,160,0.25);
+    }
+    .version-toggle-btn {
+      font-size: 12px;
+      color: #bdb6aa;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 6px;
+      padding: 3px 8px;
+      cursor: pointer;
+      margin-top: 6px;
+    }
+    .alt-version {
+      border-left: 2px solid rgba(255,255,255,0.12);
+      margin: 8px 0;
+      padding-left: 10px;
+    }
+    .alt-version-header {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .alt-version-header .small-btn {
+      margin-left: auto;
+      min-width: 26px;
+      height: 26px;
+    }
+    .alt-version-badge {
+      color: #aaa397;
+      font-size: 11px;
+      padding: 2px 8px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 999px;
+      margin-right: 8px;
     }
     .composer {
       position: fixed;
@@ -114,12 +185,19 @@
     const promptEl = $("prompt");
     const sendBtn = $("sendBtn");
     let profiles = [];
+    let messages = [];
     let conversationId = localStorage.getItem("lite_conversation") || "";
     let sending = false;
     let streamController = null;
 
     function status(text) {
       statusEl.textContent = text || "";
+    }
+
+    function escapeHtml(text) {
+      const d = document.createElement("div");
+      d.textContent = text || "";
+      return d.innerHTML;
     }
 
     async function api(method, url, body) {
@@ -141,23 +219,246 @@
       }
     }
 
-    function render(messages) {
+    function getMessageId(msg) {
+      return msg && msg.id !== undefined && msg.id !== null ? String(msg.id) : "";
+    }
+
+    function isThinkingMessage(msg) {
+      return (msg && (msg.content || "").trim()) === "思考中...";
+    }
+
+    function messageHasCopyableText(msg) {
+      return !!((msg && msg.content) || "").trim() && !isThinkingMessage(msg);
+    }
+
+    function makeSmallButton(className, title, text, msg) {
+      const btn = document.createElement("button");
+      btn.className = "small-btn " + className;
+      btn.type = "button";
+      btn.title = title;
+      btn.textContent = text;
+      btn.dataset.msgId = getMessageId(msg);
+      return btn;
+    }
+
+    function copyMessageText(btn, msg) {
+      const text = (msg && msg.content || "").trim();
+      if (!text) return;
+
+      const done = () => {
+        btn.classList.add("copied");
+        btn.textContent = "✓";
+        setTimeout(() => {
+          btn.classList.remove("copied");
+          btn.textContent = "抄";
+        }, 1500);
+      };
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(() => {});
+        return;
+      }
+
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      done();
+    }
+
+    function buildVersionChains(msgs) {
+      const byId = {};
+      msgs.forEach(m => {
+        const id = getMessageId(m);
+        if (id) byId[id] = m;
+        m._versions = [];
+      });
+
+      const supersededIds = new Set();
+      msgs.forEach(m => {
+        const id = getMessageId(m);
+        if (id && m.supersededBy) supersededIds.add(id);
+      });
+
+      function findLatest(msgId) {
+        let current = String(msgId);
+        while (byId[current] && byId[current].supersededBy && byId[String(byId[current].supersededBy)]) {
+          current = String(byId[current].supersededBy);
+        }
+        return current;
+      }
+
+      const versionGroups = {};
+      msgs.forEach(m => {
+        const id = getMessageId(m);
+        if (id && m.supersededBy) {
+          const latestId = findLatest(id);
+          if (!versionGroups[latestId]) versionGroups[latestId] = [];
+          if (!versionGroups[latestId].some(v => getMessageId(v) === id)) {
+            versionGroups[latestId].push(m);
+          }
+        }
+      });
+
+      Object.values(versionGroups).forEach(group => {
+        group.sort((a, b) => (a.id || 0) - (b.id || 0));
+      });
+
+      msgs.forEach(m => {
+        m._versions = versionGroups[getMessageId(m)] || [];
+      });
+
+      return msgs.filter(m => !supersededIds.has(getMessageId(m)));
+    }
+
+    function render(msgs) {
+      messages = msgs;
+      const displayMessages = buildVersionChains(msgs);
+
       chat.innerHTML = "";
-      if (!messages.length) {
+      if (!displayMessages.length) {
         chat.innerHTML = '<div class="status">当前对话为空</div>';
         return;
       }
-      for (const msg of messages) {
+      for (const msg of displayMessages) {
         const box = document.createElement("div");
         box.className = "msg";
-        const role = msg.role === "user" ? "用户" : "助手";
-        box.innerHTML = '<div class="role">' + role + '</div>';
+
+        const role = document.createElement("div");
+        role.className = "role";
+        role.textContent = msg.role === "user" ? "用户" : "助手";
+        box.appendChild(role);
+
+        const row = document.createElement("div");
+        row.className = "msg-row";
+
         const body = document.createElement("div");
+        body.className = "msg-content";
         body.textContent = msg.content || "";
-        box.appendChild(body);
+        row.appendChild(body);
+
+        const actions = document.createElement("div");
+        actions.className = "msg-actions";
+
+        if (messageHasCopyableText(msg)) {
+          const copyBtn = makeSmallButton("copy-msg", "复制消息", "抄", msg);
+          copyBtn.addEventListener("click", () => copyMessageText(copyBtn, msg));
+          actions.appendChild(copyBtn);
+        }
+
+        if (msg.role === "assistant" && getMessageId(msg) && !isThinkingMessage(msg)) {
+          const regenBtn = makeSmallButton("regen-msg", "重新回答", "↻", msg);
+          regenBtn.addEventListener("click", () => regenerateMsg(msg));
+          actions.appendChild(regenBtn);
+        }
+
+        row.appendChild(actions);
+        box.appendChild(row);
+
+        // Version toggle
+        if (msg._versions && msg._versions.length > 0) {
+          const versionSection = document.createElement("div");
+          versionSection.style.marginTop = "6px";
+
+          const toggleBtn = document.createElement("button");
+          toggleBtn.className = "version-toggle-btn";
+          toggleBtn.textContent = "历史版本 (" + msg._versions.length + ")";
+          toggleBtn.dataset.closedText = toggleBtn.textContent;
+          toggleBtn.dataset.openText = "收起版本";
+          versionSection.appendChild(toggleBtn);
+
+          const altContainer = document.createElement("div");
+          altContainer.hidden = true;
+          altContainer.style.marginTop = "6px";
+
+          msg._versions.forEach((alt) => {
+            const altWrap = document.createElement("div");
+            altWrap.className = "alt-version";
+            const altHeader = document.createElement("div");
+            altHeader.className = "alt-version-header";
+            const badge = document.createElement("span");
+            badge.className = "alt-version-badge";
+            badge.textContent = "旧版本";
+            altHeader.appendChild(badge);
+            if (messageHasCopyableText(alt)) {
+              const altCopyBtn = makeSmallButton("copy-msg", "复制历史版本", "抄", alt);
+              altCopyBtn.addEventListener("click", () => copyMessageText(altCopyBtn, alt));
+              altHeader.appendChild(altCopyBtn);
+            }
+            altWrap.appendChild(altHeader);
+            const altBody = document.createElement("div");
+            altBody.style.whiteSpace = "pre-wrap";
+            altBody.textContent = alt.content || "";
+            altWrap.appendChild(altBody);
+            altContainer.appendChild(altWrap);
+          });
+
+          toggleBtn.addEventListener("click", () => {
+            const willOpen = altContainer.hidden;
+            altContainer.hidden = !willOpen;
+            toggleBtn.textContent = willOpen ? toggleBtn.dataset.openText : toggleBtn.dataset.closedText;
+          });
+
+          versionSection.appendChild(altContainer);
+          box.appendChild(versionSection);
+        }
+
         chat.appendChild(box);
       }
       window.scrollTo(0, document.body.scrollHeight);
+    }
+
+    async function regenerateMsg(msg) {
+      if (sending) return;
+      if (!confirm("确定重新回答吗？旧回复将保留并可随时查看。")) return;
+
+      const p = profiles.find(x => x.id === profileEl.value) || {};
+
+      sending = true;
+      sendBtn.disabled = true;
+      status("重新生成中...");
+
+      try {
+        const resp = await fetch("/api/chat/regenerate_from_stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: conversationId,
+            message_id: msg.id,
+            keep_old: true,
+            api_base_url: p.base_url || "",
+            api_auth_token: p.auth_token || "",
+            api_model: p.model || "claude-opus-4-7",
+            api_profile_name: p.name || "",
+            route_mode: routeEl.value
+          })
+        });
+
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => "");
+          throw new Error("HTTP " + resp.status + ": " + (errText || resp.statusText));
+        }
+
+        // Read the stream silently
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+        }
+
+        await loadMessages();
+        status("重新生成完成");
+      } catch (e) {
+        status("重新生成失败：" + e.message);
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+      }
     }
 
     async function loadProfiles() {
@@ -239,6 +540,7 @@
         userBox.className = "msg";
         userBox.innerHTML = '<div class="role">用户</div>';
         const userText = document.createElement("div");
+        userText.style.whiteSpace = "pre-wrap";
         userText.textContent = text;
         userBox.appendChild(userText);
         chat.appendChild(userBox);
@@ -247,6 +549,7 @@
         assistantBox.className = "msg";
         assistantBox.innerHTML = '<div class="role">助手</div>';
         const live = document.createElement("div");
+        live.style.whiteSpace = "pre-wrap";
         assistantBox.appendChild(live);
         chat.appendChild(assistantBox);
         while (true) {

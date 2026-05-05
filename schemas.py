@@ -15,6 +15,7 @@ class MessageItem(BaseModel):
     model: Optional[str] = None
     providerName: Optional[str] = None
     tokenCount: Optional[int] = None
+    supersededBy: Optional[int] = None
 
 
 class ChatBody(BaseModel):
@@ -27,6 +28,7 @@ class ChatBody(BaseModel):
     api_model: str = DEFAULT_MODEL
     api_profile_name: str = ""
     route_mode: str = "direct"  # cc=Claude Code本地代理, direct=第三方API直连流式
+    keep_old: bool = False  # 重新生成时保留旧回复，作为版本历史
 
 
 class ConversationCreateBody(BaseModel):
@@ -35,12 +37,6 @@ class ConversationCreateBody(BaseModel):
 
 class ConversationRenameBody(BaseModel):
     title: str
-
-
-class TerminalBody(BaseModel):
-    command: str
-    cwd: str = "/root"
-    timeout: int = 60
 
 
 class AgentBody(BaseModel):
