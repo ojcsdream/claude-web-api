@@ -1081,6 +1081,9 @@ def export_conversation_markdown(conversation_id: str):
             lines.append("")
 
         md = "\n".join(lines)
+        # Add a UTF-8 BOM so downloaded Markdown opens correctly in Windows
+        # editors that still guess ANSI/GBK for plain text files.
+        md_bytes = ("\ufeff" + md).encode("utf-8")
 
         # HTTP Header 只能安全放 latin-1/ASCII，中文文件名必须用 filename*
         ascii_name = "".join(
@@ -1091,10 +1094,11 @@ def export_conversation_markdown(conversation_id: str):
         utf8_name = quote(f"{title}.md")
 
         return Response(
-            content=md,
+            content=md_bytes,
             media_type="text/markdown; charset=utf-8",
             headers={
-                "Content-Disposition": f"attachment; filename=\"{ascii_name}.md\"; filename*=UTF-8''{utf8_name}"
+                "Content-Disposition": f"attachment; filename=\"{ascii_name}.md\"; filename*=UTF-8''{utf8_name}",
+                "X-Content-Type-Options": "nosniff",
             }
         )
 
