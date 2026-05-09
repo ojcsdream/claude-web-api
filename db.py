@@ -57,6 +57,7 @@ def init_db():
         ("messages", "token_count", "INTEGER"),
         ("messages", "file_context", "TEXT"),
         ("messages", "superseded_by", "INTEGER"),
+        ("messages", "sources", "TEXT"),
         ("conversations", "is_pinned", "INTEGER NOT NULL DEFAULT 0"),
     ]:
         add_column_if_missing(cur, table, column, definition)
@@ -83,14 +84,6 @@ def init_db():
 if __name__ == "__main__":
     init_db()
     print(f"DB created: {DB_PATH}")
-
-
-def ensure_api_profiles_route_mode_column(conn):
-    try:
-        add_column_if_missing(conn, "api_profiles", "route_mode", "TEXT DEFAULT 'direct'")
-        conn.commit()
-    except Exception:
-        pass
 
 
 def now_ms() -> int:
@@ -137,15 +130,16 @@ def db_add_message(
     provider_name: Optional[str] = None,
     token_count: Optional[int] = None,
     superseded_by: Optional[int] = None,
+    sources: Optional[str] = None,
 ):
     ts = now_ms()
     conn = get_conn()
     conn.execute(
         """
-        INSERT INTO messages (conversation_id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, superseded_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (conversation_id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, superseded_by, sources, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (conversation_id, role, content or "", file_name, image_preview, file_context, model, provider_name, token_count, superseded_by, ts),
+        (conversation_id, role, content or "", file_name, image_preview, file_context, model, provider_name, token_count, superseded_by, sources, ts),
     )
     conn.execute(
         "UPDATE conversations SET updated_at=? WHERE id=?",
@@ -281,6 +275,7 @@ def message_item_from_row(row) -> MessageItem:
         providerName=row["provider_name"] if "provider_name" in keys else None,
         tokenCount=row["token_count"] if "token_count" in keys else None,
         supersededBy=row["superseded_by"] if "superseded_by" in keys else None,
+        sources=row["sources"] if "sources" in keys else None,
     )
 
 
@@ -296,7 +291,7 @@ def db_get_regenerate_history(conversation_id: str) -> list[MessageItem]:
 def db_get_messages(conversation_id: str) -> list[MessageItem]:
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, superseded_by FROM messages WHERE conversation_id=? ORDER BY id ASC",
+        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, superseded_by, sources FROM messages WHERE conversation_id=? ORDER BY id ASC",
         (conversation_id,),
     ).fetchall()
     conn.close()
@@ -331,7 +326,7 @@ def db_get_message_by_id(conversation_id: str, message_id: int):
 def db_get_messages_before_id(conversation_id: str, message_id: int) -> list[MessageItem]:
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, superseded_by FROM messages WHERE conversation_id=? AND id<? ORDER BY id ASC",
+        "SELECT id, role, content, file_name, image_preview, file_context, model, provider_name, token_count, superseded_by, sources FROM messages WHERE conversation_id=? AND id<? ORDER BY id ASC",
         (conversation_id, message_id),
     ).fetchall()
     conn.close()

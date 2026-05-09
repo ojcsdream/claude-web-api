@@ -90,13 +90,61 @@
       font-size: 13px;
       cursor: pointer;
       padding: 0 6px;
+      transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
     }
     .small-btn:active {
+      transform: scale(0.94);
       background: rgba(255,255,255,0.14);
     }
     .small-btn.copied {
       color: #a0c8a0;
       border-color: rgba(160,200,160,0.25);
+    }
+    .small-btn.copy-msg {
+      position: relative;
+      min-width: 32px;
+      width: 32px;
+      border-radius: 9px;
+      border-color: rgba(210,196,170,0.14);
+      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.025));
+      color: #c8beb0;
+      font-size: 0;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
+    }
+    .small-btn.copy-msg::before {
+      content: "";
+      width: 11px;
+      height: 13px;
+      border: 1.6px solid currentColor;
+      border-radius: 3px;
+      transform: translate(2px, -1px);
+    }
+    .small-btn.copy-msg::after {
+      content: "";
+      position: absolute;
+      width: 11px;
+      height: 13px;
+      border: 1.6px solid currentColor;
+      border-radius: 3px;
+      transform: translate(-2px, 2px);
+      opacity: .48;
+    }
+    .small-btn.copy-msg.copied {
+      color: #b8e6bd;
+      border-color: rgba(164,214,169,0.34);
+      background: rgba(92,151,98,0.13);
+    }
+    .small-btn.copy-msg.copied::before {
+      content: "✓";
+      width: auto;
+      height: auto;
+      border: 0;
+      font-size: 15px;
+      font-weight: 800;
+      transform: none;
+    }
+    .small-btn.copy-msg.copied::after {
+      content: none;
     }
     .version-toggle-btn {
       font-size: 12px;
@@ -159,10 +207,6 @@
   <div class="top">
     <strong>Lite</strong>
     <select id="profile"></select>
-    <select id="route">
-      <option value="direct">直连</option>
-      <option value="cc">CC</option>
-    </select>
     <button id="newBtn">新对话</button>
   </div>
   <main class="wrap">
@@ -181,7 +225,6 @@
     const chat = $("chat");
     const statusEl = $("status");
     const profileEl = $("profile");
-    const routeEl = $("route");
     const promptEl = $("prompt");
     const sendBtn = $("sendBtn");
     let profiles = [];
@@ -247,10 +290,8 @@
 
       const done = () => {
         btn.classList.add("copied");
-        btn.textContent = "✓";
         setTimeout(() => {
           btn.classList.remove("copied");
-          btn.textContent = "抄";
         }, 1500);
       };
 
@@ -433,8 +474,7 @@
             api_base_url: p.base_url || "",
             api_auth_token: p.auth_token || "",
             api_model: p.model || "claude-opus-4-7",
-            api_profile_name: p.name || "",
-            route_mode: routeEl.value
+            api_profile_name: p.name || ""
           })
         });
 
@@ -528,8 +568,7 @@
             api_base_url: p.base_url || "",
             api_auth_token: p.auth_token || "",
             api_model: p.model || "claude-opus-4-7",
-            api_profile_name: p.name || "",
-            route_mode: routeEl.value
+            api_profile_name: p.name || ""
           })
         });
         if (!res.ok) throw new Error("HTTP " + res.status + ": " + await res.text());

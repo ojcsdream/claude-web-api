@@ -1,34 +1,44 @@
-
+# Python cache
 __pycache__/
 *.pyc
+
+# Virtual environment
 .venv/
+
+# Runtime logs and uploads
 logs/
 *.log
-chat.db
 uploads/
-*.bak
-*.bak_*
-app.py.bak*
-static/index.html.bak*
-.env
-.cc-proxy.env
+picture/
+
+# Runtime databases and local state
+chat.db
+*.sqlite
+*.sqlite3
+filebrowser.db
+admin-token.txt
+
+# Local tunnel outputs
 ngrok-url.txt
+cloudflare-url.txt
+
+# Secrets and local environment
+.env
+.env.*
+.cc-proxy.env
 *.key
+*.pem
+*.secret
+
+# Local Claude/project settings
 .claude/
 
-__pycache__/
-*.pyc
-.venv/
-logs/
-*.log
-chat.db
-uploads/
+# Backups and broken snapshots
 *.bak
 *.bak_*
+*.broken*
+*.backup*
+*.bad*
+*.before*
 app.py.bak*
-static/index.html.bak*
-.env
-.cc-proxy.env
-ngrok-url.txt
-*.key
-.claude/
+static/*.bak*

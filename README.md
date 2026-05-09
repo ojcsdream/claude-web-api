@@ -2,10 +2,9 @@
 
 这是一个运行在安卓手机 Termux + proot-distro Ubuntu 环境中的本地 AI Web 应用。
 
-项目提供一个 Claude Web 风格的移动端聊天界面，并同时支持：
+项目提供一个 Claude Web 风格的移动端聊天界面，并支持：
 
-- Claude Code CLI 本地代理线路
-- 第三方 OpenAI/Claude 兼容 API 直连流式线路
+- 第三方 OpenAI/Claude 兼容 API 直连流式模式
 - SQLite 本地会话持久化
 - 文本文件、代码文件、图片上传
 - 历史文件上下文保留
@@ -13,7 +12,6 @@
 - Markdown 导出
 - 会话搜索、固定、重命名、删除
 - API 接入商管理
-- Agent 执行能力
 - 管理后台请求日志和系统状态页
 
 默认项目路径：
@@ -22,7 +20,7 @@
 /home/ai/claude-web
 ```
 
-推荐在普通用户 `ai` 下运行，不要使用 root 运行 Claude Code。
+推荐在普通用户 `ai` 下运行。
 
 ## 页面入口
 
@@ -44,6 +42,18 @@ http://127.0.0.1:8000/lite
 http://127.0.0.1:8000/admin
 ```
 
+## 本地辅助工具
+
+### 图片链接二进制下载识别器
+
+当用户提供图片直链或 File Browser 分享链接时，先使用：
+
+```bash
+scripts/fetch_image_binary.py "<url>"
+```
+
+该工具会解析 `http://127.0.0.1:8080/share/<hash>` 这类分享页，下载真实图片二进制到 `/tmp/codex-images/`，并输出本地路径、MIME、宽高和文件大小。拿到输出里的 `path` 后，再用图片查看工具识别图片内容。
+
 ## 最新目录结构
 
 ```text
@@ -53,7 +63,9 @@ claude-web/
 ├── schemas.py          # Pydantic 请求/响应数据结构
 ├── db.py               # SQLite 初始化和数据访问层
 ├── chat_utils.py       # token 估算、上下文裁剪、prompt 构造
-├── services.py         # Claude CLI、直连 API、视觉 API、上传/网页读取服务
+├── services.py         # 直连 API、视觉 API、上传/网页读取服务
+├── requirements.txt    # Python 运行依赖
+├── install.sh          # Linux 一键安装脚本
 ├── start-local.sh      # 本地后台启动脚本
 ├── static/
 │   ├── index.html      # 主聊天界面
@@ -63,6 +75,36 @@ claude-web/
 ├── logs/               # 日志目录，已被 .gitignore 忽略
 ├── chat.db             # SQLite 数据库，已被 .gitignore 忽略
 └── README.md
+```
+
+## Linux 一键部署
+
+运行环境：
+
+- Linux
+- Python 3.10+
+- `python3-venv`
+- `pip`
+- `curl`
+
+从 GitHub 克隆后执行：
+
+```bash
+git clone <你的仓库地址> claude-web
+cd claude-web
+chmod +x install.sh start-local.sh
+./install.sh
+./start-local.sh
+```
+
+安装脚本会创建 `.venv`、安装 Python 依赖、创建 `uploads/` 和 `logs/`，并进行 Python 语法检查。它不会写入 API Key，也不会复制历史数据库。
+
+首次启动时会自动创建全新的 `chat.db`。请在 Web 管理界面配置 API 接入商；不要把 API Key 写入公开仓库。
+
+默认访问地址：
+
+```text
+http://127.0.0.1:8000/
 ```
 
 ## 启动方式
@@ -96,11 +138,36 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8000 --workers 2 --no-access-l
 curl http://127.0.0.1:8000/api/health
 ```
 
-## 两条聊天线路
+## 公网访问
 
-### 直连流式线路
+默认服务只监听 `127.0.0.1:8000`。如果需要公网访问，建议使用 Nginx、Caddy、SSH tunnel、Cloudflare Tunnel 或其它受控反向代理，并先处理认证、CORS 和 API Key 安全。
 
-前端选择 `direct` 时使用。
+`start-ngrok.sh` 仅建议用于临时调试，不建议默认公网暴露，也不要提交 `ngrok-url.txt` 或任何隧道 token。
+
+公网 ngrok 隧道：
+
+```bash
+cd /home/ai/claude-web
+./start-ngrok.sh
+```
+
+该脚本会：
+
+- 自动确保本地 `127.0.0.1:8000` 服务已启动
+- 清理旧的 `ngrok http` 进程
+- 启动新的 HTTPS ngrok 隧道
+- 把公网地址写入 `ngrok-url.txt`
+- 尝试做一次公网 `/api/health` 检查
+
+日志文件：
+
+```text
+logs/ngrok.log
+```
+
+## 直连聊天模式
+
+项目当前只保留第三方 API 直连流式模式。
 
 特点：
 
@@ -109,25 +176,30 @@ curl http://127.0.0.1:8000/api/health
 - 支持文本文件和代码文件分析
 - 支持图片视觉输入
 - 支持自动读取用户消息中的网页 URL
-- 不具备本地文件系统控制能力
+- 不内置本地代理，也不提供本地终端执行能力
 
-### Claude Code 本地代理线路
+## 网页解析
 
-前端选择 `cc` 时使用。
+后端支持 API 优先的网页解析，避免直接抓网页时频繁遇到 403。
 
-特点：
+推荐配置：
 
-- 通过本机 `claude` CLI 调用 Claude Code
-- 可以读取和修改本地项目文件
-- 可以执行本地命令
-- 适合项目维护、代码修改、本机诊断
-
-注意：
-
-```text
-不要用 root 跑 Claude Code
-不要在 root 下使用 --dangerously-skip-permissions
+```bash
+export TAVILY_API_KEY="你的 Tavily API key"
 ```
+
+可选配置：
+
+```bash
+export FIRECRAWL_API_KEY="你的 Firecrawl API key"
+export JINA_API_KEY="你的 Jina Reader API key"
+```
+
+优先级：
+
+- 网页解析：优先 Tavily Extract API，其次 Firecrawl Scrape API，其次 Jina Reader，最后才直接抓网页。
+
+如果没有配置这些 key，功能仍可运行，但稳定性和抗 403 能力会明显下降。
 
 ## 主要功能
 
@@ -221,10 +293,8 @@ chat.db
 
 本项目是本地 AI 工作台，不是默认安全的公网服务。
 
-高风险能力包括：
+高风险事项包括：
 
-- `/api/agent/run` 可以让模型规划并执行命令
-- Claude Code 线路可访问本地文件系统
 - API Key 保存在本地 SQLite
 - 管理后台密码仍是固定值
 
@@ -232,7 +302,6 @@ chat.db
 
 - 强认证
 - 管理后台密码改环境变量
-- 禁用或保护终端/Agent/debug 接口
 - 限制 CORS
 - 定期备份并保护 `chat.db`
 
@@ -277,17 +346,26 @@ Git 提交前确认：
 
 ```bash
 git status --short
+git ls-files | grep -E '(^chat\.db$|admin-token\.txt|filebrowser\.db|ngrok-url\.txt|^uploads/|^logs/|^\.venv/|^\.env|\.key$|\.pem$|\.secret$|broken|backup|\.bak$|\.bad|\.before|^picture/)' || true
+grep -RInE 'api[_-]?key|auth[_-]?token|secret|password|Bearer |sk-[A-Za-z0-9]' . --exclude-dir=.git --exclude-dir=.venv --exclude-dir=.claude --exclude=chat.db || true
 ```
+
+第二条命令如果有输出，需要确认这些文件是否不应发布；第三条命令可能包含字段名或文档说明等误报，需要人工复核是否存在真实密钥。
 
 不要提交：
 
-- `chat.db`
-- `uploads/`
-- `logs/`
-- `.venv/`
+- `chat.db`：包含 API 接入商 token、历史对话和管理日志
+- `uploads/`：用户上传文件和图片
+- `logs/`：运行日志
+- `.venv/`：本地虚拟环境
+- `.env` / `.env.*`：本地环境变量
+- `admin-token.txt`
+- `filebrowser.db`
+- `ngrok-url.txt`
 - `.claude/`
-- 备份文件
-- 私钥或 API Key
+- `picture/`
+- 备份文件、坏版本快照
+- 私钥、token 或 API Key
 
 ## GitHub
 
@@ -300,7 +378,7 @@ git@github.com:ojcsdream/api-.git
 常规提交：
 
 ```bash
-git add app.py db.py config.py schemas.py chat_utils.py services.py static/index.html static/lite.html static/admin.html start-local.sh README.md
+git add app.py db.py config.py schemas.py chat_utils.py services.py static/index.html static/lite.html static/admin.html requirements.txt install.sh start-local.sh README.md .gitignore
 git commit -m "Update project"
 git push origin main
 ```

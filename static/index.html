@@ -10,11 +10,17 @@
       tex: {
         inlineMath: [["$", "$"], ["\\(", "\\)"]],
         displayMath: [["$$", "$$"], ["\\[", "\\]"]],
-        processEscapes: true
+        processEscapes: true,
+        processEnvironments: true,
+        packages: {"[+]": ["ams", "noerrors", "noundefined"]}
       },
       chtml: {
         scale: 1.02,
-        matchFontHeight: false
+        matchFontHeight: false,
+        mtextInheritFont: true
+      },
+      options: {
+        skipHtmlTags: ["script", "noscript", "style", "textarea", "pre", "code"]
       },
       startup: { typeset: false }
     };
@@ -97,6 +103,7 @@
       display: flex;
       flex-direction: column;
       gap: 18px;
+      contain: layout style;
     }
 
     .empty {
@@ -122,6 +129,7 @@
       display: flex;
       flex-direction: column;
       gap: 4px;
+      contain: layout style paint;
     }
 
     .msg-wrap.user {
@@ -149,6 +157,7 @@
       max-width: 94%;
       word-break: break-word;
       overflow-x: auto;
+      contain: layout style;
     }
 
     .user .bubble {
@@ -167,6 +176,23 @@
       font-size: 17px;
       line-height: 1.68;
       max-width: 100%;
+      will-change: contents;
+    }
+
+    .stream-caret {
+      display: inline-block;
+      width: 0.16em;
+      height: 1.02em;
+      margin-left: 0.1em;
+      border-radius: 999px;
+      background: rgba(230, 220, 202, 0.55);
+      vertical-align: -0.12em;
+      animation: streamCaretBlink 1.25s ease-in-out infinite;
+    }
+
+    @keyframes streamCaretBlink {
+      0%, 42% { opacity: 0.5; }
+      50%, 100% { opacity: 0.14; }
     }
 
     @media (max-width: 760px) {
@@ -187,7 +213,215 @@
 
 
     .assistant .bubble p {
-      margin: 0.28em 0;
+      margin: 0.54em 0;
+    }
+
+    .assistant .bubble h1,
+    .assistant .bubble h2,
+    .assistant .bubble h3,
+    .assistant .bubble h4 {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif;
+      color: #f7efe2;
+      line-height: 1.28;
+      margin: 1.05em 0 0.42em;
+      font-weight: 780;
+      letter-spacing: 0;
+    }
+
+    .assistant .bubble h1 { font-size: 1.42em; }
+    .assistant .bubble h2 { font-size: 1.26em; }
+    .assistant .bubble h3 { font-size: 1.12em; }
+    .assistant .bubble h4 { font-size: 1.02em; color: #e7ded0; }
+
+    .assistant .bubble h1:first-child,
+    .assistant .bubble h2:first-child,
+    .assistant .bubble h3:first-child,
+    .assistant .bubble p:first-child {
+      margin-top: 0;
+    }
+
+    .assistant .bubble ul,
+    .assistant .bubble ol {
+      margin: 0.48em 0 0.74em;
+      padding-left: 1.35em;
+    }
+
+    .assistant .bubble li {
+      margin: 0.24em 0;
+      padding-left: 0.12em;
+    }
+
+    .assistant .bubble li::marker {
+      color: #cdbb9d;
+    }
+
+    .assistant .bubble blockquote {
+      margin: 0.9em 0;
+      padding: 0.2em 0 0.2em 0.9em;
+      border-left: 3px solid rgba(232, 220, 200, 0.28);
+      color: #cfc6b9;
+      background: rgba(255,255,255,0.025);
+      border-radius: 0 10px 10px 0;
+    }
+
+    .assistant .bubble table {
+      width: max-content;
+      min-width: min(100%, 520px);
+      max-width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin: 1em 0;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif;
+      font-size: 0.92em;
+    }
+
+    .assistant .bubble th,
+    .assistant .bubble td {
+      padding: 9px 11px;
+      border-right: 1px solid rgba(255,255,255,0.08);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      vertical-align: top;
+    }
+
+    .assistant .bubble th {
+      background: rgba(255,255,255,0.07);
+      color: #f2eadc;
+      font-weight: 760;
+      text-align: left;
+    }
+
+    .assistant .bubble tr:last-child td { border-bottom: 0; }
+    .assistant .bubble th:last-child,
+    .assistant .bubble td:last-child { border-right: 0; }
+
+    .assistant .bubble :not(pre) > code {
+      background: rgba(255,255,255,0.075);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #f4dfb8;
+      border-radius: 6px;
+      padding: 0.08em 0.34em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.88em;
+      white-space: break-spaces;
+    }
+
+    .assistant .bubble hr {
+      border: 0;
+      border-top: 1px solid rgba(255,255,255,0.10);
+      margin: 1.2em 0;
+    }
+
+    .assistant .bubble a {
+      color: #9ed0ff;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(158,208,255,0.35);
+    }
+
+    .assistant .bubble .source-citation {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.45em;
+      height: 1.45em;
+      padding: 0 0.34em;
+      margin: 0 0.06em;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.055);
+      color: #f2ebde;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.74em;
+      font-weight: 720;
+      line-height: 1;
+      vertical-align: 0.08em;
+      cursor: pointer;
+      transition: background .16s ease, border-color .16s ease, transform .16s ease;
+    }
+
+    .assistant .bubble .source-citation:hover {
+      background: rgba(255,255,255,0.09);
+      border-color: rgba(255,255,255,0.18);
+    }
+
+    .assistant .bubble .source-citation:active {
+      transform: scale(0.96);
+    }
+
+    .sources-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .source-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      max-width: min(100%, 320px);
+      padding: 8px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      color: #e9e1d3;
+      text-decoration: none;
+      transition: background .16s ease, border-color .16s ease, transform .16s ease;
+    }
+
+    .source-chip:hover {
+      background: rgba(255,255,255,0.07);
+      border-color: rgba(255,255,255,0.16);
+    }
+
+    .source-chip:active {
+      transform: scale(0.985);
+    }
+
+    .source-chip-num {
+      flex: 0 0 auto;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      color: #fff5e5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px;
+      font-weight: 760;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .source-chip-body {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .source-chip-title {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px;
+      font-weight: 650;
+      color: #f1eadf;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .source-chip-url {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 11px;
+      color: #a99f92;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .assistant .bubble pre {
@@ -215,7 +449,7 @@
     .msg-actions {
       display: flex;
       gap: 6px;
-      opacity: 0.55;
+      opacity: 0.62;
       padding: 2px 0;
     }
 
@@ -240,30 +474,242 @@
       justify-content: center;
       font-size: 15px;
       padding: 0;
+      cursor: pointer;
+      transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease, opacity .16s ease;
+    }
+
+    .small-btn:active {
+      transform: scale(0.94);
     }
 
     .thinking {
       display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 0;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 4px 0 2px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif;
+      color: #9f988d;
     }
 
-    .thinking span {
+    .thinking-orbit {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: auto;
+      height: auto;
+      margin: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      animation: none;
+    }
+
+    .thinking-orbit::before,
+    .thinking-orbit::after {
+      content: "";
+      position: static;
+      display: block;
       width: 6px;
       height: 6px;
       border-radius: 999px;
       background: #f5ead8;
       opacity: 0.55;
+      box-shadow: none;
       animation: dot 1.2s infinite ease-in-out;
     }
 
-    .thinking span:nth-child(2) { animation-delay: 0.15s; }
-    .thinking span:nth-child(3) { animation-delay: 0.3s; }
+    .thinking-orbit::before {
+      animation-delay: 0s;
+    }
+
+    .thinking-orbit::after {
+      animation-delay: 0.15s;
+    }
+
+    .thinking-orbit {
+      color: transparent;
+    }
+
+    .thinking-orbit + .thinking-panel::after {
+      content: "";
+      position: absolute;
+      top: -20px;
+      left: -34px;
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #f5ead8;
+      opacity: 0.55;
+      animation: dot 1.2s 0.3s infinite ease-in-out;
+    }
+
+    .thinking-panel {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      padding-left: 2px;
+      border-left: 0;
+      overflow: visible;
+    }
+
+    .thinking-panel::before {
+      display: none;
+    }
+
+    .thinking-kicker {
+      display: none;
+    }
+
+    .thinking-badge {
+      display: none;
+    }
+
+    .thinking-query {
+      max-width: min(100vw - 48px, 560px);
+      color: #9f988d;
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .thinking-chain {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      padding-left: 0;
+    }
+
+    .thinking-step {
+      display: inline-flex;
+      align-items: flex-start;
+      gap: 9px;
+      color: #9f988d;
+      font-size: 13px;
+      line-height: 1.35;
+      transform: translateX(0);
+      transition: color .16s ease, transform .16s ease;
+    }
+
+    .thinking-step::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      margin-top: 5px;
+      border-radius: 999px;
+      background: rgba(212, 204, 194, 0.30);
+      box-shadow: none;
+      flex: 0 0 auto;
+    }
+
+    .thinking-step-title {
+      display: block;
+      color: inherit;
+      font-weight: 650;
+    }
+
+    .thinking-step-detail {
+      display: block;
+      margin-top: 1px;
+      color: #8e877c;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .thinking-step.active {
+      color: #d9d0c2;
+    }
+
+    .thinking-step.active::before {
+      background: rgba(242, 232, 216, 0.78);
+      box-shadow: 0 0 0 4px rgba(242, 232, 216, 0.06);
+    }
+
+    .thinking-step.active .thinking-step-detail {
+      color: #aaa296;
+    }
+
+    .thinking-step.current {
+      color: #f1e8d8;
+      transform: translateX(0);
+    }
+
+    .thinking-step.current::before {
+      background: #f5ead8;
+      box-shadow: 0 0 0 5px rgba(245, 234, 216, 0.10);
+      animation: thinkingPulse 1.1s ease-in-out infinite;
+    }
+
+    .thinking-progress {
+      display: none;
+    }
+
+    .thinking-progress span {
+      display: none;
+    }
 
     @keyframes dot {
       0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
       40% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    @keyframes thinkingPulse {
+      0%, 100% { transform: scale(1); opacity: 0.75; }
+      50% { transform: scale(1.22); opacity: 1; }
+    }
+
+    @media (max-width: 520px) {
+      .thinking {
+        max-width: 100%;
+      }
+
+      .thinking-orbit {
+        gap: 8px;
+      }
+
+      .thinking-step {
+        gap: 7px;
+      }
+    }
+
+    .tool-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      color: #9d9589;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    .tool-status.hidden {
+      display: none;
+    }
+
+    .tool-status-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .tool-status-dots span {
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(210, 204, 194, 0.72);
+      animation: toolPulse 1.18s infinite ease-in-out;
+    }
+
+    .tool-status-dots span:nth-child(2) { animation-delay: 0.12s; }
+    .tool-status-dots span:nth-child(3) { animation-delay: 0.24s; }
+
+    @keyframes toolPulse {
+      0%, 80%, 100% { transform: scale(0.92); opacity: 0.28; }
+      40% { transform: scale(1.12); opacity: 0.92; }
     }
 
     mjx-container {
@@ -271,6 +717,7 @@
       max-width: 100%;
       overflow-x: auto;
       overflow-y: hidden;
+      transition: min-height 0.15s ease;
     }
 
     mjx-container[display="true"] {
@@ -344,10 +791,19 @@
       color: #d8d3c8;
       font-size: 30px;
       border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      line-height: 1;
     }
 
     #fileInput {
-      display: none;
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
     }
 
     .model-pill {
@@ -519,8 +975,9 @@
     }
 
     .session-row {
+      position: relative;
       display: grid;
-      grid-template-columns: 1fr 38px;
+      grid-template-columns: 1fr 38px 38px;
       gap: 7px;
       align-items: stretch;
       margin-bottom: 6px;
@@ -533,7 +990,8 @@
       white-space: nowrap;
     }
 
-    .pin-btn {
+    .pin-btn,
+    .session-more-btn {
       width: 38px;
       min-height: 38px;
       border-radius: 10px;
@@ -544,10 +1002,54 @@
       padding: 0;
     }
 
+    .session-more-btn {
+      font-size: 20px;
+      line-height: 1;
+    }
+
     .pin-btn.active {
       background: rgba(232, 220, 200, 0.18);
       color: #fff2db;
       border-color: rgba(232, 220, 200, 0.25);
+    }
+
+    .session-menu {
+      position: absolute;
+      top: 42px;
+      right: 0;
+      z-index: 4;
+      width: 124px;
+      padding: 6px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: #191815;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.34);
+    }
+
+    .session-menu[hidden] {
+      display: none;
+    }
+
+    .session-menu button {
+      width: 100%;
+      min-height: 34px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #d8d3c8;
+      text-align: left;
+      padding: 0 10px;
+      font-size: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .session-menu button:active,
+    .session-menu button:hover {
+      background: rgba(255,255,255,0.06);
+    }
+
+    .session-menu button.danger {
+      color: #e0a199;
     }
 
     .session-empty {
@@ -561,19 +1063,6 @@
       overflow-y: auto;
       padding-right: 2px;
       margin-bottom: 9px;
-    }
-
-    .session-actions {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 7px;
-    }
-
-    .session-actions .drawer-btn {
-      margin-bottom: 0;
-      text-align: center;
-      min-height: 36px;
-      padding: 7px 8px;
     }
 
     .new-conv-icon {
@@ -633,6 +1122,7 @@
     object-fit: contain !important;
     border-radius: 14px !important;
     display: block !important;
+    transition: opacity 0.2s ease;
   }
 
   .user .bubble img {
@@ -765,6 +1255,8 @@
     overflow-x: auto;
     margin: 1em 0;
     max-height: none;
+    contain: layout style paint;
+    will-change: max-height;
   }
 
   .assistant .bubble pre.code-collapsed {
@@ -817,6 +1309,7 @@
     padding: 0 9px;
     font-size: 12px;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    transition: background 0.15s ease, transform 0.1s ease;
   }
 
   .code-tool-btn:active {
@@ -905,6 +1398,81 @@
   }
 </style>
 
+<style id="math-and-rich-text-style">
+  .assistant .bubble .table-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 0.95em 0;
+    border-radius: 12px;
+  }
+
+  .assistant .bubble .table-scroll table {
+    margin: 0;
+  }
+
+  .assistant .bubble mjx-container {
+    color: #f7f0e5 !important;
+    font-size: 108% !important;
+  }
+
+  .assistant .bubble mjx-container[display="true"] {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.72em 0.5em;
+    margin: 0.9em 0 !important;
+    background: rgba(255,255,255,0.035);
+    border: 1px solid rgba(255,255,255,0.075);
+    border-radius: 13px;
+    text-align: center;
+  }
+
+  .assistant .bubble mjx-container:not([display="true"]) {
+    padding: 0 0.08em;
+    overflow-wrap: normal;
+  }
+
+  .assistant .bubble .math-display-fallback {
+    display: block;
+    margin: 0.9em 0;
+    padding: 0.72em 0.85em;
+    overflow-x: auto;
+    border-radius: 13px;
+    border: 1px solid rgba(255,255,255,0.075);
+    background: rgba(255,255,255,0.035);
+    color: #f7f0e5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre;
+  }
+
+  .assistant .bubble .math-inline-fallback {
+    color: #f5dfb5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 640px) {
+    .assistant .bubble {
+      letter-spacing: 0;
+    }
+
+    .assistant .bubble table {
+      font-size: 0.88em;
+    }
+
+    .assistant .bubble th,
+    .assistant .bubble td {
+      padding: 8px 9px;
+    }
+
+    .assistant .bubble mjx-container[display="true"] {
+      font-size: 100% !important;
+      padding: 0.62em 0.35em;
+    }
+  }
+</style>
+
 
 <style id="agent-button-style">
   .agent-btn {
@@ -970,12 +1538,59 @@
     border-color: rgba(160,200,160,0.25);
     background: rgba(160,200,160,0.08);
   }
-  .msg-actions .small-btn.copy-msg {
-    font-size: 16px;
+  .small-btn.copy-msg {
+    position: relative;
+    width: 32px;
+    height: 28px;
+    border-radius: 9px;
+    border-color: rgba(210, 196, 170, 0.13);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.025));
+    color: #c8beb0;
+    font-size: 0;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
   }
-  .msg-actions .small-btn.copy-msg.copied {
-    color: #a0c8a0;
-    border-color: rgba(160,200,160,0.25);
+  .small-btn.copy-msg::before {
+    content: "";
+    width: 12px;
+    height: 14px;
+    border: 1.7px solid currentColor;
+    border-radius: 3px;
+    transform: translate(2px, -1px);
+  }
+  .small-btn.copy-msg::after {
+    content: "";
+    position: absolute;
+    width: 12px;
+    height: 14px;
+    border: 1.7px solid currentColor;
+    border-radius: 3px;
+    transform: translate(-2px, 2px);
+    opacity: .48;
+  }
+  .small-btn.copy-msg:hover {
+    opacity: 1;
+    color: #fff2df;
+    border-color: rgba(232, 220, 200, 0.26);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.11), rgba(255,255,255,0.04));
+  }
+  .small-btn.copy-msg.copied {
+    color: #b8e6bd;
+    border-color: rgba(164, 214, 169, 0.34);
+    background: rgba(92, 151, 98, 0.13);
+  }
+  .small-btn.copy-msg.copied::before {
+    content: "✓";
+    width: auto;
+    height: auto;
+    border: 0;
+    font-size: 15px;
+    font-weight: 800;
+    transform: none;
+  }
+  .small-btn.copy-msg.copied::after {
+    content: none;
   }
 </style>
 
@@ -1006,11 +1621,6 @@
         <button id="newConvBtn" class="drawer-btn new-conv-icon" title="新对话">+</button>
       </div>
       <div id="sessionList" class="session-list"></div>
-      <div class="session-actions">
-        <button id="renameConvBtn" class="drawer-btn">重命名</button>
-        <button id="exportConvBtn" class="drawer-btn">导出</button>
-        <button id="deleteConvBtn" class="drawer-btn danger">删除</button>
-      </div>
     </div>
 
 
@@ -1019,14 +1629,6 @@
         <span>模型</span>
         <button id="toggleModelListBtn" class="section-title-btn" type="button">展开</button>
       </div>
-      <div class="field">
-        <label>线路</label>
-        <select id="routeMode">
-          <option value="cc">CC 本地代理：可控制 Ubuntu</option>
-          <option value="direct">专用直连流式：更快，不控制本地</option>
-        </select>
-      </div>
-
       <div id="modelChoices" class="grid2">
         <button class="model-choice active" data-model="claude-opus-4-7">Opus 4.7</button>
         <button class="model-choice" data-model="claude-opus-4-6">Opus 4.6</button>
@@ -1089,10 +1691,9 @@
       <button id="clearFilesBtn" class="clear-files-btn" type="button">取消附件</button>
 
       <div class="toolbar">
-        <button id="plusBtn" class="plus-btn">+</button>
+        <label id="plusBtn" class="plus-btn" for="fileInput" role="button" tabindex="0" aria-label="上传文件">+</label>
         <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf" />
         <button id="modelPill" class="model-pill">Opus 4.7⌄</button>
-        <button id="agentBtn" class="send-btn agent-btn" title="AI执行本地终端任务">⚙</button>
         <button id="sendBtn" class="send-btn">↑</button>
       </div>
     </div>
@@ -1115,7 +1716,6 @@
     const apiUrl = $("apiUrl");
     const apiKey = $("apiKey");
     const apiModel = $("apiModel");
-    const routeMode = $("routeMode");
 
     const modelChoices = $("modelChoices");
     const toggleModelListBtn = $("toggleModelListBtn");
@@ -1127,7 +1727,6 @@
 
     const promptEl = $("prompt");
     const sendBtn = $("sendBtn");
-    const agentBtn = $("agentBtn");
     const fileInput = $("fileInput");
     const fileInfo = $("fileInfo");
     const preview = $("preview");
@@ -1348,6 +1947,62 @@
       return x;
     }
 
+    function protectCodeSpans(text) {
+      const blocks = [];
+      const replaced = String(text || "")
+        .replace(/```[\s\S]*?```/g, m => {
+          const key = `\uE000${blocks.length}\uE001`;
+          blocks.push(m);
+          return key;
+        })
+        .replace(/`[^`\n]*`/g, m => {
+          const key = `\uE000${blocks.length}\uE001`;
+          blocks.push(m);
+          return key;
+        });
+      return { text: replaced, blocks };
+    }
+
+    function restoreCodeSpans(text, blocks) {
+      return String(text || "").replace(/\uE000(\d+)\uE001/g, (_, idx) => blocks[Number(idx)] || "");
+    }
+
+    function looksLikeMathLine(line) {
+      const t = line.trim();
+      if (!t || t.length > 180) return false;
+      if (/^[-*+]\s+/.test(t) || /^#{1,6}\s+/.test(t) || /^\|/.test(t)) return false;
+      const hasOperator = /(?:=|\\(?:frac|sum|int|lim|sqrt|begin|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|infty|cdot|times|leq|geq|neq|approx)|\^|_)/.test(t);
+      const hasLetterOrNumber = /[A-Za-z0-9]/.test(t);
+      const proseChars = /[\u4e00-\u9fa5，。？！、；：]/.test(t);
+      return hasOperator && hasLetterOrNumber && !proseChars;
+    }
+
+    function normalizeMathDelimiters(text) {
+      const protectedText = protectCodeSpans(text);
+      let x = protectedText.text;
+
+      x = x
+        .replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`)
+        .replace(/\\begin\{align\*?\}([\s\S]*?)\\end\{align\*?\}/g, (_, inner) => `\n$$\n\\begin{aligned}\n${inner.trim()}\n\\end{aligned}\n$$\n`)
+        .replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`)
+        .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => `$${inner.trim()}$`)
+        .replace(/\[([^\]\n]*(?:\\frac|\\sqrt|\\sum|\\int|\\lim|=|\^|_)[^\]\n]*)\]/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`);
+
+      const lines = x.split("\n");
+      let inFence = false;
+      x = lines.map(line => {
+        if (/^\s*```/.test(line)) inFence = !inFence;
+        if (inFence || /^\s*\$\$/.test(line) || /\$\S[\s\S]*\S\$/.test(line)) return line;
+        if (looksLikeMathLine(line)) return `$$${repairFractions(line.trim())}$$`;
+        return line;
+      }).join("\n");
+
+      x = x.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => `$$\n${repairFractions(inner.trim())}\n$$`);
+      x = x.replace(/\$([^$\n]+?)\$/g, (_, inner) => `$${repairFractions(inner.trim())}$`);
+
+      return restoreCodeSpans(x, protectedText.blocks);
+    }
+
     function repairMath(root) {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       const nodes = [];
@@ -1365,6 +2020,43 @@
       });
     }
 
+    function enhanceRichText(root) {
+      root.querySelectorAll("table").forEach(table => {
+        if (table.parentElement && table.parentElement.classList.contains("table-scroll")) return;
+        const wrap = document.createElement("div");
+        wrap.className = "table-scroll";
+        table.parentNode.insertBefore(wrap, table);
+        wrap.appendChild(table);
+      });
+
+      root.querySelectorAll("a[href]").forEach(a => {
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+      });
+
+      // 为图片添加懒加载和加载状态，防止布局跳动
+      root.querySelectorAll("img").forEach(img => {
+        if (img.dataset.lazySetup) return;
+        img.dataset.lazySetup = "1";
+
+        // 如果图片还没加载，添加占位背景
+        if (!img.complete) {
+          img.style.backgroundColor = "rgba(255,255,255,0.05)";
+          img.style.minHeight = "60px";
+
+          img.addEventListener("load", () => {
+            img.style.backgroundColor = "";
+            img.style.minHeight = "";
+          }, { once: true });
+
+          img.addEventListener("error", () => {
+            img.style.backgroundColor = "rgba(255,100,100,0.1)";
+            img.style.minHeight = "";
+          }, { once: true });
+        }
+      });
+    }
+
     function enhanceCodeBlocks(root) {
       const pres = root.querySelectorAll("pre");
 
@@ -1374,13 +2066,6 @@
 
         const code = pre.querySelector("code");
         if (!code) return;
-
-        // 高亮
-        if (window.hljs) {
-          try {
-            hljs.highlightElement(code);
-          } catch (e) {}
-        }
 
         // 语言标签
         let lang = "code";
@@ -1409,6 +2094,27 @@
         toolbar.appendChild(foldBtn);
         toolbar.appendChild(copyBtn);
         pre.appendChild(toolbar);
+
+        // 使用 IntersectionObserver 懒加载代码高亮，避免初始渲染卡顿
+        if (window.hljs && window.IntersectionObserver) {
+          const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+              if (entry.isIntersecting && !code.dataset.highlighted) {
+                code.dataset.highlighted = "1";
+                try {
+                  hljs.highlightElement(code);
+                } catch (e) {}
+                observer.unobserve(pre);
+              }
+            });
+          }, { rootMargin: "200px" });
+          observer.observe(pre);
+        } else if (window.hljs) {
+          // 降级方案：直接高亮
+          try {
+            hljs.highlightElement(code);
+          } catch (e) {}
+        }
 
         foldBtn.addEventListener("click", () => {
           pre.classList.toggle("code-collapsed");
@@ -1446,20 +2152,351 @@
     function renderMath(root) {
       repairMath(root);
       if (window.MathJax && MathJax.typesetPromise) {
-        const run = () => MathJax.typesetPromise([root]).catch(() => {});
+        // 先标记数学公式容器，避免渲染后高度突变导致页面跳动
+        const mathElements = root.querySelectorAll('mjx-container');
+        mathElements.forEach(el => {
+          if (!el.style.minHeight) {
+            el.style.minHeight = el.offsetHeight ? el.offsetHeight + 'px' : '1.5em';
+          }
+        });
+
+        const run = () => {
+          const scrollBefore = getScrollTop();
+          const heightBefore = getPageHeight();
+
+          MathJax.typesetPromise([root]).then(() => {
+            // 渲染完成后，如果用户不在底部，保持滚动位置
+            const heightAfter = getPageHeight();
+            const heightDiff = heightAfter - heightBefore;
+
+            if (heightDiff > 0 && !isNearBottom(AUTO_SCROLL_THRESHOLD + 50)) {
+              window.scrollTo({
+                top: scrollBefore + heightDiff,
+                behavior: 'auto'
+              });
+            }
+          }).catch(() => {});
+        };
+
         if (window.requestIdleCallback) {
           requestIdleCallback(run, { timeout: 1200 });
         } else {
           setTimeout(run, 0);
         }
+      } else {
+        root.innerHTML = root.innerHTML
+          .replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => `<span class="math-display-fallback">${escapeHtml(inner.trim())}</span>`)
+          .replace(/\$([^$\n]+?)\$/g, (_, inner) => `<span class="math-inline-fallback">${escapeHtml(inner.trim())}</span>`);
       }
     }
 
     function renderMarkdown(text) {
+      const normalized = normalizeMathDelimiters(text || "");
       if (window.marked && marked.parse) {
-        return marked.parse(text || "");
+        if (marked.setOptions && !marked._claudeWebConfigured) {
+          marked.setOptions({
+            gfm: true,
+            breaks: true,
+            mangle: false,
+            headerIds: false
+          });
+          marked._claudeWebConfigured = true;
+        }
+        return marked.parse(normalized);
       }
-      return escapeHtml(text || "").replace(/\n/g, "<br>");
+      return escapeHtml(normalized).replace(/\n/g, "<br>");
+    }
+
+    function parseMessageSources(value) {
+      if (!value) return [];
+      if (Array.isArray(value)) return value;
+      if (typeof value === "string") {
+        try {
+          const parsed = JSON.parse(value);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+          return [];
+        }
+      }
+      return [];
+    }
+
+    const STREAM_STATUS_RE = /\[\[STATUS:([a-z_]+)\]\]/gi;
+    const STATUS_LABELS = {
+      parsing: "网页解析中"
+    };
+    let activeToolStatuses = [];
+    let lastUserPromptForThinking = "";
+    let thinkingContext = {
+      prompt: "",
+      fileCount: 0,
+      imageCount: 0,
+      fileNames: "",
+      route: "direct",
+      regenerate: false
+    };
+    let thinkingMotionSeed = 0;
+
+    function escapeAttr(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function sourceHost(url) {
+      try {
+        return new URL(url).hostname.replace(/^www\./, "");
+      } catch (_) {
+        return url || "";
+      }
+    }
+
+    function renderSourcesStrip(sources) {
+      if (!sources || !sources.length) return "";
+
+      const chips = sources.map(source => {
+        const index = Number(source.index) || 0;
+        const title = source.title || source.url || ("来源 " + index);
+        const url = source.url || "#";
+        const host = sourceHost(url);
+        return (
+          `<a class="source-chip" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer" data-source-index="${index}">` +
+            `<span class="source-chip-num">${index}</span>` +
+            `<span class="source-chip-body">` +
+              `<span class="source-chip-title">${escapeHtml(title)}</span>` +
+              `<span class="source-chip-url">${escapeHtml(host)}</span>` +
+            `</span>` +
+          `</a>`
+        );
+      }).join("");
+
+      return `<div class="sources-strip">${chips}</div>`;
+    }
+
+    function renderToolStatusesHtml() {
+      if (!activeToolStatuses.length) return "";
+      return activeToolStatuses.map(key => {
+        const label = STATUS_LABELS[key] || key;
+        return (
+          `<div class="tool-status" data-tool-status="${escapeAttr(key)}">` +
+            `<span class="tool-status-dots"><span></span><span></span><span></span></span>` +
+            `<span>${escapeHtml(label)}</span>` +
+          `</div>`
+        );
+      }).join("");
+    }
+
+    function compactPrompt(text, maxLen = 76) {
+      const normalized = String(text || "").replace(/\s+/g, " ").trim();
+      if (!normalized) return "";
+      return normalized.length > maxLen ? normalized.slice(0, maxLen - 1) + "..." : normalized;
+    }
+
+    function selectedThinkingRouteLabel() {
+      return "Direct";
+    }
+
+    function inferThinkingMode() {
+      const sourceText = thinkingContext.prompt || lastUserPromptForThinking || "";
+      const text = sourceText.trim().toLowerCase();
+      if (activeToolStatuses.includes("parsing")) return "web";
+      if (thinkingContext.imageCount > 0) return "vision";
+      if (thinkingContext.fileCount > 0 && !text) return "file";
+      if (/[+\-*/=√∑∫π]|方程|几何|证明|导数|积分|数学/.test(sourceText)) return "math";
+      if (/代码|bug|报错|函数|接口|sql|python|js|ts|html|css|java|go|rust|node/i.test(text)) return "code";
+      if (/总结|概括|润色|翻译|改写|写一段|写文章|文案|邮件/.test(sourceText)) return "writing";
+      return "general";
+    }
+
+    function makeThinkingStep(title, detail) {
+      return { title, detail };
+    }
+
+    function getThinkingSteps() {
+      const mode = inferThinkingMode();
+      const route = selectedThinkingRouteLabel();
+      const filePart = thinkingContext.fileCount
+        ? `同时纳入 ${thinkingContext.fileCount} 个附件${thinkingContext.fileNames ? "：" + compactPrompt(thinkingContext.fileNames, 42) : ""}`
+        : "只基于当前对话与已保留上下文";
+      const imagePart = thinkingContext.imageCount
+        ? `识别 ${thinkingContext.imageCount} 张图片里的可见信息`
+        : filePart;
+
+      if (mode === "web") {
+        return [
+          makeThinkingStep("解析网页内容", "抓取正文、标题和可用来源，过滤无关导航文本"),
+          makeThinkingStep("对齐用户问题", "把网页事实映射到当前问题，区分直接证据和推断"),
+          makeThinkingStep("组织可核查回答", "优先给结论，再补关键依据和必要限制")
+        ];
+      }
+      if (mode === "math") {
+        return [
+          makeThinkingStep("列出已知条件", "识别变量、约束、目标量和隐含前提"),
+          makeThinkingStep("选择推导路径", "拆成可验证的小步骤，避免跳过关键等式"),
+          makeThinkingStep("回代检查结果", "核对单位、边界情况和是否满足原条件")
+        ];
+      }
+      if (mode === "code") {
+        return [
+          makeThinkingStep("理解代码意图", `${filePart}，先确认入口、调用链和错误现象`),
+          makeThinkingStep("定位关键风险", "检查状态变化、边界输入、异步流程和兼容性"),
+          makeThinkingStep("形成可执行方案", `按 ${route} 方式返回结论、补丁或排查步骤`)
+        ];
+      }
+      if (mode === "vision") {
+        return [
+          makeThinkingStep("读取视觉线索", imagePart),
+          makeThinkingStep("连接文字需求", "把图片内容和用户问题放在同一判断框架里"),
+          makeThinkingStep("给出可用结论", "描述可见事实，明确不确定或需要放大的部分")
+        ];
+      }
+      if (mode === "file") {
+        return [
+          makeThinkingStep("读取附件结构", filePart),
+          makeThinkingStep("提取关键片段", "优先看标题、错误、配置、数据列和重复模式"),
+          makeThinkingStep("整理回答框架", "把发现、依据和建议分开呈现")
+        ];
+      }
+      if (mode === "writing") {
+        return [
+          makeThinkingStep("确认写作目标", "判断受众、语气、长度和必须保留的信息"),
+          makeThinkingStep("搭建内容骨架", "先排主次，再处理开头、转折和收束"),
+          makeThinkingStep("打磨表达节奏", "压缩空话，保留可读性和行动指向")
+        ];
+      }
+      return [
+        makeThinkingStep("拆解问题意图", "识别用户真正要解决的目标、限制和交付形式"),
+        makeThinkingStep("选择回答路径", `${filePart}，决定先给结论还是先做分析`),
+        makeThinkingStep("校验输出质量", "检查遗漏、歧义、时效性和可执行性")
+      ];
+    }
+
+    function getThinkingProgressIndex(steps) {
+      if (activeToolStatuses.includes("parsing")) return 0;
+      if (!streamingTargetContent.trim()) {
+        return Math.min(1, steps.length - 1);
+      }
+      const textLen = streamingTargetContent.trim().length;
+      if (textLen < 60) return Math.min(1, steps.length - 1);
+      if (textLen < 220) return Math.min(2, steps.length - 1);
+      return steps.length - 1;
+    }
+
+    function renderThinkingHtml() {
+      const steps = getThinkingSteps();
+      const activeIndex = getThinkingProgressIndex(steps);
+      const currentIndex = Math.min(activeIndex + (thinkingMotionSeed % 2 === 0 ? 0 : 1), steps.length - 1);
+      const mode = inferThinkingMode();
+      const promptPreview = compactPrompt(thinkingContext.prompt || lastUserPromptForThinking || "");
+      const fileMeta = thinkingContext.fileCount
+        ? ` · ${thinkingContext.fileCount} 个附件${thinkingContext.imageCount ? ` / ${thinkingContext.imageCount} 张图片` : ""}`
+        : "";
+      const title = thinkingContext.regenerate ? "重新规划回答" : "正在形成思考大纲";
+      const query = promptPreview
+        ? `<div class="thinking-query">${escapeHtml(promptPreview)}${escapeHtml(fileMeta)}</div>`
+        : (fileMeta ? `<div class="thinking-query">${escapeHtml(fileMeta.replace(/^ · /, ""))}</div>` : "");
+
+      const chain = steps.map((step, idx) => {
+        let cls = "thinking-step";
+        if (idx <= activeIndex) cls += " active";
+        if (idx === currentIndex) cls += " current";
+        return (
+          `<div class="${cls}">` +
+            `<div>` +
+              `<span class="thinking-step-title">${escapeHtml(step.title || step)}</span>` +
+              `<span class="thinking-step-detail">${escapeHtml(step.detail || "")}</span>` +
+            `</div>` +
+          `</div>`
+        );
+      }).join("");
+
+      return (
+        `<div class="thinking">` +
+          `<div class="thinking-orbit" aria-hidden="true"></div>` +
+          `<div class="thinking-panel">` +
+            `<div class="thinking-kicker">` +
+              `<span>${escapeHtml(title)}</span>` +
+              `<span class="thinking-badge">${escapeHtml(mode)} · ${escapeHtml(selectedThinkingRouteLabel())}</span>` +
+            `</div>` +
+            query +
+            `<div class="thinking-chain">${chain}</div>` +
+            `<div class="thinking-progress"><span></span></div>` +
+          `</div>` +
+        `</div>`
+      );
+    }
+
+    function stripStreamingStatusMarkers(text) {
+      const nextStatuses = [];
+      const cleaned = String(text || "").replace(STREAM_STATUS_RE, (_, name) => {
+        const key = String(name || "").trim().toLowerCase();
+        if (key && !nextStatuses.includes(key)) nextStatuses.push(key);
+        return "";
+      });
+      activeToolStatuses = nextStatuses;
+      return cleaned.replace(/^\s+/, "");
+    }
+
+    function injectCitationMarkers(root, sources) {
+      if (!root || !sources || !sources.length) return;
+
+      const sourceMap = new Map();
+      sources.forEach(source => {
+        const index = Number(source.index);
+        if (index > 0) sourceMap.set(String(index), source);
+      });
+
+      const skipTags = new Set(["A", "CODE", "PRE", "SCRIPT", "STYLE", "TEXTAREA"]);
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const parent = node.parentElement;
+        if (!parent) continue;
+        if (skipTags.has(parent.tagName)) continue;
+        if (parent.closest(".sources-strip")) continue;
+        if (!/\[\d+\]/.test(node.nodeValue || "")) continue;
+        nodes.push(node);
+      }
+
+      nodes.forEach(node => {
+        const text = node.nodeValue || "";
+        const frag = document.createDocumentFragment();
+        let lastIndex = 0;
+        const re = /\[(\d+)\]/g;
+        let match;
+
+        while ((match = re.exec(text))) {
+          const raw = match[0];
+          const idx = match[1];
+          const source = sourceMap.get(idx);
+          if (!source) continue;
+
+          if (match.index > lastIndex) {
+            frag.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+          }
+
+          const btn = document.createElement("a");
+          btn.className = "source-citation";
+          btn.textContent = idx;
+          btn.href = source.url || "#";
+          btn.target = "_blank";
+          btn.rel = "noopener noreferrer";
+          btn.dataset.sourceIndex = idx;
+          btn.setAttribute("aria-label", "查看来源 " + idx);
+          frag.appendChild(btn);
+          lastIndex = match.index + raw.length;
+        }
+
+        if (lastIndex === 0) return;
+        if (lastIndex < text.length) {
+          frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
+        node.parentNode.replaceChild(frag, node);
+      });
     }
 
     function parseImagePreviewList(value) {
@@ -1484,6 +2521,7 @@
     }
 
     let renderMessagesJob = 0;
+    let lastRenderedMsgKey = "";
 
     function getMessageId(msg) {
       return msg && msg.id !== undefined && msg.id !== null ? String(msg.id) : "";
@@ -1525,11 +2563,16 @@
 
       if (msg.role === "assistant") {
         if ((msg.content || "").trim() === "思考中...") {
-          bubble.innerHTML = '<div class="thinking"><span></span><span></span><span></span></div>';
+          bubble.innerHTML = renderThinkingHtml();
         } else {
-          bubble.innerHTML = renderMarkdown(msg.content || "");
+          const sources = parseMessageSources(msg.sources);
+          const cleanContent = stripStreamingStatusMarkers(msg.content || "");
+          bubble.innerHTML = renderToolStatusesHtml() + renderMarkdown(cleanContent);
+          injectCitationMarkers(bubble, sources);
+          bubble.insertAdjacentHTML("beforeend", renderSourcesStrip(sources));
 
           if (!lightweight) {
+            enhanceRichText(bubble);
             enhanceCodeBlocks(bubble);
             renderMath(bubble);
           }
@@ -1623,6 +2666,7 @@
           const altBubble = document.createElement("div");
           altBubble.className = "bubble";
           altBubble.innerHTML = renderMarkdown(alt.content || "");
+          enhanceRichText(altBubble);
           altWrap.appendChild(altBubble);
 
           altContainer.appendChild(altWrap);
@@ -1651,6 +2695,7 @@
         while (bubbles.length && (processed < 2 || end())) {
           const bubble = bubbles.shift();
           bubble.dataset.enhanced = "1";
+          enhanceRichText(bubble);
           enhanceCodeBlocks(bubble);
           renderMath(bubble);
           processed += 1;
@@ -1711,20 +2756,36 @@
       return msgs.filter(m => !supersededIds.has(getMessageId(m)));
     }
 
+    function getMsgSnapshotKey(msgs) {
+      return msgs.map(m => getMessageId(m) + ":" + (m.role || "") + ":" + ((m.content || "").length) + ":" + (m.supersededBy || "")).join("|");
+    }
+
     function renderMessages(forceScroll = false) {
       const jobId = ++renderMessagesJob;
 
       if (!messages.length) {
         chatList.innerHTML = '<div class="empty">当前对话还没有消息</div>';
+        lastRenderedMsgKey = "";
         return;
       }
 
       const shouldAutoScroll = forceScroll || autoScrollEnabled;
-      const oldScrollY = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
-
-      chatList.innerHTML = "";
+      const scrollBefore = getScrollTop();
+      const heightBefore = getPageHeight();
 
       const displayMessages = buildVersionChains(messages);
+      const newKey = getMsgSnapshotKey(displayMessages);
+
+      // 如果消息没有变化，跳过重新渲染
+      if (newKey === lastRenderedMsgKey && chatList.children.length > 0 && !chatList.querySelector(".empty")) {
+        if (shouldAutoScroll) {
+          scrollToBottomIfNeeded(forceScroll);
+        }
+        return;
+      }
+      lastRenderedMsgKey = newKey;
+
+      chatList.innerHTML = "";
 
       const fragment = document.createDocumentFragment();
       displayMessages.forEach((msg, idx) => {
@@ -1736,7 +2797,12 @@
       if (shouldAutoScroll) {
         scrollToBottomIfNeeded(forceScroll);
       } else {
-        restoreScrollPosition(oldScrollY);
+        // 保持滚动位置：补偿高度差异
+        const heightAfter = getPageHeight();
+        const heightDiff = heightAfter - heightBefore;
+        if (Math.abs(heightDiff) > 5) {
+          restoreScrollPosition(scrollBefore);
+        }
       }
     }
 
@@ -1749,6 +2815,13 @@
     // ============================================================
     let streamingRenderQueued = false;
     let pendingStreamingContent = "";
+    let lastStreamingRenderTime = 0;
+    const STREAMING_RENDER_THROTTLE = 50; // 最小渲染间隔 50ms
+    let streamingDisplayContent = "";
+    let streamingTargetContent = "";
+    let streamingTypewriterTimer = null;
+    let isAssistantTyping = false;
+    let thinkingMotionTimer = null;
 
     function getLastAssistantBubble() {
       const assistantWraps = chatList.querySelectorAll(".msg-wrap.assistant");
@@ -1758,58 +2831,248 @@
       return lastWrap.querySelector(".bubble");
     }
 
-    function renderAssistantContentIntoBubble(bubble, content, finalRender = false) {
+    function getLastAssistantMessage() {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i] && messages[i].role === "assistant") return messages[i];
+      }
+      return null;
+    }
+
+    function renderAssistantContentIntoBubble(bubble, content, finalRender = false, showCaret = false) {
       if (!bubble) return false;
 
-      const text = content || "";
+      const text = stripStreamingStatusMarkers(content || "");
+      const lastAssistantMsg = getLastAssistantMessage();
+      const sources = lastAssistantMsg ? parseMessageSources(lastAssistantMsg.sources) : [];
 
       if (text.trim() === "思考中...") {
-        bubble.innerHTML = '<div class="thinking"><span></span><span></span><span></span></div>';
+        bubble.innerHTML = renderThinkingHtml();
         return true;
       }
 
+      // 保存当前滚动位置和页面高度
+      const scrollBefore = getScrollTop();
+      const heightBefore = getPageHeight();
+      const wasNearBottom = isNearBottom(AUTO_SCROLL_THRESHOLD);
+
       // 流式过程中只做 Markdown 渲染，不做每帧代码高亮和 MathJax，避免手机卡顿。
       // 最后一帧 finalRender=true 时再补做增强。
-      bubble.innerHTML = renderMarkdown(text);
+      bubble.innerHTML = renderToolStatusesHtml() + renderMarkdown(text);
+      injectCitationMarkers(bubble, sources);
+      bubble.insertAdjacentHTML("beforeend", renderSourcesStrip(sources));
+
+      if (showCaret && text.trim() && text.trim() !== "思考中...") {
+        const caret = document.createElement("span");
+        caret.className = "stream-caret";
+        bubble.appendChild(caret);
+      }
 
       if (finalRender) {
+        enhanceRichText(bubble);
         enhanceCodeBlocks(bubble);
         renderMath(bubble);
       }
 
-      return true;
-    }
+      // 渲染后，如果用户不在底部且内容高度变化了，保持滚动位置
+      const heightAfter = getPageHeight();
+      const heightDiff = heightAfter - heightBefore;
 
-    function followBottomDuringStreaming() {
-      // 兼容前面补过的智能滚动函数
-      if (typeof scrollToBottomIfNeeded === "function") {
-        scrollToBottomIfNeeded(false);
-        return;
-      }
-
-      // 兼容原始版本
-      if (typeof autoScrollEnabled !== "undefined" && autoScrollEnabled) {
+      if (!wasNearBottom && heightDiff > 0 && Math.abs(heightDiff) > 5) {
         requestAnimationFrame(() => {
           window.scrollTo({
-            top: document.documentElement.scrollHeight || document.body.scrollHeight || 0,
-            behavior: "auto"
+            top: scrollBefore,
+            behavior: 'auto'
           });
         });
       }
+
+      return true;
     }
 
-    function updateLastAssistantBubble(content, finalRender = false) {
+    function stopThinkingMotion() {
+      if (thinkingMotionTimer) {
+        clearInterval(thinkingMotionTimer);
+        thinkingMotionTimer = null;
+      }
+    }
+
+    function ensureThinkingMotion() {
+      if (thinkingMotionTimer) return;
+      thinkingMotionTimer = setInterval(() => {
+        thinkingMotionSeed += 1;
+        const bubble = getLastAssistantBubble();
+        if (!bubble) return;
+        const rawContent = messages.length ? (messages[messages.length - 1].content || "") : "思考中...";
+        if ((rawContent || "").trim() === "思考中...") {
+          renderAssistantContentIntoBubble(bubble, rawContent, false, false);
+          return;
+        }
+        if (!streamingTargetContent && !isAssistantTyping) {
+          stopThinkingMotion();
+        }
+      }, 1100);
+    }
+
+    function followBottomDuringStreaming() {
+      // 只有在自动滚动启用且用户在底部附近时才跟随
+      if (!autoScrollEnabled || userScrollActive) return;
+
+      // 使用单次 RAF 保持流畅性，避免过度滚动
+      requestAnimationFrame(() => {
+        if (isNearBottom(AUTO_SCROLL_THRESHOLD + 100)) {
+          const targetScroll = getPageHeight();
+          window.scrollTo({
+            top: targetScroll,
+            behavior: "auto"
+          });
+        }
+      });
+    }
+
+    function updateLastAssistantBubble(content, finalRender = false, showCaret = false) {
       const bubble = getLastAssistantBubble();
 
       // 如果找不到最后一个 assistant bubble，说明 DOM 状态不完整，退回全量渲染。
       if (!bubble) {
+        // 标记需要重新渲染，避免缓存的 key 阻止渲染
+        lastRenderedMsgKey = "";
         renderMessages();
         return false;
       }
 
-      renderAssistantContentIntoBubble(bubble, content, finalRender);
+      renderAssistantContentIntoBubble(bubble, content, finalRender, showCaret);
       followBottomDuringStreaming();
       return true;
+    }
+
+    function stopStreamingTypewriter(finalRender = false) {
+      if (streamingTypewriterTimer) {
+        clearTimeout(streamingTypewriterTimer);
+        streamingTypewriterTimer = null;
+      }
+
+      isAssistantTyping = false;
+      stopThinkingMotion();
+
+      if (finalRender) {
+        streamingDisplayContent = streamingTargetContent || streamingDisplayContent;
+      }
+    }
+
+    function isCjkChar(ch) {
+      return /[\u3400-\u9fff\uf900-\ufaff]/.test(ch || "");
+    }
+
+    function isWhitespace(ch) {
+      return /\s/.test(ch || "");
+    }
+
+    function isAsciiWordChar(ch) {
+      return /[A-Za-z0-9]/.test(ch || "");
+    }
+
+    function isSoftPunctuation(ch) {
+      return /[,:;，、：；]/.test(ch || "");
+    }
+
+    function isHardPunctuation(ch) {
+      return /[.!?。！？]/.test(ch || "");
+    }
+
+    function isLineBreak(ch) {
+      return ch === "\n";
+    }
+
+    function getNextTypewriterSlice() {
+      const start = streamingDisplayContent.length;
+      const source = streamingTargetContent;
+
+      if (start >= source.length) {
+        return { nextText: streamingDisplayContent, delay: 0 };
+      }
+
+      let end = start;
+      const first = source[end];
+
+      if (isLineBreak(first)) {
+        end += 1;
+      } else if (isWhitespace(first)) {
+        while (end < source.length && isWhitespace(source[end])) end += 1;
+      } else if (isCjkChar(first)) {
+        end += 1;
+      } else if (isAsciiWordChar(first)) {
+        while (end < source.length && isAsciiWordChar(source[end])) end += 1;
+      } else {
+        end += 1;
+      }
+
+      const chunk = source.slice(start, end);
+      const last = chunk[chunk.length - 1] || "";
+
+      let delay = 22;
+      if (isLineBreak(last)) delay = 125;
+      else if (isWhitespace(last)) delay = 10;
+      else if (isCjkChar(last)) delay = 26;
+      else if (isAsciiWordChar(last)) delay = 32;
+      else if (isSoftPunctuation(last)) delay = 68;
+      else if (isHardPunctuation(last)) delay = 112;
+
+      return {
+        nextText: source.slice(0, end),
+        delay
+      };
+    }
+
+    function tickStreamingTypewriter() {
+      streamingTypewriterTimer = null;
+
+      if (!isAssistantTyping) return;
+
+      const remaining = streamingTargetContent.length - streamingDisplayContent.length;
+      if (remaining <= 0) {
+        updateLastAssistantBubble(streamingDisplayContent, false, true);
+        return;
+      }
+
+      const next = getNextTypewriterSlice();
+      streamingDisplayContent = next.nextText;
+
+      updateLastAssistantBubble(streamingDisplayContent, false, true);
+
+      if (streamingDisplayContent.length < streamingTargetContent.length) {
+        streamingTypewriterTimer = setTimeout(tickStreamingTypewriter, next.delay);
+      }
+    }
+
+    function ensureStreamingTypewriter() {
+      if (!isAssistantTyping) {
+        isAssistantTyping = true;
+      }
+
+      if (streamingTypewriterTimer) return;
+      streamingTypewriterTimer = setTimeout(tickStreamingTypewriter, 0);
+    }
+
+    function beginStreamingAssistantMessage() {
+      stopStreamingTypewriter(false);
+      pendingStreamingContent = "";
+      streamingDisplayContent = "";
+      streamingTargetContent = "";
+      activeToolStatuses = [];
+      thinkingMotionSeed = 0;
+      lastStreamingRenderTime = 0;
+      ensureThinkingMotion();
+    }
+
+    function setThinkingContextFromInput(text, files, options = {}) {
+      const list = files ? Array.from(files) : [];
+      thinkingContext = {
+        prompt: text || "",
+        fileCount: list.length,
+        imageCount: list.filter(f => f.type && f.type.startsWith("image/")).length,
+        fileNames: list.map(f => f.name).join(", "),
+        regenerate: !!options.regenerate
+      };
     }
 
     function scheduleStreamingAssistantUpdate(content) {
@@ -1817,13 +3080,32 @@
 
       if (streamingRenderQueued) return;
 
+      const now = Date.now();
+      const timeSinceLastRender = now - lastStreamingRenderTime;
+
+      // 如果距离上次渲染时间太短，延迟渲染以减少 DOM 操作频率
+      if (timeSinceLastRender < STREAMING_RENDER_THROTTLE) {
+        streamingRenderQueued = true;
+        setTimeout(() => {
+          streamingRenderQueued = false;
+          lastStreamingRenderTime = Date.now();
+          const text = pendingStreamingContent;
+          pendingStreamingContent = "";
+          streamingTargetContent = text;
+          ensureStreamingTypewriter();
+        }, STREAMING_RENDER_THROTTLE - timeSinceLastRender);
+        return;
+      }
+
       streamingRenderQueued = true;
+      lastStreamingRenderTime = now;
 
       requestAnimationFrame(() => {
         streamingRenderQueued = false;
         const text = pendingStreamingContent;
         pendingStreamingContent = "";
-        updateLastAssistantBubble(text, false);
+        streamingTargetContent = text;
+        ensureStreamingTypewriter();
       });
     }
 
@@ -1831,7 +3113,9 @@
       streamingRenderQueued = false;
       const text = pendingStreamingContent || (messages.length ? (messages[messages.length - 1].content || "") : "");
       pendingStreamingContent = "";
-      updateLastAssistantBubble(text, finalRender);
+      streamingTargetContent = text;
+      stopStreamingTypewriter(finalRender);
+      updateLastAssistantBubble(streamingTargetContent, finalRender, false);
     }
 
     function showLoadError(message) {
@@ -1903,8 +3187,66 @@
           renderSessions();
         };
 
+        const more = document.createElement("button");
+        more.className = "session-more-btn";
+        more.textContent = "⋯";
+        more.title = "对话操作";
+        more.setAttribute("aria-expanded", "false");
+        more.onclick = e => {
+          e.stopPropagation();
+          const isOpen = !menu.hidden;
+          sessionList.querySelectorAll(".session-menu").forEach(m => {
+            m.hidden = true;
+            const btn = m.parentElement && m.parentElement.querySelector(".session-more-btn");
+            if (btn) btn.setAttribute("aria-expanded", "false");
+          });
+          menu.hidden = isOpen;
+          more.setAttribute("aria-expanded", String(!isOpen));
+        };
+
+        const menu = document.createElement("div");
+        menu.className = "session-menu";
+        menu.hidden = true;
+
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.textContent = "重命名";
+        rename.onclick = async e => {
+          e.stopPropagation();
+          menu.hidden = true;
+          more.setAttribute("aria-expanded", "false");
+          await renameConversation(c);
+        };
+
+        const exportBtn = document.createElement("button");
+        exportBtn.type = "button";
+        exportBtn.textContent = "导出";
+        exportBtn.onclick = e => {
+          e.stopPropagation();
+          menu.hidden = true;
+          more.setAttribute("aria-expanded", "false");
+          exportConversation(c.id);
+        };
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "danger";
+        del.textContent = "删除";
+        del.onclick = async e => {
+          e.stopPropagation();
+          menu.hidden = true;
+          more.setAttribute("aria-expanded", "false");
+          await deleteConversation(c);
+        };
+
+        menu.appendChild(rename);
+        menu.appendChild(exportBtn);
+        menu.appendChild(del);
+
         row.appendChild(b);
         row.appendChild(pin);
+        row.appendChild(more);
+        row.appendChild(menu);
         sessionList.appendChild(row);
       });
     }
@@ -1964,19 +3306,34 @@
     function scrollToBottomIfNeeded(force = false) {
       if (!force && !autoScrollEnabled) return;
 
+      // 使用双重 RAF 确保 DOM 完全渲染后再滚动
       requestAnimationFrame(() => {
-        window.scrollTo({
-          top: getPageHeight(),
-          behavior: "auto"
+        requestAnimationFrame(() => {
+          const targetScroll = getPageHeight();
+          const currentScroll = getScrollTop();
+
+          // 只有当目标位置和当前位置差异明显时才滚动
+          if (Math.abs(targetScroll - currentScroll) > 2) {
+            window.scrollTo({
+              top: targetScroll,
+              behavior: "auto"
+            });
+          }
         });
       });
     }
 
     function restoreScrollPosition(y) {
       requestAnimationFrame(() => {
-        window.scrollTo({
-          top: y,
-          behavior: "auto"
+        requestAnimationFrame(() => {
+          const currentScroll = getScrollTop();
+          // 只有当目标位置和当前位置差异明显时才滚动
+          if (Math.abs(y - currentScroll) > 2) {
+            window.scrollTo({
+              top: y,
+              behavior: "auto"
+            });
+          }
         });
       });
     }
@@ -2088,90 +3445,6 @@
       applyProfile();
     }
 
-    async function runAgentTask() {
-      if (sending) return;
-
-      const task = promptEl.value.trim();
-
-      if (!task) return;
-
-      const ok = confirm(
-        "你即将让 AI 自动执行本地 Linux 终端命令。\n\n" +
-        "它拥有当前 Ubuntu 容器内的完整 shell 权限。\n\n" +
-        "是否继续？"
-      );
-
-      if (!ok) return;
-
-      sending = true;
-      sendBtn.disabled = true;
-      agentBtn.disabled = true;
-
-      messages.push({
-        role: "user",
-        content: "本地终端 Agent 任务：\n" + task
-      });
-
-      messages.push({
-        role: "assistant",
-        content: "思考中..."
-      });
-
-      // 用户主动启动 Agent 时，强制回到底部，并开启本轮自动跟随
-      autoScrollEnabled = true;
-      userScrollActive = false;
-      renderMessages(true);
-      promptEl.value = "";
-
-      try {
-        const data = await api("POST", "/api/agent/run", {
-          conversation_id: activeConversationId,
-          task,
-          cwd: "/root",
-          max_steps: 8,
-          timeout: 120,
-          api_base_url: apiUrl.value.trim(),
-          api_auth_token: apiKey.value.trim(),
-          api_model: apiModel.value.trim() || "claude-opus-4-7",
-          api_profile_name: providerName()
-        });
-
-        if (!data.ok) {
-          messages[messages.length - 1].content = "Agent 执行失败：" + (data.answer || "未知错误");
-          renderMessages();
-          return;
-        }
-
-        let text = "本地终端 Agent 执行完成。\n\n";
-
-        for (const step of data.steps || []) {
-          text += "### 步骤 " + step.step + "\n";
-          if (step.reason) text += "原因: " + step.reason + "\n";
-          text += "cwd: " + step.cwd + "\n";
-          text += "命令:\n```bash\n" + step.command + "\n```\n";
-          text += "退出码: " + step.code + "\n";
-          text += "输出:\n```text\n" + step.output + "\n```\n\n";
-        }
-
-        text += "### 最终结果\n";
-        text += data.answer || "";
-
-        messages[messages.length - 1].content = text;
-        renderMessages();
-
-        await loadConversations();
-        await loadMessages();
-        renderAll();
-      } catch (e) {
-        messages[messages.length - 1].content = "Agent 请求失败：" + e;
-        renderMessages();
-      } finally {
-        sending = false;
-        sendBtn.disabled = false;
-        agentBtn.disabled = false;
-      }
-    }
-
     async function sendPrompt() {
       if (sending) return;
 
@@ -2201,6 +3474,9 @@
 
       messages.push({ role: "user", content: text, fileName, imagePreview });
       messages.push({ role: "assistant", content: "思考中..." });
+      lastUserPromptForThinking = text;
+      setThinkingContextFromInput(text, files);
+      beginStreamingAssistantMessage();
 
       // 用户主动发送新消息时，强制回到底部，并开启本轮自动跟随
       autoScrollEnabled = true;
@@ -2223,7 +3499,6 @@
           form.append("api_auth_token", apiKey.value.trim());
           form.append("api_model", model);
           form.append("api_profile_name", providerName());
-          form.append("route_mode", routeMode.value);
 
           for (const f of files) form.append("files", f);
 
@@ -2238,8 +3513,7 @@
               api_base_url: apiUrl.value.trim(),
               api_auth_token: apiKey.value.trim(),
               api_model: model,
-              api_profile_name: providerName(),
-              route_mode: routeMode.value
+              api_profile_name: providerName()
             })
           });
         }
@@ -2276,6 +3550,7 @@
         await loadMessages();
         renderAll();
       } catch (e) {
+        stopStreamingTypewriter(false);
         messages[messages.length - 1].content = "请求失败: " + e;
         renderMessages();
       } finally {
@@ -2310,6 +3585,11 @@
 
       // 添加占位消息用于流式输出
       messages.push({ role: "assistant", content: "思考中..." });
+      lastUserPromptForThinking = (messages[idx - 1] && messages[idx - 1].role === "user")
+        ? (messages[idx - 1].content || "")
+        : "";
+      setThinkingContextFromInput(lastUserPromptForThinking, [], { regenerate: true });
+      beginStreamingAssistantMessage();
 
       // 用户主动重新生成时，强制回到底部，并开启本轮自动跟随
       autoScrollEnabled = true;
@@ -2327,8 +3607,7 @@
             api_base_url: apiUrl.value.trim(),
             api_auth_token: apiKey.value.trim(),
             api_model: apiModel.value.trim() || "claude-opus-4-7",
-            api_profile_name: providerName(),
-            route_mode: routeMode.value
+            api_profile_name: providerName()
           })
         });
 
@@ -2348,6 +3627,10 @@
 
         await loadMessages();
         renderAll();
+      } catch (e) {
+        stopStreamingTypewriter(false);
+        messages[messages.length - 1].content = "重新生成失败: " + e;
+        renderMessages();
       } finally {
         sending = false;
         sendBtn.disabled = false;
@@ -2364,6 +3647,42 @@
       overlay.classList.remove("open");
     }
 
+    function exportConversation(conversationId) {
+      if (!conversationId) {
+        alert("当前没有可导出的对话");
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = `/api/conversations/${conversationId}/export.md`;
+      a.download = "";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function exportActiveConversation() {
+      exportConversation(activeConversationId);
+    }
+
+    async function renameConversation(conversation) {
+      if (!conversation || !conversation.id) return;
+      const title = prompt("新名称", conversation.title || "");
+      if (!title) return;
+      await api("POST", `/api/conversations/${conversation.id}/rename`, { title });
+      await loadConversations();
+    }
+
+    async function deleteConversation(conversation) {
+      if (!conversation || !conversation.id) return;
+      if (!confirm("确定删除这个对话吗？")) return;
+      await api("DELETE", `/api/conversations/${conversation.id}`);
+      if (conversation.id === activeConversationId) {
+        activeConversationId = null;
+      }
+      await loadConversations();
+    }
+
     $("openDrawer").onclick = openDrawer;
     $("closeDrawer").onclick = closeDrawer;
     overlay.onclick = closeDrawer;
@@ -2376,32 +3695,7 @@
       closeDrawer();
     };
 
-    $("renameConvBtn").onclick = async () => {
-      const c = conversations.find(x => x.id === activeConversationId);
-      const title = prompt("新名称", c ? c.title : "");
-      if (!title) return;
-      await api("POST", `/api/conversations/${activeConversationId}/rename`, { title });
-      await loadConversations();
-    };
-
-    $("deleteConvBtn").onclick = async () => {
-      if (!confirm("确定删除当前对话吗？")) return;
-      await api("DELETE", `/api/conversations/${activeConversationId}`);
-      activeConversationId = null;
-      await loadConversations();
-    };
-
-    $("exportConvBtn").onclick = () => {
-      if (activeConversationId) window.open(`/api/conversations/${activeConversationId}/export.md`, "_blank");
-    };
-
-    shareBtn.onclick = () => {
-      if (!activeConversationId) {
-        alert("当前没有可分享的对话");
-        return;
-      }
-      window.open(`/api/conversations/${activeConversationId}/export.md`, "_blank");
-    };
+    shareBtn.onclick = exportActiveConversation;
 
     modelChoices.onclick = e => {
       const btn = e.target.closest(".model-choice");
@@ -2431,12 +3725,6 @@
     };
 
     apiModel.oninput = () => setModel(apiModel.value.trim() || "claude-opus-4-7");
-
-    routeMode.value = localStorage.getItem("route_mode") || "direct";
-    routeMode.onchange = () => {
-      localStorage.setItem("route_mode", routeMode.value);
-    };
-
 
     modelPill.onclick = openDrawer;
 
@@ -2491,7 +3779,12 @@
       clearFilesBtn.style.display = "none";
     }
 
-    $("plusBtn").onclick = () => fileInput.click();
+    $("plusBtn").onkeydown = e => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        fileInput.click();
+      }
+    };
     clearFilesBtn.onclick = clearSelectedFiles;
 
     fileInput.onchange = () => {
@@ -2515,7 +3808,6 @@
       });
     };
 
-    agentBtn.onclick = runAgentTask;
     sendBtn.onclick = sendPrompt;
 
     // 输入框回车只换行，不发送消息。
@@ -2550,10 +3842,8 @@
 
     function markCopied(btn) {
       btn.classList.add("copied");
-      btn.textContent = "✓";
       setTimeout(() => {
         btn.classList.remove("copied");
-        btn.textContent = "📋";
       }, 1500);
     }
 
@@ -2613,6 +3903,11 @@
               : versionToggle.dataset.closedText;
           }
         }
+        return;
+      }
+
+      const citation = e.target.closest(".source-citation");
+      if (citation && citation.href) {
         return;
       }
     };

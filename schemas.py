@@ -16,6 +16,7 @@ class MessageItem(BaseModel):
     providerName: Optional[str] = None
     tokenCount: Optional[int] = None
     supersededBy: Optional[int] = None
+    sources: Optional[str] = None
 
 
 class ChatBody(BaseModel):
@@ -27,7 +28,6 @@ class ChatBody(BaseModel):
     api_auth_token: str = ""
     api_model: str = DEFAULT_MODEL
     api_profile_name: str = ""
-    route_mode: str = "direct"  # cc=Claude Code本地代理, direct=第三方API直连流式
     keep_old: bool = False  # 重新生成时保留旧回复，作为版本历史
 
 
@@ -38,17 +38,6 @@ class ConversationCreateBody(BaseModel):
 class ConversationRenameBody(BaseModel):
     title: str
 
-
-class AgentBody(BaseModel):
-    conversation_id: str = ""
-    task: str
-    cwd: str = "/root"
-    max_steps: int = 8
-    timeout: int = 120
-    api_base_url: str = ""
-    api_auth_token: str = ""
-    api_model: str = DEFAULT_MODEL
-    api_profile_name: str = ""
 
 
 class ConversationPinBody(BaseModel):

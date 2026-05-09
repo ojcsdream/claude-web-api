@@ -1,7 +1,6 @@
 from pathlib import Path
 from urllib.parse import quote
 import os
-import subprocess
 import json
 import uuid
 import time
@@ -42,7 +41,6 @@ from db import (
     now_ms,
 )
 from schemas import (
-    AgentBody,
     ApiProfileBody,
     ChatBody,
     ConversationCreateBody,
@@ -52,14 +50,12 @@ from schemas import (
 from services import (
     call_direct_vision_api,
     enhance_prompt_with_url_fetch,
+    extract_urls_from_text,
     load_uploaded_text_from_path,
-    make_env,
-    run_claude,
     save_uploaded_file_dual_paths,
-    stream_and_save,
-    stream_claude_text,
     stream_direct_and_save,
     stream_direct_api_text,
+    stream_direct_vision_and_save,
 )
 
 init_db()
@@ -104,15 +100,16 @@ def health():
 @app.post("/api/profiles/test")
 def test_api_profile(body: ApiProfileBody):
     try:
-        reply = run_claude(
+        reply = "".join(stream_direct_api_text(
             "只回复：API配置可用",
-            api_base_url=body.base_url,
-            api_auth_token=body.auth_token,
-            api_model=body.model or DEFAULT_MODEL,
-        )
+            body.base_url,
+            body.auth_token,
+            body.model or DEFAULT_MODEL,
+        )).strip()
+        failed = "[直连" in reply and "失败]" in reply
         return {
-            "ok": True,
-            "reply": reply,
+            "ok": bool(reply) and not failed,
+            "reply": reply or "无输出",
         }
     except Exception as e:
         return {
@@ -142,9 +139,11 @@ def do_fetch_models_from_profile(base_url: str, token: str):
     req = urllib.request.Request(
         url,
         headers={
+            "Accept": "application/json, text/plain, */*",
             "x-api-key": token,
             "Authorization": "Bearer " + token,
             "anthropic-version": "2023-06-01",
+            "User-Agent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         },
         method="GET",
     )
@@ -178,10 +177,13 @@ def do_fetch_models_from_profile(base_url: str, token: str):
 
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="ignore")
+        hint = ""
+        if e.code == 403 and ("1010" in err or "cloudflare" in err.lower()):
+            hint = "\n\n提示：服务端返回 Cloudflare/WAF 403，通常是请求头或当前出口 IP 被风控拦截。已使用浏览器式 User-Agent 重试；如果仍失败，需要在接入商后台放行当前 IP，或让接入商关闭该 API 路径的 Browser Integrity/WAF 规则。"
         return {
             "ok": False,
             "models": [],
-            "error": f"HTTP {e.code}: " + (err or str(e)),
+            "error": f"HTTP {e.code}: " + (err or str(e)) + hint,
         }
     except Exception as e:
         return {
@@ -420,15 +422,15 @@ def echo(body: ChatBody):
         db_add_message(cid, "user", body.prompt)
         db_update_title_if_needed(cid, body.prompt)
 
-        reply = run_claude(
+        reply = "".join(stream_direct_api_text(
             final_prompt,
-            api_base_url=body.api_base_url,
-            api_auth_token=body.api_auth_token,
-            api_model=body.api_model or DEFAULT_MODEL,
-        )
-        db_add_message(cid, "assistant", reply)
+            body.api_base_url,
+            body.api_auth_token,
+            body.api_model or DEFAULT_MODEL,
+        )).strip()
+        db_add_message(cid, "assistant", reply, model=body.api_model or DEFAULT_MODEL, provider_name=body.api_profile_name or "")
 
-        return {"ok": True, "conversation_id": cid, "reply": reply}
+        return {"ok": True, "conversation_id": cid, "reply": reply or "无输出"}
     except Exception as e:
         return {"ok": False, "reply": f"调用失败: {e}"}
 
@@ -437,113 +439,36 @@ def echo(body: ChatBody):
 def chat_stream(body: ChatBody):
     cid = db_ensure_conversation(body.conversation_id)
     history = db_get_messages(cid)
-
-    effective_prompt = body.prompt
-    if (body.route_mode or "direct") == "direct":
-        effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
-
-    history_image_paths = collect_history_image_paths(history)
-
     db_add_message(cid, "user", body.prompt)
     db_update_title_if_needed(cid, body.prompt)
 
-    if history_image_paths:
-        vision_prompt = build_vision_text_history(history)
-        if vision_prompt:
-            vision_prompt += "\n\n"
-        vision_prompt += "用户问题：" + (effective_prompt.strip() or "请继续结合历史图片回答。")
+    def status_line(name: str):
+        return f"\n[[STATUS:{name}]]\n"
 
-        _api_base_url = body.api_base_url
-        _api_auth_token = body.api_auth_token
-        _api_model = body.api_model or DEFAULT_MODEL
-        _api_profile_name = body.api_profile_name or ""
-        _cid = cid
+    def gen():
+        if extract_urls_from_text(body.prompt):
+            yield status_line("parsing")
 
-        def gen_history_vision():
-            try:
-                answer = call_direct_vision_api(
-                    vision_prompt,
-                    history_image_paths,
-                    _api_base_url,
-                    _api_auth_token,
-                    _api_model,
-                )
-                debug = (
-                    f"【历史视觉上下文｜图片数: {len(history_image_paths)}"
-                    f"｜模型: {_api_model}"
-                    f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
-                )
-                final_answer = debug + answer
-                token_count = estimate_round_tokens(vision_prompt, final_answer, image_count=len(history_image_paths))
-                db_add_message(
-                    _cid, "assistant", final_answer,
-                    model=_api_model,
-                    provider_name=_api_profile_name,
-                    token_count=token_count,
-                )
-                yield final_answer
-            except Exception as e:
-                final_answer = (
-                    "【历史视觉接口调用失败】\n\n"
-                    + str(e)
-                    + "\n\n将改用普通文字上下文继续回答。"
-                )
-                fallback_prompt = build_chat_prompt(history, effective_prompt)
-                fallback_full = ""
-                for chunk in stream_direct_api_text(
-                    fallback_prompt,
-                    _api_base_url,
-                    _api_auth_token,
-                    _api_model,
-                ):
-                    fallback_full += chunk
-                    yield chunk
-                if fallback_full:
-                    db_add_message(
-                        _cid, "assistant", fallback_full,
-                        model=_api_model,
-                        provider_name=(_api_profile_name or "") + "｜直连流式",
-                        token_count=estimate_round_tokens(fallback_prompt, fallback_full),
-                    )
-                else:
-                    db_add_message(_cid, "assistant", final_answer, model=_api_model, provider_name=_api_profile_name)
-                    yield final_answer
+        effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
+        final_prompt = build_chat_prompt(history, effective_prompt)
 
-        return StreamingResponse(gen_history_vision(), media_type="text/plain; charset=utf-8")
-
-    final_prompt = build_chat_prompt(history, effective_prompt)
-
-    if (body.route_mode or "direct") == "direct":
-        return StreamingResponse(
-            stream_direct_and_save(
-                cid,
-                final_prompt,
-                body.api_base_url,
-                body.api_auth_token,
-                body.api_model or DEFAULT_MODEL,
-                body.api_profile_name or "",
-            ),
-            media_type="text/plain; charset=utf-8",
-        )
-
-    return StreamingResponse(
-        stream_and_save(
+        yield from stream_direct_and_save(
             cid,
             final_prompt,
             body.api_base_url,
             body.api_auth_token,
             body.api_model or DEFAULT_MODEL,
             body.api_profile_name or "",
-        ),
-        media_type="text/plain; charset=utf-8",
-    )
+        )
+
+    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
 
 
 
 
 
 
-def _save_regenerated_answer(cid, answer, api_model, provider_name, old_message_id, final_prompt="", image_count=0):
+def _save_regenerated_answer(cid, answer, api_model, provider_name, old_message_id, final_prompt="", image_count=0, sources=None):
     token_count = estimate_round_tokens(final_prompt, answer, image_count=image_count)
     new_id = db_add_message(
         cid,
@@ -552,18 +477,19 @@ def _save_regenerated_answer(cid, answer, api_model, provider_name, old_message_
         model=api_model,
         provider_name=provider_name,
         token_count=token_count,
+        sources=sources,
     )
     if old_message_id:
         db_mark_message_superseded(old_message_id, new_id)
     return new_id
 
 
-def _stream_and_save_regenerated_answer(inner_gen, cid, api_model, provider_name, old_message_id, final_prompt=""):
+def _stream_and_save_regenerated_answer(inner_gen, cid, api_model, provider_name, old_message_id, final_prompt="", sources=None):
     full = ""
     for chunk in inner_gen:
         full += chunk
         yield chunk
-    _save_regenerated_answer(cid, full, api_model, provider_name, old_message_id, final_prompt)
+    _save_regenerated_answer(cid, full, api_model, provider_name, old_message_id, final_prompt, sources=sources)
 
 
 @app.post("/api/chat/regenerate_from_stream")
@@ -604,7 +530,6 @@ def regenerate_from_stream(body: ChatBody):
     last_user_msg = before[last_user_index]
     last_user_prompt = last_user_msg.content
     last_image_preview = last_user_msg.imagePreview
-
     # 如果不保留旧版本，删除目标消息以及之后所有消息
     keep_old = body.keep_old
     if not keep_old:
@@ -641,50 +566,23 @@ def regenerate_from_stream(body: ChatBody):
             _api_profile_name = body.api_profile_name or ""
             _cid = cid
 
-            _keep_old = keep_old
-            _old_msg_id = body.message_id
-
             def gen_vision():
-                try:
-                    answer = call_direct_vision_api(
-                        vision_prompt,
-                        local_image_paths,
-                        _api_base_url,
-                        _api_auth_token,
-                        _api_model,
-                    )
-                    debug = (
-                        f"【重新回答｜视觉直连｜图片数: {len(local_image_paths)}"
-                        f"｜模型: {_api_model}"
-                        f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
-                    )
-                    final_answer = debug + answer
-                    _save_regenerated_answer(
-                        _cid,
-                        final_answer,
-                        _api_model,
-                        _api_profile_name,
-                        _old_msg_id if _keep_old else None,
-                        vision_prompt,
-                        image_count=len(local_image_paths),
-                    )
-                    yield final_answer
-                except Exception as e:
-                    final_answer = (
-                        "【视觉接口调用失败】\n\n"
-                        + str(e)
-                        + "\n\n这说明当前接入商或模型可能不支持图片视觉输入，"
-                        + "或者它的视觉接口格式不是 OpenAI/Anthropic 标准格式。"
-                    )
-                    _save_regenerated_answer(
-                        _cid,
-                        final_answer,
-                        _api_model,
-                        _api_profile_name,
-                        _old_msg_id if _keep_old else None,
-                        vision_prompt,
-                    )
-                    yield final_answer
+                debug = (
+                    f"【重新回答｜视觉直连｜图片数: {len(local_image_paths)}"
+                    f"｜模型: {_api_model}"
+                    f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
+                )
+                yield debug
+
+                yield from stream_direct_vision_and_save(
+                    _cid,
+                    vision_prompt,
+                    local_image_paths,
+                    _api_base_url,
+                    _api_auth_token,
+                    _api_model,
+                    _api_profile_name,
+                )
 
             return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
@@ -697,50 +595,22 @@ def regenerate_from_stream(body: ChatBody):
     _api_profile_name = body.api_profile_name or ""
 
     if keep_old:
-        if (body.route_mode or "direct") == "direct":
-            def gen_direct():
-                inner = stream_direct_api_text(
-                    final_prompt,
-                    body.api_base_url,
-                    body.api_auth_token,
-                    _api_model,
-                )
-                yield from _stream_and_save_regenerated_answer(
-                    inner, cid, _api_model,
-                    (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
-                    body.message_id, final_prompt,
-                )
-            return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
-        else:
-            def gen_cc():
-                inner = stream_claude_text(
-                    final_prompt,
-                    body.api_base_url,
-                    body.api_auth_token,
-                    _api_model,
-                )
-                yield from _stream_and_save_regenerated_answer(
-                    inner, cid, _api_model,
-                    _api_profile_name or "",
-                    body.message_id, final_prompt,
-                )
-            return StreamingResponse(gen_cc(), media_type="text/plain; charset=utf-8")
-
-    if (body.route_mode or "direct") == "direct":
-        return StreamingResponse(
-            stream_direct_and_save(
-                cid,
+        def gen_direct():
+            inner = stream_direct_api_text(
                 final_prompt,
                 body.api_base_url,
                 body.api_auth_token,
                 _api_model,
-                _api_profile_name,
-            ),
-            media_type="text/plain; charset=utf-8",
-        )
+            )
+            yield from _stream_and_save_regenerated_answer(
+                inner, cid, _api_model,
+                (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
+                body.message_id, final_prompt,
+            )
+        return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
     return StreamingResponse(
-        stream_and_save(
+        stream_direct_and_save(
             cid,
             final_prompt,
             body.api_base_url,
@@ -793,14 +663,10 @@ def regenerate_stream(body: ChatBody):
     last_user_msg = history[last_user_index]
     last_user_prompt = last_user_msg.content
 
-    history_images = collect_history_image_paths(context_messages)
+    # 检查最后一条用户消息是否带有图片
     last_user_images = parse_image_preview_paths(getattr(last_user_msg, "imagePreview", None))
-    all_history_images = []
-    for path_item in history_images + last_user_images:
-        if path_item not in all_history_images:
-            all_history_images.append(path_item)
 
-    if all_history_images:
+    if last_user_images:
         vision_prompt = build_vision_text_history(context_messages)
         if vision_prompt:
             vision_prompt += "\n\n"
@@ -811,50 +677,24 @@ def regenerate_stream(body: ChatBody):
         _api_model = body.api_model or DEFAULT_MODEL
         _api_profile_name = body.api_profile_name or ""
         _cid = cid
-        _keep_old = keep_old
-        _old_id = old_assistant_id
 
         def gen_vision():
-            try:
-                answer = call_direct_vision_api(
-                    vision_prompt,
-                    all_history_images,
-                    _api_base_url,
-                    _api_auth_token,
-                    _api_model,
-                )
-                debug = (
-                    f"【重新回答｜历史视觉上下文｜图片数: {len(all_history_images)}"
-                    f"｜模型: {_api_model}"
-                    f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
-                )
-                final_answer = debug + answer
-                _save_regenerated_answer(
-                    _cid,
-                    final_answer,
-                    _api_model,
-                    _api_profile_name,
-                    _old_id if _keep_old else None,
-                    vision_prompt,
-                    image_count=len(all_history_images),
-                )
-                yield final_answer
-            except Exception as e:
-                final_answer = (
-                    "【视觉接口调用失败】\n\n"
-                    + str(e)
-                    + "\n\n这说明当前接入商或模型可能不支持图片视觉输入，"
-                    + "或者它的视觉接口格式不是 OpenAI/Anthropic 标准格式。"
-                )
-                _save_regenerated_answer(
-                    _cid,
-                    final_answer,
-                    _api_model,
-                    _api_profile_name,
-                    _old_id if _keep_old else None,
-                    vision_prompt,
-                )
-                yield final_answer
+            debug = (
+                f"【重新回答｜视觉上下文｜图片数: {len(last_user_images)}"
+                f"｜模型: {_api_model}"
+                f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
+            )
+            yield debug
+
+            yield from stream_direct_vision_and_save(
+                _cid,
+                vision_prompt,
+                last_user_images,
+                _api_base_url,
+                _api_auth_token,
+                _api_model,
+                _api_profile_name,
+            )
 
         return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
@@ -867,50 +707,22 @@ def regenerate_stream(body: ChatBody):
     _api_profile_name = body.api_profile_name or ""
 
     if keep_old and old_assistant_id:
-        if (body.route_mode or "direct") == "direct":
-            def gen_direct():
-                inner = stream_direct_api_text(
-                    final_prompt,
-                    body.api_base_url,
-                    body.api_auth_token,
-                    _api_model,
-                )
-                yield from _stream_and_save_regenerated_answer(
-                    inner, cid, _api_model,
-                    (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
-                    old_assistant_id, final_prompt,
-                )
-            return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
-        else:
-            def gen_cc():
-                inner = stream_claude_text(
-                    final_prompt,
-                    body.api_base_url,
-                    body.api_auth_token,
-                    _api_model,
-                )
-                yield from _stream_and_save_regenerated_answer(
-                    inner, cid, _api_model,
-                    _api_profile_name or "",
-                    old_assistant_id, final_prompt,
-                )
-            return StreamingResponse(gen_cc(), media_type="text/plain; charset=utf-8")
-
-    if (body.route_mode or "direct") == "direct":
-        return StreamingResponse(
-            stream_direct_and_save(
-                cid,
+        def gen_direct():
+            inner = stream_direct_api_text(
                 final_prompt,
                 body.api_base_url,
                 body.api_auth_token,
                 _api_model,
-                _api_profile_name,
-            ),
-            media_type="text/plain; charset=utf-8",
-        )
+            )
+            yield from _stream_and_save_regenerated_answer(
+                inner, cid, _api_model,
+                (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
+                old_assistant_id, final_prompt,
+            )
+        return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
     return StreamingResponse(
-        stream_and_save(
+        stream_direct_and_save(
             cid,
             final_prompt,
             body.api_base_url,
@@ -931,7 +743,6 @@ async def chat_upload_stream(
     api_auth_token: str = Form(""),
     api_model: str = Form(DEFAULT_MODEL),
     api_profile_name: str = Form(""),
-    route_mode: str = Form("direct"),
     files: list[UploadFile] = File([]),
 ):
     cid = db_ensure_conversation(conversation_id)
@@ -1006,7 +817,7 @@ async def chat_upload_stream(
 
     db_update_title_if_needed(cid, prompt or file_names_str or "新对话")
 
-    # 有图片时，强制走 base64 视觉 API，不再走 claude CLI 读路径
+    # 有图片时，强制走 base64 视觉 API
     if image_files:
         vision_prompt_parts = []
 
@@ -1048,7 +859,7 @@ async def chat_upload_stream(
                     api_model or DEFAULT_MODEL,
                 )
 
-                route_label = "专用直连视觉" if (route_mode or "direct") == "direct" else "CC线路视觉"
+                route_label = "直连视觉"
                 debug = (
                     f"【{route_label}已调用｜图片数: {len(local_image_paths)}"
                     f"｜模型: {api_model or DEFAULT_MODEL}"
@@ -1127,23 +938,8 @@ async def chat_upload_stream(
         prompt=final_user_prompt,
     )
 
-    # 专用直连线路：文本文件也走真流式 API
-    if (route_mode or "direct") == "direct":
-        return StreamingResponse(
-            stream_direct_and_save(
-                cid,
-                final_prompt,
-                api_base_url,
-                api_auth_token,
-                api_model or DEFAULT_MODEL,
-                api_profile_name or "",
-            ),
-            media_type="text/plain; charset=utf-8",
-        )
-
-    # CC 本地代理线路：继续走 Claude Code
     return StreamingResponse(
-        stream_and_save(
+        stream_direct_and_save(
             cid,
             final_prompt,
             api_base_url,
@@ -1243,284 +1039,9 @@ def export_conversation_markdown(conversation_id: str):
             status_code=500
         )
 
-def execute_agent_shell(command: str, cwd: str = "/root", timeout: int = 120):
-    import subprocess
-    import os
-    import time
-
-    command = (command or "").strip()
-    cwd = (cwd or "/root").strip()
-
-    if not command:
-        return {
-            "ok": False,
-            "code": -2,
-            "cwd": cwd,
-            "elapsed": 0,
-            "output": "命令为空"
-        }
-
-    if not os.path.exists(cwd):
-        cwd = "/root"
-
-    timeout = max(1, min(int(timeout or 120), 300))
-
-    start = time.time()
-
-    try:
-        proc = subprocess.run(
-            ["bash", "-lc", command],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=os.environ.copy(),
-        )
-
-        elapsed = round(time.time() - start, 3)
-        output = ""
-
-        if proc.stdout:
-            output += proc.stdout
-        if proc.stderr:
-            if output:
-                output += "\\n"
-            output += proc.stderr
-
-        # 防止一次输出过大撑爆上下文
-        if len(output) > 20000:
-            output = output[:20000] + "\\n...[输出过长，已截断]"
-
-        return {
-            "ok": proc.returncode == 0,
-            "code": proc.returncode,
-            "cwd": cwd,
-            "elapsed": elapsed,
-            "output": output or "(无输出)"
-        }
-
-    except subprocess.TimeoutExpired as e:
-        output = ""
-        if e.stdout:
-            output += e.stdout
-        if e.stderr:
-            output += "\\n" + e.stderr
-
-        return {
-            "ok": False,
-            "code": -1,
-            "cwd": cwd,
-            "elapsed": timeout,
-            "output": "命令超时。\\n" + output
-        }
-
-    except Exception as e:
-        return {
-            "ok": False,
-            "code": -3,
-            "cwd": cwd,
-            "elapsed": 0,
-            "output": "执行失败：" + str(e)
-        }
-
-
-def extract_agent_json(text: str):
-    import json
-    import re
-
-    raw = (text or "").strip()
-
-    # 优先解析 ```json ... ```
-    m = re.search(r"```json\\s*([\\s\\S]*?)```", raw)
-    if m:
-        raw = m.group(1).strip()
-    else:
-        # 否则找第一个 JSON 对象
-        m = re.search(r"\\{[\\s\\S]*\\}", raw)
-        if m:
-            raw = m.group(0).strip()
-
-    try:
-        return json.loads(raw)
-    except Exception:
-        return {
-            "action": "final",
-            "answer": text
-        }
-
-
-def build_agent_prompt(task: str, cwd: str, transcript: list):
-    parts = []
-
-    parts.append("你现在是一个拥有本地 Ubuntu Linux 终端完整权限的 AI Agent。")
-    parts.append("你运行在用户手机 Termux/proot Ubuntu 容器中。")
-    parts.append("用户已经明确授权你使用本地终端执行命令、读写文件、联网、安装依赖、修改项目。")
-    parts.append("你可以根据任务自主决定下一步要执行的 shell 命令。")
-    parts.append("")
-    parts.append("重要规则：")
-    parts.append("1. 如果需要操作终端，必须只输出 JSON。")
-    parts.append("2. 不要输出 Markdown，不要解释 JSON 外的内容。")
-    parts.append("3. 每次最多执行一条命令。")
-    parts.append("4. 如果任务已经完成，输出 final。")
-    parts.append("")
-    parts.append("JSON 格式只能是以下两种之一：")
-    parts.append("")
-    parts.append('{"action":"run","cwd":"/root","command":"ls -la","reason":"查看当前目录"}')
-    parts.append("")
-    parts.append('{"action":"final","answer":"任务完成，结果是..."}')
-    parts.append("")
-    parts.append(f"当前默认工作目录: {cwd}")
-    parts.append("")
-    parts.append("用户任务：")
-    parts.append(task)
-    parts.append("")
-
-    if transcript:
-        parts.append("此前执行记录：")
-        for i, item in enumerate(transcript, 1):
-            parts.append(f"步骤 {i}:")
-            parts.append("命令:")
-            parts.append(item.get("command", ""))
-            parts.append("退出码:")
-            parts.append(str(item.get("code", "")))
-            parts.append("输出:")
-            parts.append(item.get("output", ""))
-            parts.append("")
-
-    parts.append("请给出下一步 JSON。")
-
-    return "\\n".join(parts)
-
-
-@app.post("/api/agent/run")
-def run_local_agent(body: AgentBody):
-    task = (body.task or "").strip()
-
-    if not task:
-        return {
-            "ok": False,
-            "answer": "任务为空",
-            "steps": []
-        }
-
-    cid = db_ensure_conversation(body.conversation_id)
-    cwd = body.cwd or "/root"
-    max_steps = max(1, min(int(body.max_steps or 8), 20))
-    timeout = max(1, min(int(body.timeout or 120), 300))
-
-    steps = []
-    final_answer = ""
-
-    # 保存用户任务
-    db_add_message(
-        cid,
-        "user",
-        task,
-        file_name=None,
-        image_preview=None,
-    )
-
-    for step_index in range(max_steps):
-        prompt = build_agent_prompt(task, cwd, steps)
-
-        model_reply = run_claude(
-            prompt,
-            api_base_url=body.api_base_url,
-            api_auth_token=body.api_auth_token,
-            api_model=body.api_model or DEFAULT_MODEL,
-        )
-
-        action = extract_agent_json(model_reply)
-
-        if action.get("action") == "final":
-            final_answer = action.get("answer") or model_reply
-            break
-
-        if action.get("action") != "run":
-            final_answer = model_reply
-            break
-
-        command = (action.get("command") or "").strip()
-        step_cwd = (action.get("cwd") or cwd or "/root").strip()
-        reason = action.get("reason") or ""
-
-        result = execute_agent_shell(
-            command=command,
-            cwd=step_cwd,
-            timeout=timeout,
-        )
-
-        cwd = result.get("cwd") or step_cwd
-
-        steps.append({
-            "step": step_index + 1,
-            "reason": reason,
-            "cwd": cwd,
-            "command": command,
-            "ok": result.get("ok"),
-            "code": result.get("code"),
-            "elapsed": result.get("elapsed"),
-            "output": result.get("output"),
-        })
-
-    if not final_answer:
-        # 如果达到最大步骤还没 final，让模型总结一次
-        summary_prompt = []
-        summary_prompt.append("请根据以下终端执行记录，总结任务当前完成情况。")
-        summary_prompt.append("如果已经完成，请说明结果；如果未完成，请说明卡在哪里。")
-        summary_prompt.append("")
-        summary_prompt.append("用户任务：")
-        summary_prompt.append(task)
-        summary_prompt.append("")
-        summary_prompt.append("执行记录：")
-        for item in steps:
-            summary_prompt.append(f"步骤 {item['step']}: {item['command']}")
-            summary_prompt.append(f"退出码: {item['code']}")
-            summary_prompt.append("输出:")
-            summary_prompt.append(item["output"])
-            summary_prompt.append("")
-
-        final_answer = run_claude(
-            "\\n".join(summary_prompt),
-            api_base_url=body.api_base_url,
-            api_auth_token=body.api_auth_token,
-            api_model=body.api_model or DEFAULT_MODEL,
-        )
-
-    # 保存 AI Agent 最终回答
-    answer_for_db = "本地终端 Agent 执行完成。\\n\\n"
-
-    for item in steps:
-        answer_for_db += f"### 步骤 {item['step']}\\n"
-        if item.get("reason"):
-            answer_for_db += f"原因: {item['reason']}\\n"
-        answer_for_db += f"cwd: {item['cwd']}\\n"
-        answer_for_db += f"命令:\\n```bash\\n{item['command']}\\n```\\n"
-        answer_for_db += f"退出码: {item['code']}\\n"
-        answer_for_db += f"输出:\\n```text\\n{item['output']}\\n```\\n\\n"
-
-    answer_for_db += "### 最终结果\\n"
-    answer_for_db += final_answer
-
-    db_add_message(
-        cid,
-        "assistant",
-        answer_for_db,
-        model=body.api_model or DEFAULT_MODEL,
-        provider_name=body.api_profile_name or "",
-    )
-
-    return {
-        "ok": True,
-        "conversation_id": cid,
-        "answer": final_answer,
-        "steps": steps,
-    }
-
-
-
 # ===== CLAUDE WEB ADMIN BACKEND PATCH START =====
-# 管理员后台：请求日志、日志详情、接入商线路质量检测
+# 管理员后台：请求日志、日志详情、接入商可用性检测
+
 
 import urllib.request
 import urllib.error
@@ -1692,7 +1213,7 @@ async def admin_request_logger(request: Request, call_next):
     user_agent = request.headers.get("user-agent", "")
 
     request_summary = ""
-    route_mode = ""
+    route_mode = "direct" if path.startswith("/api/chat") else ""
     api_model = ""
     api_profile_name = ""
     error_message = ""
@@ -1715,7 +1236,6 @@ async def admin_request_logger(request: Request, call_next):
 
                 try:
                     data = json.loads(raw)
-                    route_mode = str(data.get("route_mode", "") or "")
                     api_model = str(data.get("api_model", "") or "")
                     api_profile_name = str(data.get("api_profile_name", "") or "")
                 except Exception:
@@ -2102,171 +1622,3 @@ def admin_system(_: bool = Depends(require_admin_token)):
     }
 
 # ===== CLAUDE WEB ADMIN BACKEND PATCH END =====
-
-
-
-
-# ===== CC DEBUG PATCH START =====
-import shutil
-from fastapi import Query
-
-CC_DEBUG_LOG = BASE_DIR / "logs" / "cc-debug.log"
-CC_DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
-
-def _cc_redact_env_value(key: str, value: str) -> str:
-    k = (key or "").upper()
-    if any(x in k for x in ["KEY", "TOKEN", "SECRET", "PASSWORD", "AUTH"]):
-        return "[REDACTED]"
-    return value
-
-def _cc_env_snapshot(source_env=None):
-    source_env = source_env or os.environ
-    keys = [
-        "HOME",
-        "PATH",
-        "TERM",
-        "SHELL",
-        "USER",
-        "LOGNAME",
-        "PWD",
-        "LANG",
-        "LC_ALL",
-        "XDG_RUNTIME_DIR",
-        "DISPLAY",
-        "SSH_AUTH_SOCK",
-        "CLAUDE_HOME",
-        "ANTHROPIC_API_KEY",
-    ]
-    env = {}
-    for k in keys:
-        v = source_env.get(k, "")
-        if v:
-            env[k] = _cc_redact_env_value(k, v)
-
-    # 额外记录所有和 Claude 相关的环境变量名，但做脱敏
-    for k, v in source_env.items():
-        ku = k.upper()
-        if "CLAUDE" in ku or "ANTHROPIC" in ku:
-            env[k] = _cc_redact_env_value(k, v)
-
-    return env
-
-def _write_cc_debug_log(title: str, payload: dict):
-    try:
-        CC_DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(CC_DEBUG_LOG, "a", encoding="utf-8") as f:
-            f.write(f"\n=== {title} ===\n")
-            f.write(json.dumps(payload, ensure_ascii=False, indent=2))
-            f.write("\n")
-    except Exception:
-        pass
-
-@app.get("/api/debug/cc-env")
-def debug_cc_env():
-    claude_path = shutil.which("claude")
-    version = ""
-    version_err = ""
-
-    if claude_path:
-        try:
-            r = subprocess.run(
-                [claude_path, "--version"],
-                cwd=str(BASE_DIR),
-                capture_output=True,
-                text=True,
-                timeout=15,
-                env=os.environ.copy(),
-            )
-            version = (r.stdout or "").strip() or (r.stderr or "").strip()
-            if not version:
-                version = f"exit={r.returncode}"
-        except Exception as e:
-            version_err = str(e)
-
-    data = {
-        "ok": True,
-        "cwd": str(Path.cwd()),
-        "project_dir": str(BASE_DIR),
-        "claude_path": claude_path,
-        "claude_version": version,
-        "claude_version_error": version_err,
-        "process_env": _cc_env_snapshot(),
-        "effective_claude_env": _cc_env_snapshot(make_env()),
-    }
-
-    _write_cc_debug_log("cc-env", data)
-    return data
-
-@app.post("/api/debug/cc-test")
-def debug_cc_test(prompt: str = Query(default="只回复：OK")):
-    claude_path = shutil.which("claude")
-    if not claude_path:
-        data = {
-            "ok": False,
-            "error": "claude not found in PATH",
-            "cwd": str(Path.cwd()),
-            "project_dir": str(BASE_DIR),
-            "env": _cc_env_snapshot(),
-        }
-        _write_cc_debug_log("cc-test-missing", data)
-        return data
-
-    env = make_env()
-    env.setdefault("TERM", "xterm-256color")
-    env.setdefault("HOME", str(Path.home()))
-    env.setdefault("PWD", str(BASE_DIR))
-
-    cmd = [claude_path, "-p", prompt]
-    start = time.time()
-
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(BASE_DIR),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-        data = {
-            "ok": proc.returncode == 0,
-            "cmd": cmd,
-            "cwd": str(BASE_DIR),
-            "returncode": proc.returncode,
-            "elapsed_ms": int((time.time() - start) * 1000),
-            "stdout": (proc.stdout or "").strip(),
-            "stderr": (proc.stderr or "").strip(),
-            "env": _cc_env_snapshot(),
-        }
-        _write_cc_debug_log("cc-test", data)
-        return data
-
-    except subprocess.TimeoutExpired as e:
-        data = {
-            "ok": False,
-            "cmd": cmd,
-            "cwd": str(BASE_DIR),
-            "timeout": True,
-            "elapsed_ms": int((time.time() - start) * 1000),
-            "stdout": (e.stdout or "").strip() if isinstance(e.stdout, str) else "",
-            "stderr": (e.stderr or "").strip() if isinstance(e.stderr, str) else "",
-            "env": _cc_env_snapshot(),
-            "error": "timeout",
-        }
-        _write_cc_debug_log("cc-test-timeout", data)
-        return data
-
-    except Exception as e:
-        data = {
-            "ok": False,
-            "cmd": cmd,
-            "cwd": str(BASE_DIR),
-            "elapsed_ms": int((time.time() - start) * 1000),
-            "error": str(e),
-            "env": _cc_env_snapshot(),
-        }
-        _write_cc_debug_log("cc-test-exception", data)
-        return data
-
-# ===== CC DEBUG PATCH END =====

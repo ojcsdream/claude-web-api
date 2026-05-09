@@ -845,10 +845,10 @@
       <section class="card">
         <div class="section-title">
           <div>
-            <h2>接入商线路质量</h2>
+            <h2>接入商可用性</h2>
             <div class="muted" id="healthTime">点击检测后显示延迟和可用质量</div>
           </div>
-          <button id="testHealthBtn">检测线路</button>
+          <button id="testHealthBtn">检测接入商</button>
         </div>
         <div class="health-grid" id="healthGrid">
           <div class="muted">暂无检测结果</div>
@@ -859,7 +859,7 @@
         <div class="section-title">
           <div>
             <h2>请求日志</h2>
-            <div class="muted">记录每次请求路径、耗时、状态码、线路和模型信息</div>
+            <div class="muted">记录每次请求路径、耗时、状态码和模型信息</div>
           </div>
           <div class="row">
             <button class="secondary" id="refreshBtn">刷新</button>
@@ -894,7 +894,6 @@
                 <th>路径</th>
                 <th>状态</th>
                 <th>耗时</th>
-                <th>线路</th>
                 <th>模型</th>
                 <th>接入商</th>
                 <th>操作</th>
@@ -902,7 +901,7 @@
             </thead>
             <tbody id="logsBody">
               <tr>
-                <td colspan="10" class="muted">暂无数据</td>
+                <td colspan="9" class="muted">暂无数据</td>
               </tr>
             </tbody>
           </table>
@@ -1082,7 +1081,6 @@
             <td data-label="路径" class="path">${escapeHtml(item.path || "")}${item.query_string ? `<div class="small">?${escapeHtml(item.query_string)}</div>` : ""}</td>
             <td data-label="状态"><span class="badge ${statusClass(code)}">${code}</span></td>
             <td data-label="耗时">${item.duration_ms || 0}ms</td>
-            <td data-label="线路">${escapeHtml(item.route_mode || "-")}</td>
             <td data-label="模型">${escapeHtml(item.api_model || "-")}</td>
             <td data-label="接入商">${escapeHtml(item.api_profile_name || "-")}</td>
             <td data-label="操作"><button class="secondary" onclick="showDetail(${item.id})">详情</button></td>
@@ -1092,7 +1090,7 @@
     }
 
     async function loadHealth() {
-      healthGrid.innerHTML = `<div class="muted">正在检测线路质量...</div>`;
+      healthGrid.innerHTML = `<div class="muted">正在检测接入商可用性...</div>`;
       healthTime.textContent = "检测中，请稍等...";
 
       const data = await api("/api/admin/profile-health");
