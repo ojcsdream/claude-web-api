@@ -71,6 +71,13 @@
       border-radius: 10px;
     }
 
+    .menu-btn svg,
+    .share-btn svg {
+      width: 24px;
+      height: 24px;
+      display: block;
+    }
+
     .title {
       flex: 1;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -91,6 +98,10 @@
       color: #f0ece3;
       font-size: 14px;
       font-weight: 650;
+    }
+
+    .share-btn svg {
+      display: none;
     }
 
     .wrap {
@@ -123,6 +134,55 @@
       color: #f0ece3;
       font-size: 14px;
       font-weight: 650;
+    }
+
+    .claude-welcome {
+      width: 100%;
+      min-height: 100%;
+      display: flex;
+      justify-content: center;
+      padding: 0 16px;
+      color: #d8d6cc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+      animation: welcomeFadeUp 0.52s ease forwards;
+    }
+
+    .claude-welcome-hero {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: clamp(12px, 3.7vw, 18px);
+      width: min(100%, 360px);
+      margin-top: clamp(132px, 22vh, 180px);
+      white-space: nowrap;
+    }
+
+    .claude-mark {
+      width: 44px;
+      height: 44px;
+      flex: 0 0 auto;
+      color: rgba(232, 111, 87, 0.88);
+    }
+
+    .claude-welcome h1 {
+      margin: 0;
+      color: rgba(216, 214, 204, 0.88);
+      font-family: Georgia, "Times New Roman", "Noto Serif SC", "Songti SC", serif;
+      font-size: clamp(32px, 8.7vw, 39px);
+      font-weight: 400;
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    @keyframes welcomeFadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     .msg-wrap {
@@ -828,6 +888,12 @@
       color: #1f1f1d;
       font-size: 24px;
       font-weight: 800;
+    }
+
+    .voice-icon {
+      width: 31px;
+      height: 31px;
+      display: none;
     }
 
     .drawer-overlay {
@@ -1594,13 +1660,305 @@
   }
 </style>
 
+<style id="claude-welcome-page-style">
+  :root {
+    --claude-bg: #1c1c1a;
+    --claude-panel: #2a2a28;
+    --claude-border: rgba(255, 255, 255, 0.08);
+    --claude-text: #d8d6cc;
+    --claude-muted: #a6a5a0;
+    --claude-dim: #7d7c76;
+    --claude-accent: #e26f55;
+    --claude-pill: #111110;
+  }
+
+  html,
+  body {
+    background: var(--claude-bg);
+  }
+
+  body.welcome-mode {
+    background: var(--claude-bg);
+  }
+
+  body.welcome-mode .topbar {
+    height: 72px;
+    padding: 0 24px;
+    background: var(--claude-bg);
+    border-bottom-color: transparent;
+  }
+
+  body.welcome-mode .menu-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: rgba(216, 214, 204, 0.66);
+    font-size: 0;
+    border-radius: 10px;
+  }
+
+  body.welcome-mode .menu-btn svg,
+  body.welcome-mode .share-btn svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  body.welcome-mode .menu-btn svg * ,
+  body.welcome-mode .share-btn svg * {
+    stroke-width: 1.6;
+  }
+
+  body.welcome-mode .menu-btn:active,
+  body.welcome-mode .share-btn:active,
+  body.welcome-mode .plus-btn:active,
+  body.welcome-mode .send-btn:active,
+  body.welcome-mode .model-pill:active {
+    opacity: 0.75;
+    transform: scale(0.96);
+  }
+
+  body.welcome-mode .title {
+    display: none;
+  }
+
+  body.welcome-mode .title u {
+    text-decoration-thickness: 1px;
+    text-underline-offset: 5px;
+  }
+
+  body.welcome-mode .share-btn {
+    position: absolute;
+    top: 49px;
+    right: 28px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: rgba(216, 214, 204, 0.66);
+    font-size: 0;
+  }
+
+  body.welcome-mode .share-btn svg {
+    display: block;
+    width: 30px;
+    height: 30px;
+  }
+
+  body.welcome-mode .wrap {
+    max-width: 398px;
+    min-height: 100vh;
+    padding: 0 0 260px;
+  }
+
+  body.welcome-mode #chatList {
+    min-height: calc(100vh - 260px);
+  }
+
+  body.welcome-mode .composer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    top: calc(clamp(132px, 22vh, 180px) + 98px);
+    padding: 0 18px;
+    background: transparent;
+    animation: welcomeFadeUp 0.56s 0.08s ease both;
+  }
+
+  body.welcome-mode .composer-inner {
+    max-width: 372px;
+    height: 150px;
+    max-height: 160px;
+    min-height: 150px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 21px 20px 15px;
+    background: #292927;
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    border-radius: 22px;
+    box-shadow: none;
+    transition: border-color 0.18s ease;
+  }
+
+  body.welcome-mode .composer-inner:focus-within,
+  body.welcome-mode .composer-inner:hover {
+    border-color: rgba(255, 255, 255, 0.11);
+  }
+
+  body.welcome-mode textarea {
+    min-height: 50px;
+    max-height: 70px;
+    padding: 0;
+    color: rgba(228, 225, 216, 0.86);
+    font-size: clamp(19px, 5vw, 22px);
+    font-weight: 400;
+    line-height: 1.2;
+  }
+
+  body.welcome-mode textarea::placeholder {
+    color: rgba(216, 214, 204, 0.42);
+    opacity: 1;
+  }
+
+  body.welcome-mode .file-info,
+  body.welcome-mode .preview,
+  body.welcome-mode .clear-files-btn {
+    margin-left: 0;
+    padding-left: 0;
+  }
+
+  body.welcome-mode .toolbar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0;
+  }
+
+  body.welcome-mode .plus-btn {
+    width: 40px;
+    height: 40px;
+    color: rgba(215, 213, 204, 0.78);
+    font-size: 30px;
+    font-weight: 300;
+  }
+
+  body.welcome-mode .model-pill {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: calc(100% - 88px);
+    padding: 0;
+    color: rgba(216, 214, 204, 0.82);
+    font-size: clamp(16px, 4.7vw, 19px);
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: 0;
+    transition: color 0.16s ease;
+  }
+
+  body.welcome-mode .model-pill:hover {
+    color: rgba(235, 232, 223, 0.88);
+  }
+
+  body.welcome-mode .model-secondary {
+    color: rgba(142, 141, 135, 0.72);
+    margin-left: 8px;
+  }
+
+  body.welcome-mode .model-caret {
+    color: rgba(142, 141, 135, 0.72);
+    margin-left: 7px;
+  }
+
+  body.welcome-mode .send-btn {
+    margin-left: auto;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(216, 214, 204, 0.72);
+    font-size: 0;
+    font-weight: 650;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  body.welcome-mode .send-arrow {
+    display: none;
+    transform: translateY(-1px);
+  }
+
+  body.welcome-mode .voice-icon {
+    display: block;
+    width: 34px;
+    height: 34px;
+  }
+
+  body.welcome-mode .voice-icon path {
+    stroke-width: 1.8;
+    opacity: 0.85;
+  }
+
+  body.welcome-mode.has-input .send-btn {
+    width: 52px;
+    height: 52px;
+    background: rgba(216, 214, 204, 0.78);
+    color: #1c1c1a;
+    font-size: 24px;
+  }
+
+  body.welcome-mode.has-input .send-arrow {
+    display: inline;
+  }
+
+  body.welcome-mode.has-input .voice-icon {
+    display: none;
+  }
+
+  @media (max-width: 380px) {
+    .claude-welcome h1 {
+      font-size: 32px;
+    }
+
+    .claude-welcome-hero {
+      gap: 12px;
+    }
+
+    body.welcome-mode .composer-inner {
+      padding-left: 18px;
+      padding-right: 18px;
+    }
+
+    body.welcome-mode .model-pill {
+      font-size: 17px;
+    }
+  }
+
+  @media (max-height: 740px) {
+    .claude-welcome-hero {
+      margin-top: 114px;
+    }
+
+    body.welcome-mode .composer {
+      top: 212px;
+    }
+  }
+
+  @media (min-width: 760px) {
+    body.welcome-mode .topbar,
+    body.welcome-mode .composer {
+      left: 50%;
+      width: min(100vw, 430px);
+      transform: translateX(-50%);
+    }
+  }
+</style>
+
 </head>
 
 <body>
   <div class="topbar">
-    <button id="openDrawer" class="menu-btn">☰</button>
+    <button id="openDrawer" class="menu-btn" aria-label="打开侧边栏">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="4" y="5" width="7" height="14" rx="1.6" stroke="currentColor" stroke-width="1.5" />
+        <rect x="11" y="5" width="9" height="14" rx="1.6" stroke="currentColor" stroke-width="1.5" opacity="0.72" />
+      </svg>
+    </button>
     <div id="topTitle" class="title">Claude Web</div>
-    <button id="shareBtn" class="share-btn">Share</button>
+    <button id="shareBtn" class="share-btn" aria-label="导出对话">
+      <span class="share-label">Share</span>
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M8.5 26V13.5C8.5 8.8 11.8 5 16 5s7.5 3.8 7.5 8.5V26l-3.2-2.9L17.1 26 14 23.1 10.7 26 8.5 24Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+        <circle cx="13.4" cy="14.6" r="1.25" fill="currentColor" />
+        <circle cx="18.6" cy="14.6" r="1.25" fill="currentColor" />
+      </svg>
+    </button>
   </div>
 
   <div id="drawerOverlay" class="drawer-overlay"></div>
@@ -1694,7 +2052,16 @@
         <label id="plusBtn" class="plus-btn" for="fileInput" role="button" tabindex="0" aria-label="上传文件">+</label>
         <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf" />
         <button id="modelPill" class="model-pill">Opus 4.7⌄</button>
-        <button id="sendBtn" class="send-btn">↑</button>
+        <button id="sendBtn" class="send-btn" aria-label="发送消息">
+          <span class="send-arrow">↑</span>
+          <svg class="voice-icon" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+            <path d="M7 20v-4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            <path d="M12.5 24v-12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            <path d="M18 28V8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            <path d="M23.5 24v-12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            <path d="M29 20v-4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+          </svg>
+        </button>
       </div>
     </div>
   </div>
@@ -1743,6 +2110,58 @@
     let activeProfileId = "";
     let sending = false;
     let loadSeq = 0;
+    let renderMessagesJob = 0;
+    let lastRenderedMsgKey = "";
+
+    function isWelcomeEmptyConversation() {
+      return !sending && (!messages || messages.length === 0);
+    }
+
+    function setWelcomeMode(enabled) {
+      document.body.classList.toggle("welcome-mode", enabled);
+      if (enabled) {
+        topTitle.textContent = "";
+        promptEl.placeholder = "How can I help you today?";
+      } else {
+        promptEl.placeholder = "Write a message...";
+      }
+      modelPill.innerHTML = modelLabel(apiModel.value || "claude-sonnet-4-6");
+      updateWelcomeInputState();
+    }
+
+    function updateWelcomeInputState() {
+      document.body.classList.toggle(
+        "has-input",
+        document.body.classList.contains("welcome-mode") && !!promptEl.value.trim()
+      );
+    }
+
+    function renderWelcomeEmpty() {
+      chatList.innerHTML = `
+        <section class="claude-welcome" aria-label="Claude welcome">
+          <div class="claude-welcome-hero">
+            <svg class="claude-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+              <g stroke="currentColor" stroke-width="5.4" stroke-linecap="round">
+                <path d="M32 8v17" />
+                <path d="M32 39v17" />
+                <path d="M8 32h17" />
+                <path d="M39 32h17" />
+                <path d="M15 15l12 12" />
+                <path d="M37 37l12 12" />
+                <path d="M49 15 37 27" />
+                <path d="M27 37 15 49" />
+                <path d="M22 10.5l6.6 15.7" />
+                <path d="M35.4 37.8 42 53.5" />
+                <path d="M53.5 22l-15.7 6.6" />
+                <path d="M26.2 35.4 10.5 42" />
+              </g>
+            </svg>
+            <h1>Welcome!</h1>
+          </div>
+        </section>
+      `;
+      lastRenderedMsgKey = "";
+    }
 
     function escapeHtml(t) {
       const d = document.createElement("div");
@@ -1793,6 +2212,9 @@
 
     function modelLabel(m) {
       m = (m || "").toLowerCase();
+      if (document.body.classList.contains("welcome-mode")) {
+        return '<span>Sonnet 4.6</span><span class="model-secondary">Adaptive</span><span class="model-caret">⌄</span>';
+      }
       if (m.includes("opus-4-7")) return "Opus 4.7⌄";
       if (m.includes("opus-4-6")) return "Opus 4.6⌄";
       if (m.includes("sonnet-4-6")) return "Sonnet 4.6⌄";
@@ -1807,7 +2229,7 @@
 
     function setModel(model) {
       apiModel.value = model || "claude-opus-4-7";
-      modelPill.textContent = modelLabel(apiModel.value);
+      modelPill.innerHTML = modelLabel(apiModel.value);
 
       let matched = false;
       modelChoices.querySelectorAll(".model-choice").forEach(b => {
@@ -1823,6 +2245,8 @@
       localStorage.setItem("last_model_global", apiModel.value);
       localStorage.setItem(currentModelKey(), apiModel.value);
     }
+
+    setModel("claude-sonnet-4-6");
 
     function setModelChoicesCollapsed(collapsed) {
       modelChoices.classList.toggle("model-choices-collapsed", collapsed);
@@ -2520,9 +2944,6 @@
       return [];
     }
 
-    let renderMessagesJob = 0;
-    let lastRenderedMsgKey = "";
-
     function getMessageId(msg) {
       return msg && msg.id !== undefined && msg.id !== null ? String(msg.id) : "";
     }
@@ -2764,10 +3185,12 @@
       const jobId = ++renderMessagesJob;
 
       if (!messages.length) {
-        chatList.innerHTML = '<div class="empty">当前对话还没有消息</div>';
-        lastRenderedMsgKey = "";
+        setWelcomeMode(true);
+        renderWelcomeEmpty();
         return;
       }
+
+      setWelcomeMode(false);
 
       const shouldAutoScroll = forceScroll || autoScrollEnabled;
       const scrollBefore = getScrollTop();
@@ -2816,7 +3239,7 @@
     let streamingRenderQueued = false;
     let pendingStreamingContent = "";
     let lastStreamingRenderTime = 0;
-    const STREAMING_RENDER_THROTTLE = 50; // 最小渲染间隔 50ms
+    const STREAMING_RENDER_THROTTLE = 16; // 约每帧更新一次，提升流式显示速度
     let streamingDisplayContent = "";
     let streamingTargetContent = "";
     let streamingTypewriterTimer = null;
@@ -3009,13 +3432,13 @@
       const chunk = source.slice(start, end);
       const last = chunk[chunk.length - 1] || "";
 
-      let delay = 22;
-      if (isLineBreak(last)) delay = 125;
-      else if (isWhitespace(last)) delay = 10;
-      else if (isCjkChar(last)) delay = 26;
-      else if (isAsciiWordChar(last)) delay = 32;
-      else if (isSoftPunctuation(last)) delay = 68;
-      else if (isHardPunctuation(last)) delay = 112;
+      let delay = 6;
+      if (isLineBreak(last)) delay = 28;
+      else if (isWhitespace(last)) delay = 3;
+      else if (isCjkChar(last)) delay = 7;
+      else if (isAsciiWordChar(last)) delay = 8;
+      else if (isSoftPunctuation(last)) delay = 14;
+      else if (isHardPunctuation(last)) delay = 24;
 
       return {
         nextText: source.slice(0, end),
@@ -3394,7 +3817,9 @@
 
     function renderAll() {
       const c = conversations.find(x => x.id === activeConversationId);
-      topTitle.textContent = c && c.title ? c.title : "Claude Web";
+      if (!isWelcomeEmptyConversation()) {
+        topTitle.textContent = c && c.title ? c.title : "Claude Web";
+      }
       renderSessions();
       renderMessages();
     }
@@ -3455,6 +3880,7 @@
 
       sending = true;
       sendBtn.disabled = true;
+      setWelcomeMode(false);
 
       let fileName = null;
       let imagePreview = null;
@@ -3812,6 +4238,8 @@
 
     // 输入框回车只换行，不发送消息。
     // 发送消息只通过右侧发送按钮触发。
+    promptEl.addEventListener("input", updateWelcomeInputState);
+
     promptEl.onkeydown = e => {
       if (e.key === "Enter") {
         return;

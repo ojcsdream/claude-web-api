@@ -142,6 +142,54 @@ curl http://127.0.0.1:8000/api/health
 
 默认服务只监听 `127.0.0.1:8000`。如果需要公网访问，建议使用 Nginx、Caddy、SSH tunnel、Cloudflare Tunnel 或其它受控反向代理，并先处理认证、CORS 和 API Key 安全。
 
+### 默认公网启动
+
+当前推荐默认使用固定 ngrok 域名启动：
+
+```bash
+cd /home/ai/claude-web
+./start-public.sh
+```
+
+固定公网入口：
+
+```text
+https://kindling-shaft-creamer.ngrok-free.dev
+```
+
+### Cloudflare Tunnel 公网入口
+
+推荐使用 Cloudflare Tunnel 暴露本地服务。当前脚本默认使用 `cloudflared tunnel --url` 创建临时 HTTPS 地址，适合快速公网访问。
+
+```bash
+cd /home/ai/claude-web
+chmod +x start-cloudflare.sh
+./start-cloudflare.sh
+```
+
+该脚本会：
+
+- 自动确保本地 `127.0.0.1:8000` 服务已启动
+- 清理旧的同端口 `cloudflared tunnel` 进程
+- 启动新的 Cloudflare Tunnel
+- 把公网地址写入 `cloudflare-url.txt`
+- 尝试做一次公网 `/api/health` 检查
+
+日志文件：
+
+```text
+logs/cloudflared.log
+logs/cloudflared.log.stdout
+```
+
+需要固定域名和更稳定的入口时，在 Cloudflare Zero Trust 里创建 Named Tunnel，把公网 Hostname 指向本地服务 `http://127.0.0.1:8000`，然后用 token 启动：
+
+```bash
+export CLOUDFLARE_TUNNEL_TOKEN="你的 tunnel token"
+export CLOUDFLARE_PUBLIC_URL="https://你的域名"
+./start-cloudflare.sh
+```
+
 `start-ngrok.sh` 仅建议用于临时调试，不建议默认公网暴露，也不要提交 `ngrok-url.txt` 或任何隧道 token。
 
 公网 ngrok 隧道：

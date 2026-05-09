@@ -10,6 +10,8 @@ logs/
 *.log
 uploads/
 picture/
+Screenshot_*.jpg
+Screenshot_*.png
 
 # Runtime databases and local state
 chat.db

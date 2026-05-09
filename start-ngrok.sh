@@ -10,6 +10,7 @@ NGROK_API="http://127.0.0.1:4040/api/tunnels"
 NGROK_LOG="logs/ngrok.log"
 NGROK_PID_FILE="logs/ngrok.pid"
 NGROK_URL_FILE="ngrok-url.txt"
+NGROK_URL="${NGROK_URL:-}"
 
 ./start-local.sh >/dev/null
 
@@ -20,8 +21,13 @@ fi
 
 rm -f "$NGROK_LOG" "$NGROK_PID_FILE"
 
-setsid "$NGROK_BIN" http --log=stdout "http://127.0.0.1:${PORT}" \
-  >"$NGROK_LOG" 2>&1 < /dev/null &
+if [ -n "$NGROK_URL" ]; then
+  setsid "$NGROK_BIN" http --log=stdout --url="$NGROK_URL" "http://127.0.0.1:${PORT}" \
+    >"$NGROK_LOG" 2>&1 < /dev/null &
+else
+  setsid "$NGROK_BIN" http --log=stdout "http://127.0.0.1:${PORT}" \
+    >"$NGROK_LOG" 2>&1 < /dev/null &
+fi
 
 echo $! > "$NGROK_PID_FILE"
 

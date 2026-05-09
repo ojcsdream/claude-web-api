@@ -5,7 +5,7 @@ import json
 import uuid
 import time
 
-from fastapi import FastAPI, UploadFile, File, Form, Depends
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +19,7 @@ from chat_utils import (
     is_image_file,
     parse_image_preview_paths,
 )
-from config import BASE_DIR, DEFAULT_MODEL, STATIC_DIR, UPLOAD_DIR
+from config import BASE_DIR, DEFAULT_MODEL, STATIC_DIR, UPLOAD_DIR, VISION_IMAGE_EXTS
 from db import (
     db_add_message,
     db_create_conversation,
@@ -762,6 +762,11 @@ async def chat_upload_stream(
         fname = file.filename or "uploaded_file"
 
         if is_image_file(fname):
+            if Path(fname).suffix.lower() not in VISION_IMAGE_EXTS:
+                raise HTTPException(
+                    status_code=400,
+                    detail="公网模式下暂只支持 jpg/jpeg/png/webp 图片，请先转换后再上传。",
+                )
             original, local_path, web_path = await save_uploaded_file_dual_paths(file)
 
             image_files.append({
@@ -1045,7 +1050,7 @@ def export_conversation_markdown(conversation_id: str):
 
 import urllib.request
 import urllib.error
-from fastapi import Request, Header, HTTPException, Query
+from fastapi import Request, Header, Query
 from fastapi.responses import PlainTextResponse
 
 ADMIN_TOKEN_FILE = BASE_DIR / "admin-token.txt"

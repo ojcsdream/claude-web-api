@@ -8,8 +8,8 @@ from urllib.parse import quote, urlparse, parse_qs, unquote
 
 from fastapi import UploadFile
 
-from chat_utils import estimate_round_tokens
-from config import BASE_DIR, DEFAULT_MODEL, UPLOAD_DIR
+from chat_utils import estimate_round_tokens, is_image_file
+from config import BASE_DIR, DEFAULT_MODEL, MAX_IMAGE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, UPLOAD_DIR
 from db import db_add_message
 
 
@@ -1092,6 +1092,10 @@ async def save_uploaded_file_dual_paths(file: UploadFile) -> tuple[str, str, str
     save_path = UPLOAD_DIR / safe_name
 
     raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise RuntimeError(f"文件过大，当前限制为 {MAX_UPLOAD_BYTES // 1024 // 1024}MB")
+    if is_image_file(original_name) and len(raw) > MAX_IMAGE_UPLOAD_BYTES:
+        raise RuntimeError(f"图片过大，当前限制为 {MAX_IMAGE_UPLOAD_BYTES // 1024 // 1024}MB。请先压缩图片后再上传。")
     save_path.write_bytes(raw)
 
     local_path = f"./uploads/{safe_name}"

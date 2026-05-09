@@ -12,7 +12,7 @@ fi
 setsid .venv/bin/python -m uvicorn app:app \
   --host 127.0.0.1 \
   --port 8000 \
-  --workers 2 \
+  --workers 1 \
   --no-access-log \
   > logs/uvicorn-local.log 2>&1 < /dev/null &
 
