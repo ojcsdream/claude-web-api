@@ -1,0 +1,21 @@
+{
+  "name": "Claude Web",
+  "short_name": "Claude Web",
+  "description": "Claude-style local AI workspace",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#1c1c1a",
+  "theme_color": "#1c1c1a",
+  "orientation": "portrait",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/static/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

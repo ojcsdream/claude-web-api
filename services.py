@@ -223,7 +223,8 @@ def looks_like_search_request(text: str) -> bool:
     patterns = [
         "搜索", "搜一下", "搜一搜", "查一下", "查一查", "查找", "检索",
         "最新", "最近", "新闻", "消息", "动态", "网页", "浏览网页",
-        "search ", "google ", "look up", "browse", "web search", "latest"
+        "新功能", "功能清单", "有什么", "有哪些", "区别", "变化", "不一样",
+        "search ", "google ", "look up", "browse", "web search", "latest", "what's new"
     ]
     return any(p in value for p in patterns)
 
@@ -351,6 +352,204 @@ def normalize_source_url(url: str) -> str:
     return url
 
 
+def fetch_searchfree_results(query: str, max_results: int = 5) -> list[dict]:
+    import urllib.request
+    import urllib.error
+
+    q = rewrite_search_query(query)
+    if not q:
+        return []
+
+    payload = json.dumps({
+        "query": q,
+        "search_depth": "advanced",
+        "max_results": max(1, min(int(max_results or 5), 10)),
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://searchfree.site/api/search",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Claude-Web/1.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+    except Exception:
+        return []
+
+    items = data.get("results") or []
+    cleaned = []
+    seen = set()
+
+    for item in items:
+        href = normalize_source_url(item.get("url", ""))
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        title = normalize_source_title(item.get("title", ""), href)
+        excerpt = (item.get("content") or item.get("description") or "").strip()
+        cleaned.append({
+            "title": title,
+            "url": href,
+            "description": excerpt[:2200],
+            "score": source_relevance_score(q, title, href, excerpt) + 14,
+            "provider": "searchfree",
+        })
+        if len(cleaned) >= max_results:
+            break
+
+    cleaned.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return cleaned[:max_results]
+
+
+def fetch_search1api_results(query: str, max_results: int = 5) -> list[dict]:
+    import urllib.request
+
+    token = os.environ.get("SEARCH1API_KEY", "").strip()
+    if not token:
+        return []
+
+    q = rewrite_search_query(query)
+    if not q:
+        return []
+
+    payload = json.dumps({
+        "query": q,
+        "search_service": "google",
+        "max_results": max(1, min(int(max_results or 5), 10)),
+        "crawl_results": 0,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.search1api.com/search",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": "Bearer " + token,
+            "User-Agent": "Claude-Web/1.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+    except Exception:
+        return []
+
+    items = data.get("results") or data.get("data") or []
+    cleaned = []
+    seen = set()
+
+    for item in items:
+        href = normalize_source_url(item.get("link") or item.get("url") or "")
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        title = normalize_source_title(item.get("title", ""), href)
+        excerpt = (item.get("content") or item.get("snippet") or item.get("description") or "").strip()
+        cleaned.append({
+            "title": title,
+            "url": href,
+            "description": excerpt[:2200],
+            "score": source_relevance_score(q, title, href, excerpt) + 10,
+            "provider": "search1api",
+        })
+        if len(cleaned) >= max_results:
+            break
+
+    cleaned.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return cleaned[:max_results]
+
+
+def merge_search_results(result_groups: list[list[dict]], max_results: int = 5) -> list[dict]:
+    merged = []
+    seen = set()
+
+    for group in result_groups:
+        for item in group or []:
+            href = normalize_source_url(item.get("url", ""))
+            if not href or href in seen:
+                continue
+            seen.add(href)
+            normalized = dict(item)
+            normalized["url"] = href
+            merged.append(normalized)
+
+    merged.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return merged[:max_results]
+
+
+def fetch_primary_search_results(query: str, max_results: int = 5) -> list[dict]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    per_provider_limit = max(1, min(int(max_results or 5), 10))
+    providers = [
+        lambda: fetch_search1api_results(query, max_results=per_provider_limit),
+        lambda: fetch_searchfree_results(query, max_results=per_provider_limit),
+    ]
+
+    groups = []
+    with ThreadPoolExecutor(max_workers=len(providers)) as pool:
+        futures = [pool.submit(provider) for provider in providers]
+        for future in futures:
+            try:
+                groups.append(future.result(timeout=25))
+            except Exception:
+                groups.append([])
+
+    return merge_search_results(groups, max_results=max_results)
+
+
+def select_balanced_sources(results: list[dict], max_results: int) -> list[dict]:
+    if not results:
+        return []
+
+    limit = max(1, int(max_results or 4))
+    sorted_results = sorted(
+        results,
+        key=lambda x: x.get("score", source_relevance_score("", x.get("title", ""), x.get("url", ""), x.get("excerpt", ""))),
+        reverse=True,
+    )
+
+    selected = []
+    selected_urls = set()
+
+    def add_first(predicate):
+        if len(selected) >= limit:
+            return
+        for item in sorted_results:
+            url = item.get("url", "")
+            if not url or url in selected_urls:
+                continue
+            if predicate(item):
+                selected.append(item)
+                selected_urls.add(url)
+                return
+
+    add_first(lambda item: not item.get("provider"))
+    add_first(lambda item: item.get("provider") == "search1api")
+    add_first(lambda item: item.get("provider") == "searchfree")
+
+    for item in sorted_results:
+        if len(selected) >= limit:
+            break
+        url = item.get("url", "")
+        if not url or url in selected_urls:
+            continue
+        selected.append(item)
+        selected_urls.add(url)
+
+    return selected
+
+
 def fetch_search_results(query: str, max_results: int = 5) -> list[dict]:
     import urllib.request
     from html.parser import HTMLParser
@@ -408,6 +607,10 @@ def fetch_search_results(query: str, max_results: int = 5) -> list[dict]:
     query = rewrite_search_query(query)
     if not query:
         return []
+
+    primary_results = fetch_primary_search_results(query, max_results=max_results)
+    if primary_results:
+        return primary_results
 
     api_results = fetch_brave_search_results(query, max_results=max_results)
     if api_results:
@@ -546,42 +749,15 @@ def build_sources_context_block(sources: list[dict]) -> str:
 
 
 def collect_search_sources(user_prompt: str, max_results: int = 4) -> list[dict]:
-    urls = extract_urls_from_text(user_prompt, max_urls=max_results)
     results = []
 
-    lowered_prompt = (user_prompt or "").lower()
-    if "openai" in lowered_prompt or "gpt" in lowered_prompt:
-        for url in [
-            "https://openai.com/news/",
-            "https://help.openai.com/en/articles/9624314-model-release-notes",
-        ]:
-            if len(results) >= max_results:
-                break
-            excerpt = extract_webpage_via_api(url, max_chars=1400)
-            results.append({
-                "title": normalize_source_title("", url),
-                "url": url,
-                "excerpt": excerpt,
-                "score": source_relevance_score(user_prompt, "", url, excerpt) + 12,
-            })
-
-    for url in urls:
-        excerpt = extract_webpage_via_api(url, max_chars=2200)
-        results.append({
-            "title": normalize_source_title("", url),
-            "url": url,
-            "excerpt": excerpt,
-        })
-
-    if len(results) < max_results and looks_like_search_request(user_prompt):
-        search_results = fetch_search_results(user_prompt, max_results=max_results)
-        for item in search_results[:2]:
-            if any(existing["url"] == item["url"] for existing in results):
-                continue
+    if looks_like_search_request(user_prompt):
+        search_results = fetch_primary_search_results(user_prompt, max_results=max_results * 2)
+        for item in search_results:
             excerpt = item.get("description") or ""
             if not excerpt:
                 excerpt = extract_webpage_via_api(item["url"], max_chars=1400)
-            score = source_relevance_score(user_prompt, item["title"], item["url"], excerpt)
+            score = item.get("score", source_relevance_score(user_prompt, item["title"], item["url"], excerpt))
             if score < 8:
                 continue
             results.append({
@@ -589,11 +765,10 @@ def collect_search_sources(user_prompt: str, max_results: int = 4) -> list[dict]
                 "url": item["url"],
                 "excerpt": excerpt,
                 "score": score,
+                "provider": item.get("provider", ""),
             })
-            if len(results) >= max_results:
-                break
 
-    results.sort(key=lambda x: x.get("score", source_relevance_score(user_prompt, x.get("title", ""), x.get("url", ""), x.get("excerpt", ""))), reverse=True)
+    results = select_balanced_sources(results, max_results)
     final = []
     for idx, item in enumerate(results, 1):
         final.append({
@@ -601,6 +776,7 @@ def collect_search_sources(user_prompt: str, max_results: int = 4) -> list[dict]
             "title": normalize_source_title(item.get("title", ""), item.get("url", "")),
             "url": item.get("url", ""),
             "excerpt": item.get("excerpt", ""),
+            "provider": item.get("provider", ""),
         })
     return final
 

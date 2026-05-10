@@ -3,16 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1c1c1a" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Claude Web" />
+  <link rel="manifest" href="/static/manifest.webmanifest" />
+  <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/static/icons/icon.svg" />
   <title>Claude Web</title>
 
   <script>
     window.MathJax = {
+      loader: {
+        load: ["[tex]/mhchem"]
+      },
       tex: {
         inlineMath: [["$", "$"], ["\\(", "\\)"]],
         displayMath: [["$$", "$$"], ["\\[", "\\]"]],
         processEscapes: true,
         processEnvironments: true,
-        packages: {"[+]": ["ams", "noerrors", "noundefined"]}
+        packages: {"[+]": ["ams", "mhchem", "noerrors", "noundefined"]}
       },
       chtml: {
         scale: 1.02,
@@ -1552,6 +1563,23 @@
     transform: scale(0.94);
     background: rgba(255,255,255,0.16) !important;
   }
+
+  .web-search-btn {
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: #bdb6aa;
+    font-size: 18px;
+    font-weight: 750;
+    flex: 0 0 auto;
+  }
+
+  .web-search-btn.active {
+    background: rgba(236,229,215,0.16);
+    color: #fff7ea;
+  }
 </style>
 
 <style id="version-toggle-styles">
@@ -1815,6 +1843,7 @@
     align-items: center;
     min-height: 34px;
     padding: 0;
+    gap: 8px;
   }
 
   body.welcome-mode .plus-btn {
@@ -1826,11 +1855,11 @@
   }
 
   body.welcome-mode .model-pill {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    width: max-content;
-    max-width: calc(100% - 88px);
+    position: static;
+    transform: none;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
     padding: 0;
     color: rgba(216, 214, 204, 0.82);
     font-size: clamp(16px, 4.7vw, 19px);
@@ -1838,6 +1867,22 @@
     line-height: 1.1;
     letter-spacing: 0;
     transition: color 0.16s ease;
+  }
+
+  body.welcome-mode .web-search-btn {
+    width: 34px;
+    height: 34px;
+    margin-left: auto;
+    color: rgba(216, 214, 204, 0.72);
+    font-size: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  body.welcome-mode .web-search-btn.active {
+    background: rgba(236,229,215,0.14);
+    color: rgba(245,241,232,0.92);
   }
 
   body.welcome-mode .model-pill:hover {
@@ -1855,7 +1900,7 @@
   }
 
   body.welcome-mode .send-btn {
-    margin-left: auto;
+    margin-left: 0;
     width: 34px;
     height: 34px;
     padding: 0;
@@ -2052,6 +2097,7 @@
         <label id="plusBtn" class="plus-btn" for="fileInput" role="button" tabindex="0" aria-label="上传文件">+</label>
         <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf" />
         <button id="modelPill" class="model-pill">Opus 4.7⌄</button>
+        <button id="webSearchBtn" class="web-search-btn" type="button" title="联网搜索">⌕</button>
         <button id="sendBtn" class="send-btn" aria-label="发送消息">
           <span class="send-arrow">↑</span>
           <svg class="voice-icon" viewBox="0 0 36 36" fill="none" aria-hidden="true">
@@ -2094,6 +2140,7 @@
 
     const promptEl = $("prompt");
     const sendBtn = $("sendBtn");
+    const webSearchBtn = $("webSearchBtn");
     const fileInput = $("fileInput");
     const fileInfo = $("fileInfo");
     const preview = $("preview");
@@ -2112,6 +2159,12 @@
     let loadSeq = 0;
     let renderMessagesJob = 0;
     let lastRenderedMsgKey = "";
+    let webSearchEnabled = localStorage.getItem("web_search_enabled") === "1";
+
+    function renderWebSearchButton() {
+      webSearchBtn.classList.toggle("active", webSearchEnabled);
+      webSearchBtn.title = webSearchEnabled ? "联网搜索已开启" : "联网搜索";
+    }
 
     function isWelcomeEmptyConversation() {
       return !sending && (!messages || messages.length === 0);
@@ -2391,11 +2444,46 @@
       return String(text || "").replace(/\uE000(\d+)\uE001/g, (_, idx) => blocks[Number(idx)] || "");
     }
 
+    function protectMathSpans(text) {
+      const blocks = [];
+      const replaced = String(text || "")
+        .replace(/\$\$[\s\S]*?\$\$/g, m => {
+          const key = `\uE100${blocks.length}\uE101`;
+          blocks.push(m);
+          return key;
+        })
+        .replace(/\\\[[\s\S]*?\\\]/g, m => {
+          const key = `\uE100${blocks.length}\uE101`;
+          blocks.push(m);
+          return key;
+        })
+        .replace(/\\begin\{(?:equation|align|aligned|gather|multline)\*?\}[\s\S]*?\\end\{(?:equation|align|aligned|gather|multline)\*?\}/g, m => {
+          const key = `\uE100${blocks.length}\uE101`;
+          blocks.push(m);
+          return key;
+        })
+        .replace(/\\\([\s\S]*?\\\)/g, m => {
+          const key = `\uE100${blocks.length}\uE101`;
+          blocks.push(m);
+          return key;
+        })
+        .replace(/\$(?!\$)(?:\\.|[^$\n])+\$/g, m => {
+          const key = `\uE100${blocks.length}\uE101`;
+          blocks.push(m);
+          return key;
+        });
+      return { text: replaced, blocks };
+    }
+
+    function restoreMathSpans(html, blocks) {
+      return String(html || "").replace(/\uE100(\d+)\uE101/g, (_, idx) => blocks[Number(idx)] || "");
+    }
+
     function looksLikeMathLine(line) {
       const t = line.trim();
       if (!t || t.length > 180) return false;
       if (/^[-*+]\s+/.test(t) || /^#{1,6}\s+/.test(t) || /^\|/.test(t)) return false;
-      const hasOperator = /(?:=|\\(?:frac|sum|int|lim|sqrt|begin|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|infty|cdot|times|leq|geq|neq|approx)|\^|_)/.test(t);
+      const hasOperator = /(?:=|->|<-|<=>|\\(?:ce|pu|frac|sum|int|lim|sqrt|begin|alpha|beta|gamma|delta|theta|lambda|mu|nu|pi|sigma|omega|infty|cdot|times|leq|geq|neq|approx|to|rightarrow|leftarrow|Rightarrow|Leftarrow|leftrightarrow|longrightarrow|longleftarrow)|\^|_)/.test(t);
       const hasLetterOrNumber = /[A-Za-z0-9]/.test(t);
       const proseChars = /[\u4e00-\u9fa5，。？！、；：]/.test(t);
       return hasOperator && hasLetterOrNumber && !proseChars;
@@ -2408,15 +2496,17 @@
       x = x
         .replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`)
         .replace(/\\begin\{align\*?\}([\s\S]*?)\\end\{align\*?\}/g, (_, inner) => `\n$$\n\\begin{aligned}\n${inner.trim()}\n\\end{aligned}\n$$\n`)
+        .replace(/\\begin\{gather\*?\}([\s\S]*?)\\end\{gather\*?\}/g, (_, inner) => `\n$$\n\\begin{gathered}\n${inner.trim()}\n\\end{gathered}\n$$\n`)
         .replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`)
         .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => `$${inner.trim()}$`)
-        .replace(/\[([^\]\n]*(?:\\frac|\\sqrt|\\sum|\\int|\\lim|=|\^|_)[^\]\n]*)\]/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`);
+        .replace(/\[([^\]\n]*(?:\\ce|\\pu|\\frac|\\sqrt|\\sum|\\int|\\lim|\\to|\\rightarrow|\\leftarrow|\\Rightarrow|\\Leftarrow|\\leftrightarrow|=|->|<-|<=>|\^|_)[^\]\n]*)\]/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`);
 
       const lines = x.split("\n");
       let inFence = false;
       x = lines.map(line => {
         if (/^\s*```/.test(line)) inFence = !inFence;
         if (inFence || /^\s*\$\$/.test(line) || /\$\S[\s\S]*\S\$/.test(line)) return line;
+        if (/^\s*\\ce\{.+\}\s*$/.test(line) || /^\s*\\pu\{.+\}\s*$/.test(line)) return `$$${line.trim()}$$`;
         if (looksLikeMathLine(line)) return `$$${repairFractions(line.trim())}$$`;
         return line;
       }).join("\n");
@@ -2616,6 +2706,7 @@
 
     function renderMarkdown(text) {
       const normalized = normalizeMathDelimiters(text || "");
+      const protectedMath = protectMathSpans(normalized);
       if (window.marked && marked.parse) {
         if (marked.setOptions && !marked._claudeWebConfigured) {
           marked.setOptions({
@@ -2626,9 +2717,9 @@
           });
           marked._claudeWebConfigured = true;
         }
-        return marked.parse(normalized);
+        return restoreMathSpans(marked.parse(protectedMath.text), protectedMath.blocks);
       }
-      return escapeHtml(normalized).replace(/\n/g, "<br>");
+      return restoreMathSpans(escapeHtml(protectedMath.text).replace(/\n/g, "<br>"), protectedMath.blocks);
     }
 
     function parseMessageSources(value) {
@@ -3925,6 +4016,7 @@
           form.append("api_auth_token", apiKey.value.trim());
           form.append("api_model", model);
           form.append("api_profile_name", providerName());
+          form.append("web_search", webSearchEnabled ? "true" : "false");
 
           for (const f of files) form.append("files", f);
 
@@ -3936,6 +4028,7 @@
             body: JSON.stringify({
               conversation_id: activeConversationId,
               prompt: text,
+              web_search: webSearchEnabled,
               api_base_url: apiUrl.value.trim(),
               api_auth_token: apiKey.value.trim(),
               api_model: model,
@@ -4234,6 +4327,12 @@
       });
     };
 
+    webSearchBtn.onclick = () => {
+      webSearchEnabled = !webSearchEnabled;
+      localStorage.setItem("web_search_enabled", webSearchEnabled ? "1" : "0");
+      renderWebSearchButton();
+    };
+
     sendBtn.onclick = sendPrompt;
 
     // 输入框回车只换行，不发送消息。
@@ -4350,6 +4449,7 @@
       }, 8000);
 
       try {
+        renderWebSearchButton();
         await loadProfiles();
         if (seq !== loadSeq) return;
         restoreModel();
@@ -4364,6 +4464,12 @@
     }
 
     initPage();
+
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/static/sw.js").catch(() => {});
+      });
+    }
   </script>
 </body>
 </html>

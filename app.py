@@ -48,10 +48,13 @@ from schemas import (
     ConversationRenameBody,
 )
 from services import (
+    build_sources_context_block,
     call_direct_vision_api,
+    collect_search_sources,
     enhance_prompt_with_url_fetch,
     extract_urls_from_text,
     load_uploaded_text_from_path,
+    looks_like_search_request,
     save_uploaded_file_dual_paths,
     stream_direct_and_save,
     stream_direct_api_text,
@@ -446,10 +449,20 @@ def chat_stream(body: ChatBody):
         return f"\n[[STATUS:{name}]]\n"
 
     def gen():
-        if extract_urls_from_text(body.prompt):
+        should_search = body.web_search or looks_like_search_request(body.prompt)
+
+        if should_search or extract_urls_from_text(body.prompt):
             yield status_line("parsing")
 
         effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
+        sources = []
+
+        if should_search:
+            sources = collect_search_sources(body.prompt)
+            source_context = build_sources_context_block(sources)
+            if source_context:
+                effective_prompt = source_context + "\n\n用户原始问题：\n" + body.prompt
+
         final_prompt = build_chat_prompt(history, effective_prompt)
 
         yield from stream_direct_and_save(
@@ -459,6 +472,7 @@ def chat_stream(body: ChatBody):
             body.api_auth_token,
             body.api_model or DEFAULT_MODEL,
             body.api_profile_name or "",
+            sources=json.dumps(sources, ensure_ascii=False) if sources else "",
         )
 
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
@@ -739,6 +753,7 @@ async def chat_upload_stream(
     conversation_id: str = Form(""),
     prompt: str = Form(""),
     messages_json: str = Form("[]"),
+    web_search: bool = Form(False),
     api_base_url: str = Form(""),
     api_auth_token: str = Form(""),
     api_model: str = Form(DEFAULT_MODEL),
@@ -822,6 +837,13 @@ async def chat_upload_stream(
 
     db_update_title_if_needed(cid, prompt or file_names_str or "新对话")
 
+    sources = []
+    search_context = ""
+    should_search = web_search or looks_like_search_request(user_prompt)
+    if should_search:
+        sources = collect_search_sources(user_prompt)
+        search_context = build_sources_context_block(sources)
+
     # 有图片时，强制走 base64 视觉 API
     if image_files:
         vision_prompt_parts = []
@@ -837,6 +859,10 @@ async def chat_upload_stream(
         vision_prompt_parts.append("不要只根据聊天历史、文件名、路径或上下文猜测图片内容。")
         vision_prompt_parts.append("如果你没有看到图片内容，请明确回复：我没有读取到图片内容。")
         vision_prompt_parts.append("")
+
+        if search_context:
+            vision_prompt_parts.append(search_context)
+            vision_prompt_parts.append("")
 
         for idx, item in enumerate(image_files, 1):
             vision_prompt_parts.append(f"图片 {idx} 文件名：{item['name']}（仅用于区分，不可据此判断内容）")
@@ -886,6 +912,7 @@ async def chat_upload_stream(
                     model=api_model or DEFAULT_MODEL,
                     provider_name=api_profile_name or "",
                     token_count=token_count,
+                    sources=json.dumps(sources, ensure_ascii=False) if sources else "",
                 )
 
                 yield final_answer
@@ -911,6 +938,7 @@ async def chat_upload_stream(
                     model=api_model or DEFAULT_MODEL,
                     provider_name=api_profile_name or "",
                     token_count=token_count,
+                    sources=json.dumps(sources, ensure_ascii=False) if sources else "",
                 )
 
                 yield final_answer
@@ -938,6 +966,9 @@ async def chat_upload_stream(
     else:
         final_user_prompt = user_prompt
 
+    if search_context:
+        final_user_prompt = search_context + "\n\n用户原始问题：\n" + final_user_prompt
+
     final_prompt = build_chat_prompt(
         messages=history,
         prompt=final_user_prompt,
@@ -951,6 +982,7 @@ async def chat_upload_stream(
             api_auth_token,
             api_model or DEFAULT_MODEL,
             api_profile_name or "",
+            sources=json.dumps(sources, ensure_ascii=False) if sources else "",
         ),
         media_type="text/plain; charset=utf-8",
     )

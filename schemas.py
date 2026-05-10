@@ -28,6 +28,7 @@ class ChatBody(BaseModel):
     api_auth_token: str = ""
     api_model: str = DEFAULT_MODEL
     api_profile_name: str = ""
+    web_search: bool = False
     keep_old: bool = False  # 重新生成时保留旧回复，作为版本历史
 
 

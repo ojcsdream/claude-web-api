@@ -4,6 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p logs
 
+if [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
+fi
+
 if pgrep -f "uvicorn app:app --host 127.0.0.1 --port 8000" >/dev/null 2>&1; then
   pkill -f "uvicorn app:app --host 127.0.0.1 --port 8000" || true
   sleep 1
