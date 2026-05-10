@@ -506,6 +506,24 @@ def _stream_and_save_regenerated_answer(inner_gen, cid, api_model, provider_name
     _save_regenerated_answer(cid, full, api_model, provider_name, old_message_id, final_prompt, sources=sources)
 
 
+def _build_regenerate_prompt_with_search(context_messages, last_user_prompt, web_search=False):
+    sources = []
+    search_context = ""
+    should_search = web_search or looks_like_search_request(last_user_prompt)
+    if should_search:
+        sources = collect_search_sources(last_user_prompt)
+        search_context = build_sources_context_block(sources)
+
+    final_user_prompt = last_user_prompt
+    if search_context:
+        final_user_prompt = search_context + "\n\n用户原始问题：\n" + last_user_prompt
+
+    return build_chat_prompt(
+        messages=context_messages,
+        prompt=final_user_prompt,
+    ), sources
+
+
 @app.post("/api/chat/regenerate_from_stream")
 def regenerate_from_stream(body: ChatBody):
     cid = db_ensure_conversation(body.conversation_id)
@@ -600,9 +618,10 @@ def regenerate_from_stream(body: ChatBody):
 
             return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
-    final_prompt = build_chat_prompt(
-        messages=context_messages,
-        prompt=last_user_prompt,
+    final_prompt, sources = _build_regenerate_prompt_with_search(
+        context_messages,
+        last_user_prompt,
+        body.web_search,
     )
 
     _api_model = body.api_model or DEFAULT_MODEL
@@ -619,7 +638,7 @@ def regenerate_from_stream(body: ChatBody):
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
                 (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
-                body.message_id, final_prompt,
+                body.message_id, final_prompt, sources=json.dumps(sources, ensure_ascii=False) if sources else "",
             )
         return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
@@ -631,6 +650,7 @@ def regenerate_from_stream(body: ChatBody):
             body.api_auth_token,
             _api_model,
             _api_profile_name,
+            sources=json.dumps(sources, ensure_ascii=False) if sources else "",
         ),
         media_type="text/plain; charset=utf-8",
     )
@@ -712,9 +732,10 @@ def regenerate_stream(body: ChatBody):
 
         return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
-    final_prompt = build_chat_prompt(
-        messages=context_messages,
-        prompt=last_user_prompt,
+    final_prompt, sources = _build_regenerate_prompt_with_search(
+        context_messages,
+        last_user_prompt,
+        body.web_search,
     )
 
     _api_model = body.api_model or DEFAULT_MODEL
@@ -731,7 +752,7 @@ def regenerate_stream(body: ChatBody):
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
                 (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
-                old_assistant_id, final_prompt,
+                old_assistant_id, final_prompt, sources=json.dumps(sources, ensure_ascii=False) if sources else "",
             )
         return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
@@ -743,6 +764,7 @@ def regenerate_stream(body: ChatBody):
             body.api_auth_token,
             _api_model,
             _api_profile_name,
+            sources=json.dumps(sources, ensure_ascii=False) if sources else "",
         ),
         media_type="text/plain; charset=utf-8",
     )

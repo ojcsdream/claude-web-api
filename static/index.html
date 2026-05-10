@@ -1707,6 +1707,10 @@
 
   body.welcome-mode {
     background: var(--claude-bg);
+    --welcome-width: 398px;
+    --welcome-card-width: 372px;
+    --welcome-hero-top: clamp(132px, 22vh, 180px);
+    --welcome-composer-offset: 98px;
   }
 
   body.welcome-mode .topbar {
@@ -1774,7 +1778,7 @@
   }
 
   body.welcome-mode .wrap {
-    max-width: 398px;
+    max-width: var(--welcome-width);
     min-height: 100vh;
     padding: 0 0 260px;
   }
@@ -1788,14 +1792,16 @@
     left: 0;
     right: 0;
     bottom: auto;
-    top: calc(clamp(132px, 22vh, 180px) + 98px);
+    top: calc(var(--welcome-hero-top) + var(--welcome-composer-offset));
     padding: 0 18px;
     background: transparent;
     animation: welcomeFadeUp 0.56s 0.08s ease both;
   }
 
   body.welcome-mode .composer-inner {
-    max-width: 372px;
+    width: 100%;
+    max-width: var(--welcome-card-width);
+    margin: 0 auto;
     height: 150px;
     max-height: 160px;
     min-height: 150px;
@@ -1967,11 +1973,11 @@
 
   @media (max-height: 740px) {
     .claude-welcome-hero {
-      margin-top: 114px;
+      margin-top: var(--welcome-hero-top);
     }
 
     body.welcome-mode .composer {
-      top: 212px;
+      top: calc(var(--welcome-hero-top) + var(--welcome-composer-offset));
     }
   }
 
@@ -1979,8 +1985,135 @@
     body.welcome-mode .topbar,
     body.welcome-mode .composer {
       left: 50%;
-      width: min(100vw, 430px);
+      right: auto;
+      width: min(100vw, var(--welcome-width));
       transform: translateX(-50%);
+    }
+  }
+
+  @media (min-width: 768px) and (max-width: 1180px) and (min-height: 720px) {
+    body.welcome-mode {
+      --welcome-width: 720px;
+      --welcome-card-width: 620px;
+      --welcome-hero-top: clamp(176px, 22vh, 236px);
+      --welcome-composer-offset: 120px;
+    }
+
+    body.welcome-mode .topbar {
+      left: 50%;
+      width: min(100vw, var(--welcome-width));
+      height: 86px;
+      padding: 0 34px;
+      transform: translateX(-50%);
+    }
+
+    body.welcome-mode .menu-btn {
+      width: 40px;
+      height: 40px;
+    }
+
+    body.welcome-mode .menu-btn svg {
+      width: 34px;
+      height: 34px;
+    }
+
+    body.welcome-mode .share-btn {
+      top: 58px;
+      right: 40px;
+      width: 40px;
+      height: 40px;
+    }
+
+    body.welcome-mode .share-btn svg {
+      width: 36px;
+      height: 36px;
+    }
+
+    body.welcome-mode .wrap {
+      max-width: 720px;
+      padding-bottom: 320px;
+    }
+
+    body.welcome-mode #chatList {
+      min-height: calc(100vh - 320px);
+    }
+
+    .claude-welcome {
+      padding: 0 36px;
+    }
+
+    .claude-welcome-hero {
+      width: min(100%, 560px);
+      margin-top: var(--welcome-hero-top);
+      gap: 22px;
+    }
+
+    .claude-mark {
+      width: 58px;
+      height: 58px;
+    }
+
+    .claude-welcome h1 {
+      font-size: clamp(44px, 6vw, 58px);
+    }
+
+    body.welcome-mode .composer {
+      left: 50%;
+      right: auto;
+      width: min(100vw, var(--welcome-width));
+      top: calc(var(--welcome-hero-top) + var(--welcome-composer-offset));
+      padding: 0 42px;
+      transform: translateX(-50%);
+    }
+
+    body.welcome-mode .composer-inner {
+      max-width: var(--welcome-card-width);
+      height: 178px;
+      min-height: 178px;
+      max-height: 190px;
+      padding: 26px 28px 20px;
+      border-radius: 26px;
+    }
+
+    body.welcome-mode textarea {
+      min-height: 66px;
+      max-height: 88px;
+      font-size: 26px;
+      line-height: 1.18;
+    }
+
+    body.welcome-mode .toolbar {
+      min-height: 44px;
+      gap: 12px;
+    }
+
+    body.welcome-mode .plus-btn,
+    body.welcome-mode .web-search-btn,
+    body.welcome-mode .send-btn {
+      width: 44px;
+      height: 44px;
+    }
+
+    body.welcome-mode .plus-btn {
+      font-size: 34px;
+    }
+
+    body.welcome-mode .web-search-btn {
+      font-size: 20px;
+    }
+
+    body.welcome-mode .model-pill {
+      font-size: 21px;
+    }
+
+    body.welcome-mode .voice-icon {
+      width: 40px;
+      height: 40px;
+    }
+
+    body.welcome-mode.has-input .send-btn {
+      width: 56px;
+      height: 56px;
     }
   }
 </style>
@@ -4126,7 +4259,8 @@
             api_base_url: apiUrl.value.trim(),
             api_auth_token: apiKey.value.trim(),
             api_model: apiModel.value.trim() || "claude-opus-4-7",
-            api_profile_name: providerName()
+            api_profile_name: providerName(),
+            web_search: webSearchEnabled
           })
         });
 
