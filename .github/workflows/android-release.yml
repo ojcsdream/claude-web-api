@@ -1,0 +1,71 @@
+name: Android APK Release
+
+on:
+  push:
+    tags:
+      - "android-v*"
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: "URL loaded by the Android WebView"
+        required: false
+        default: "https://kindling-shaft-creamer.ngrok-free.dev"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build debug APK
+        run: |
+          APP_URL="${{ github.event.inputs.app_url || 'https://kindling-shaft-creamer.ngrok-free.dev' }}"
+          gradle assembleDebug -PappUrl="$APP_URL"
+
+      - name: Rename APK
+        run: |
+          VERSION="${GITHUB_REF_NAME:-manual}"
+          mkdir -p ../release
+          cp app/build/outputs/apk/debug/app-debug.apk "../release/ClaudeWeb-${VERSION}.apk"
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/ClaudeWeb-${{ github.ref_name }}.apk
+          name: Claude Web Android ${{ github.ref_name }}
+          body: |
+            Android WebView APK for Claude Web.
+
+            Default server URL: https://kindling-shaft-creamer.ngrok-free.dev
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeWeb-APK
+          path: release/ClaudeWeb-*.apk
