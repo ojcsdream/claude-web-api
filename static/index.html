@@ -1399,6 +1399,123 @@
     font-size: 14px;
     line-height: 1.65;
   }
+
+  .code-preview-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: none;
+    background: rgba(0,0,0,0.58);
+    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+  }
+
+  .code-preview-backdrop.open {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .code-preview-modal {
+    width: min(1120px, 100%);
+    height: min(760px, 92vh);
+    background: #111110;
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.45);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .code-preview-head {
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px 8px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.035);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .code-preview-title {
+    flex: 1;
+    min-width: 0;
+    color: #eee9df;
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .code-preview-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .code-preview-action {
+    height: 32px;
+    min-width: 52px;
+    padding: 0 11px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06);
+    color: #e8e0d2;
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .code-preview-body {
+    flex: 1;
+    min-height: 0;
+    background: #0b0f14;
+  }
+
+  .code-preview-frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #fff;
+  }
+
+  .code-preview-source {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 18px;
+    overflow: auto;
+    color: #e8edf2;
+    background: #0b0f14;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre;
+  }
+
+  @media (max-width: 720px) {
+    .code-preview-backdrop {
+      padding: 0;
+    }
+
+    .code-preview-modal {
+      width: 100%;
+      height: 100%;
+      border-radius: 0;
+      border-left: 0;
+      border-right: 0;
+    }
+
+    .code-preview-title {
+      font-size: 13px;
+    }
+
+    .code-preview-action {
+      min-width: 46px;
+      padding: 0 9px;
+    }
+  }
 </style>
 
 
@@ -2245,7 +2362,21 @@
     </div>
   </div>
 
-  <script>
+  <div id="codePreviewBackdrop" class="code-preview-backdrop" aria-hidden="true">
+    <div class="code-preview-modal" role="dialog" aria-modal="true" aria-labelledby="codePreviewTitle">
+      <div class="code-preview-head">
+        <div id="codePreviewTitle" class="code-preview-title">代码预览</div>
+        <div class="code-preview-actions">
+          <button id="codePreviewCopyBtn" class="code-preview-action" type="button">复制</button>
+          <button id="codePreviewOpenBtn" class="code-preview-action" type="button">新开</button>
+          <button id="codePreviewCloseBtn" class="code-preview-action" type="button">关闭</button>
+        </div>
+      </div>
+      <div id="codePreviewBody" class="code-preview-body"></div>
+    </div>
+  </div>
+
+<script>
     const $ = id => document.getElementById(id);
 
     const chatList = $("chatList");
@@ -2278,6 +2409,12 @@
     const fileInfo = $("fileInfo");
     const preview = $("preview");
     const clearFilesBtn = $("clearFilesBtn");
+    const codePreviewBackdrop = $("codePreviewBackdrop");
+    const codePreviewTitle = $("codePreviewTitle");
+    const codePreviewBody = $("codePreviewBody");
+    const codePreviewCopyBtn = $("codePreviewCopyBtn");
+    const codePreviewOpenBtn = $("codePreviewOpenBtn");
+    const codePreviewCloseBtn = $("codePreviewCloseBtn");
 
     let conversations = [];
     let autoScrollEnabled = true;
@@ -2293,6 +2430,7 @@
     let renderMessagesJob = 0;
     let lastRenderedMsgKey = "";
     let webSearchEnabled = localStorage.getItem("web_search_enabled") === "1";
+    let activeCodePreview = null;
 
     function renderWebSearchButton() {
       webSearchBtn.classList.toggle("active", webSearchEnabled);
@@ -2704,6 +2842,83 @@
       });
     }
 
+    function normalizeCodeLanguage(lang) {
+      return String(lang || "code").trim().toLowerCase();
+    }
+
+    function isRenderableCode(lang, codeText) {
+      const normalized = normalizeCodeLanguage(lang);
+      if (["html", "htm", "svg", "xml", "markdown", "md"].includes(normalized)) return true;
+      return /^\s*<(?:!doctype\s+html|html|head|body|main|section|article|div|style|script|svg)\b/i.test(codeText || "");
+    }
+
+    function buildPreviewDocument(lang, codeText) {
+      const normalized = normalizeCodeLanguage(lang);
+      const text = codeText || "";
+
+      if (normalized === "svg") {
+        return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>html,body{margin:0;min-height:100%;display:grid;place-items:center;background:#f6f4ee}svg{max-width:100%;max-height:100vh}</style></head><body>" + text + "</body></html>";
+      }
+
+      if (normalized === "markdown" || normalized === "md") {
+        const body = window.marked && marked.parse
+          ? marked.parse(text)
+          : escapeHtml(text).replace(/\n/g, "<br>");
+        return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>body{margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.6;color:#24201a;background:#fbfaf7}pre{overflow:auto;padding:14px;background:#111;color:#eee;border-radius:10px}code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}img{max-width:100%}</style></head><body>" + body + "</body></html>";
+      }
+
+      if (/^\s*<!doctype\s+html/i.test(text) || /^\s*<html[\s>]/i.test(text)) {
+        return text;
+      }
+
+      return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>body{margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#24201a;background:#fbfaf7}img,video,canvas,svg{max-width:100%}</style></head><body>" + text + "</body></html>";
+    }
+
+    function closeCodePreview() {
+      if (!codePreviewBackdrop) return;
+      codePreviewBackdrop.classList.remove("open");
+      codePreviewBackdrop.setAttribute("aria-hidden", "true");
+      codePreviewBody.innerHTML = "";
+      activeCodePreview = null;
+      document.body.style.overflow = "";
+    }
+
+    function openCodePreview(lang, codeText) {
+      if (!codePreviewBackdrop) return;
+      const normalized = normalizeCodeLanguage(lang);
+      const text = codeText || "";
+      const renderable = isRenderableCode(normalized, text);
+
+      activeCodePreview = {
+        lang: normalized,
+        text,
+        html: renderable ? buildPreviewDocument(normalized, text) : "",
+        renderable
+      };
+
+      codePreviewTitle.textContent = renderable ? `${normalized.toUpperCase()} 预览` : `${normalized.toUpperCase()} 代码`;
+      codePreviewBody.innerHTML = "";
+
+      if (renderable) {
+        const iframe = document.createElement("iframe");
+        iframe.className = "code-preview-frame";
+        iframe.setAttribute("sandbox", "allow-scripts allow-forms allow-modals allow-popups");
+        iframe.srcdoc = activeCodePreview.html;
+        codePreviewBody.appendChild(iframe);
+        codePreviewOpenBtn.hidden = false;
+      } else {
+        const pre = document.createElement("pre");
+        pre.className = "code-preview-source";
+        pre.textContent = text;
+        codePreviewBody.appendChild(pre);
+        codePreviewOpenBtn.hidden = true;
+      }
+
+      codePreviewBackdrop.classList.add("open");
+      codePreviewBackdrop.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+    }
+
     function enhanceCodeBlocks(root) {
       const pres = root.querySelectorAll("pre");
 
@@ -2732,6 +2947,11 @@
         foldBtn.type = "button";
         foldBtn.textContent = "折叠";
 
+        const previewBtn = document.createElement("button");
+        previewBtn.className = "code-tool-btn";
+        previewBtn.type = "button";
+        previewBtn.textContent = "预览";
+
         const copyBtn = document.createElement("button");
         copyBtn.className = "code-tool-btn";
         copyBtn.type = "button";
@@ -2739,6 +2959,7 @@
 
         toolbar.appendChild(label);
         toolbar.appendChild(foldBtn);
+        toolbar.appendChild(previewBtn);
         toolbar.appendChild(copyBtn);
         pre.appendChild(toolbar);
 
@@ -2766,6 +2987,11 @@
         foldBtn.addEventListener("click", () => {
           pre.classList.toggle("code-collapsed");
           foldBtn.textContent = pre.classList.contains("code-collapsed") ? "展开" : "折叠";
+        });
+
+        previewBtn.addEventListener("click", () => {
+          const text = code.innerText || code.textContent || "";
+          openCodePreview(lang, text);
         });
 
         copyBtn.addEventListener("click", async () => {
@@ -4467,6 +4693,26 @@
       renderWebSearchButton();
     };
 
+    codePreviewCloseBtn.onclick = closeCodePreview;
+
+    codePreviewBackdrop.addEventListener("click", e => {
+      if (e.target === codePreviewBackdrop) closeCodePreview();
+    });
+
+    codePreviewCopyBtn.onclick = async () => {
+      if (!activeCodePreview) return;
+      const text = activeCodePreview.renderable ? activeCodePreview.html : activeCodePreview.text;
+      await copyTextFromButton(codePreviewCopyBtn, text);
+    };
+
+    codePreviewOpenBtn.onclick = () => {
+      if (!activeCodePreview || !activeCodePreview.renderable) return;
+      const blob = new Blob([activeCodePreview.html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    };
+
     sendBtn.onclick = sendPrompt;
 
     // 输入框回车只换行，不发送消息。
@@ -4478,6 +4724,12 @@
         return;
       }
     };
+
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && codePreviewBackdrop.classList.contains("open")) {
+        closeCodePreview();
+      }
+    });
 
     function findMsgIdxById(msgId) {
       for (let i = 0; i < messages.length; i++) {
