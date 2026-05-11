@@ -244,10 +244,57 @@
 
     .assistant .bubble {
       color: #eee9df;
+      font-family: "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", Georgia, "Times New Roman", serif;
       font-size: 17px;
       line-height: 1.68;
       max-width: 100%;
       will-change: contents;
+    }
+
+    .bubble.message-collapsed {
+      max-height: 340px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .bubble.message-collapsed::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 96px;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(31,31,29,0), #1f1f1d 82%);
+    }
+
+    .msg-wrap.user .bubble.message-collapsed::after {
+      background: linear-gradient(180deg, rgba(17,17,15,0), #11110f 82%);
+    }
+
+    .message-fold-bar {
+      align-self: flex-start;
+      margin: 8px 0 0;
+      padding: 0;
+    }
+
+    .msg-wrap.user .message-fold-bar {
+      align-self: flex-end;
+      padding-right: 4px;
+    }
+
+    .message-fold-btn {
+      min-width: 86px;
+      height: 32px;
+      padding: 0 13px;
+      border-radius: 999px;
+      border: 1px solid rgba(216, 214, 204, 0.16);
+      background: rgba(216, 214, 204, 0.075);
+      color: #ddd4c6;
+      font-size: 13px;
+      font-weight: 650;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      cursor: pointer;
     }
 
     .stream-caret {
@@ -335,6 +382,14 @@
       border-radius: 0 10px 10px 0;
     }
 
+    .assistant .bubble blockquote > :first-child {
+      margin-top: 0;
+    }
+
+    .assistant .bubble blockquote > :last-child {
+      margin-bottom: 0;
+    }
+
     .assistant .bubble table {
       width: max-content;
       min-width: min(100%, 520px);
@@ -377,6 +432,33 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.88em;
       white-space: break-spaces;
+    }
+
+    .assistant .bubble input[type="checkbox"] {
+      width: 1em;
+      height: 1em;
+      margin: 0 0.42em 0 0;
+      vertical-align: -0.12em;
+      accent-color: #d6b78f;
+    }
+
+    .assistant .bubble sup {
+      line-height: 0;
+    }
+
+    .assistant .bubble sup a,
+    .assistant .bubble .footnote-ref {
+      color: #f0c58d;
+      text-decoration: none;
+    }
+
+    .assistant .bubble .footnotes,
+    .assistant .bubble section.footnotes {
+      margin-top: 1.25em;
+      padding-top: 0.7em;
+      border-top: 1px solid rgba(255,255,255,0.10);
+      color: #cfc7b9;
+      font-size: 0.9em;
     }
 
     .assistant .bubble hr {
@@ -1328,12 +1410,16 @@
     background: #111110 !important;
     border: 1px solid rgba(255,255,255,0.10) !important;
     border-radius: 14px !important;
-    padding: 42px 14px 14px !important;
+    padding: 46px 0 0 !important;
     overflow-x: auto;
     margin: 1em 0;
     max-height: none;
     contain: layout style paint;
     will-change: max-height;
+  }
+
+  .assistant .bubble pre.code-tall {
+    max-height: 560px;
   }
 
   .assistant .bubble pre.code-collapsed {
@@ -1364,6 +1450,10 @@
     pointer-events: none;
   }
 
+  .assistant .bubble pre:hover .code-toolbar {
+    opacity: 1;
+  }
+
   .code-lang-label {
     margin-right: auto;
     color: #8f887d;
@@ -1373,6 +1463,14 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .code-line-count {
+    color: #6f7886;
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    white-space: nowrap;
+    margin-right: 4px;
   }
 
   .code-tool-btn {
@@ -1389,15 +1487,79 @@
     transition: background 0.15s ease, transform 0.1s ease;
   }
 
+  .code-tool-btn.active {
+    background: rgba(214, 183, 143, 0.16);
+    border-color: rgba(214, 183, 143, 0.34);
+    color: #f1d6b4;
+  }
+
   .code-tool-btn:active {
     background: rgba(255,255,255,0.13);
     transform: scale(0.96);
   }
 
   .assistant .bubble pre code {
+    display: block;
+    min-width: max-content;
+    padding: 0 14px 14px 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 14px;
     line-height: 1.65;
+    tab-size: 2;
+  }
+
+  .code-line {
+    display: block;
+    min-height: 1.65em;
+    padding: 0 14px 0 0;
+    white-space: pre;
+  }
+
+  .code-line::before {
+    content: attr(data-line);
+    display: inline-block;
+    width: 3.8em;
+    padding: 0 12px 0 10px;
+    margin-right: 12px;
+    text-align: right;
+    color: #56606d;
+    background: rgba(11, 15, 20, 0.78);
+    border-right: 1px solid rgba(160, 180, 200, 0.14);
+    user-select: none;
+    position: sticky;
+    left: 0;
+  }
+
+  .assistant .bubble pre.hide-lines .code-line::before {
+    display: none;
+  }
+
+  .assistant .bubble pre.hide-lines code {
+    padding-left: 14px;
+  }
+
+  .assistant .bubble pre.code-wrap {
+    overflow-x: hidden;
+  }
+
+  .assistant .bubble pre.code-wrap code {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .assistant .bubble pre.code-wrap .code-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .code-line.active-line {
+    background: rgba(214, 183, 143, 0.10);
+  }
+
+  .code-line.active-line::before {
+    color: #f0c58d;
+    background: rgba(214, 183, 143, 0.16);
   }
 
   .code-preview-backdrop {
@@ -1495,6 +1657,34 @@
   }
 
   @media (max-width: 720px) {
+    .assistant .bubble pre {
+      border-radius: 12px !important;
+    }
+
+    .code-toolbar {
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+
+    .code-toolbar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .code-lang-label {
+      max-width: 96px;
+      flex: 0 0 auto;
+    }
+
+    .code-line-count {
+      display: none;
+    }
+
+    .code-tool-btn {
+      min-width: 42px;
+      padding: 0 8px;
+    }
+
     .code-preview-backdrop {
       padding: 0;
     }
@@ -2429,12 +2619,15 @@
     let loadSeq = 0;
     let renderMessagesJob = 0;
     let lastRenderedMsgKey = "";
-    let webSearchEnabled = localStorage.getItem("web_search_enabled") === "1";
+    localStorage.removeItem("web_search_enabled");
+    let webSearchEnabled = false;
+    const collapsedMessageKeys = new Set();
+    const longMessageKeys = new Set();
     let activeCodePreview = null;
 
     function renderWebSearchButton() {
       webSearchBtn.classList.toggle("active", webSearchEnabled);
-      webSearchBtn.title = webSearchEnabled ? "联网搜索已开启" : "联网搜索";
+      webSearchBtn.title = webSearchEnabled ? "下一条消息将联网搜索" : "联网搜索下一条消息";
     }
 
     function isWelcomeEmptyConversation() {
@@ -2682,19 +2875,6 @@
       return profileName.value.trim() || apiUrl.value.trim() || "当前接入商";
     }
 
-    function repairFractions(latex) {
-      if (!latex) return latex;
-      let x = latex;
-
-      x = x.replace(/\(([^()]+)\)\s*\/\s*\(([^()]+)\)/g, (_, a, b) => `\\frac{${a.trim()}}{${b.trim()}}`);
-
-      x = x.replace(/(^|[\s=+\-*/(])([\-]?(?:\\?[a-zA-Z]+|\d+)(?:\^\{?[\w+\-]+\}?)*(?:[a-zA-Z0-9^{}]*)?)\s*\/\s*([\-]?(?:\\?[a-zA-Z]+|\d+)(?:\^\{?[\w+\-]+\}?)*(?:[a-zA-Z0-9^{}]*)?)/g,
-        (_, prefix, a, b) => prefix + `\\frac{${a.trim()}}{${b.trim()}}`
-      );
-
-      return x;
-    }
-
     function protectCodeSpans(text) {
       const blocks = [];
       const replaced = String(text || "")
@@ -2715,49 +2895,69 @@
       return String(text || "").replace(/\uE000(\d+)\uE001/g, (_, idx) => blocks[Number(idx)] || "");
     }
 
-    function protectMathSpans(text) {
+    function normalizeDisplayMathBlocks(text) {
+      const src = String(text || "");
+      const re = /\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]/g;
+      let out = "";
+      let last = 0;
+      let match;
+
+      while ((match = re.exec(src))) {
+        const before = src.slice(last, match.index);
+        let raw = match[0];
+
+        if (raw.startsWith("$$")) {
+          raw = raw.replace(/^\$\$\s*([\s\S]*?)\s*\$\$$/, (_, inner) => `$$\n${inner.trim()}\n$$`);
+        } else {
+          raw = raw.replace(/^\\\[\s*([\s\S]*?)\s*\\\]$/, (_, inner) => `\\[\n${inner.trim()}\n\\]`);
+        }
+
+        out += before.replace(/[ \t]+$/g, "");
+        if (out && !out.endsWith("\n\n")) out += out.endsWith("\n") ? "\n" : "\n\n";
+        out += raw;
+
+        last = match.index + match[0].length;
+        const rest = src.slice(last);
+        const whitespace = rest.match(/^[ \t]*/)[0];
+        last += whitespace.length;
+        if (last < src.length && !src.slice(last).startsWith("\n")) out += "\n\n";
+      }
+
+      out += src.slice(last);
+      return out;
+    }
+
+    function protectMathForMarkdown(text) {
       const blocks = [];
-      const replaced = String(text || "")
-        .replace(/\$\$[\s\S]*?\$\$/g, m => {
-          const key = `\uE100${blocks.length}\uE101`;
-          blocks.push(m);
-          return key;
-        })
-        .replace(/\\\[[\s\S]*?\\\]/g, m => {
-          const key = `\uE100${blocks.length}\uE101`;
-          blocks.push(m);
-          return key;
-        })
-        .replace(/\\begin\{(?:equation|align|aligned|gather|multline)\*?\}[\s\S]*?\\end\{(?:equation|align|aligned|gather|multline)\*?\}/g, m => {
-          const key = `\uE100${blocks.length}\uE101`;
-          blocks.push(m);
-          return key;
-        })
-        .replace(/\\\([\s\S]*?\\\)/g, m => {
-          const key = `\uE100${blocks.length}\uE101`;
-          blocks.push(m);
-          return key;
-        })
-        .replace(/\$(?!\$)(?:\\.|[^$\n])+\$/g, m => {
-          const key = `\uE100${blocks.length}\uE101`;
-          blocks.push(m);
-          return key;
-        });
-      return { text: replaced, blocks };
+      const addBlock = (raw, display) => {
+        blocks.push({ raw, display });
+        return display
+          ? `\n\n<div class="math-source math-source-display" data-math-id="${blocks.length - 1}"></div>\n\n`
+          : `<span class="math-source math-source-inline" data-math-id="${blocks.length - 1}"></span>`;
+      };
+
+      const protectedText = String(text || "")
+        .replace(/\$\$[\s\S]*?\$\$/g, m => addBlock(m, true))
+        .replace(/\\\[[\s\S]*?\\\]/g, m => addBlock(m, true))
+        .replace(/\\begin\{(?:equation|align|aligned|gather|multline|cases|matrix|pmatrix|bmatrix|vmatrix)\*?\}[\s\S]*?\\end\{(?:equation|align|aligned|gather|multline|cases|matrix|pmatrix|bmatrix|vmatrix)\*?\}/g, m => addBlock(`$$\n${m.trim()}\n$$`, true))
+        .replace(/\\\([\s\S]*?\\\)/g, m => addBlock(m, false))
+        .replace(/\$(?!\$)(?:\\.|[^$\n])+\$/g, m => addBlock(m, false));
+
+      return { text: protectedText, blocks };
     }
 
-    function restoreMathSpans(html, blocks) {
-      return String(html || "").replace(/\uE100(\d+)\uE101/g, (_, idx) => blocks[Number(idx)] || "");
-    }
+    function restoreMarkdownMath(html, blocks) {
+      const container = document.createElement("template");
+      container.innerHTML = html || "";
 
-    function looksLikeMathLine(line) {
-      const t = line.trim();
-      if (!t || t.length > 180) return false;
-      if (/^[-*+]\s+/.test(t) || /^#{1,6}\s+/.test(t) || /^\|/.test(t)) return false;
-      const hasOperator = /(?:=|->|<-|<=>|\\(?:ce|pu|frac|sum|int|lim|sqrt|begin|alpha|beta|gamma|delta|theta|lambda|mu|nu|pi|sigma|omega|infty|cdot|times|leq|geq|neq|approx|to|rightarrow|leftarrow|Rightarrow|Leftarrow|leftrightarrow|longrightarrow|longleftarrow)|\^|_)/.test(t);
-      const hasLetterOrNumber = /[A-Za-z0-9]/.test(t);
-      const proseChars = /[\u4e00-\u9fa5，。？！、；：]/.test(t);
-      return hasOperator && hasLetterOrNumber && !proseChars;
+      container.content.querySelectorAll(".math-source").forEach(el => {
+        const idx = Number(el.dataset.mathId);
+        const item = blocks[idx];
+        if (!item) return;
+        el.textContent = item.raw;
+      });
+
+      return container.innerHTML;
     }
 
     function normalizeMathDelimiters(text) {
@@ -2765,44 +2965,12 @@
       let x = protectedText.text;
 
       x = x
-        .replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`)
-        .replace(/\\begin\{align\*?\}([\s\S]*?)\\end\{align\*?\}/g, (_, inner) => `\n$$\n\\begin{aligned}\n${inner.trim()}\n\\end{aligned}\n$$\n`)
-        .replace(/\\begin\{gather\*?\}([\s\S]*?)\\end\{gather\*?\}/g, (_, inner) => `\n$$\n\\begin{gathered}\n${inner.trim()}\n\\end{gathered}\n$$\n`)
         .replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`)
-        .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => `$${inner.trim()}$`)
-        .replace(/\[([^\]\n]*(?:\\ce|\\pu|\\frac|\\sqrt|\\sum|\\int|\\lim|\\to|\\rightarrow|\\leftarrow|\\Rightarrow|\\Leftarrow|\\leftrightarrow|=|->|<-|<=>|\^|_)[^\]\n]*)\]/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`);
+        .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => `$${inner.trim()}$`);
 
-      const lines = x.split("\n");
-      let inFence = false;
-      x = lines.map(line => {
-        if (/^\s*```/.test(line)) inFence = !inFence;
-        if (inFence || /^\s*\$\$/.test(line) || /\$\S[\s\S]*\S\$/.test(line)) return line;
-        if (/^\s*\\ce\{.+\}\s*$/.test(line) || /^\s*\\pu\{.+\}\s*$/.test(line)) return `$$${line.trim()}$$`;
-        if (looksLikeMathLine(line)) return `$$${repairFractions(line.trim())}$$`;
-        return line;
-      }).join("\n");
-
-      x = x.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => `$$\n${repairFractions(inner.trim())}\n$$`);
-      x = x.replace(/\$([^$\n]+?)\$/g, (_, inner) => `$${repairFractions(inner.trim())}$`);
+      x = normalizeDisplayMathBlocks(x);
 
       return restoreCodeSpans(x, protectedText.blocks);
-    }
-
-    function repairMath(root) {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      const nodes = [];
-      while (walker.nextNode()) nodes.push(walker.currentNode);
-
-      nodes.forEach(n => {
-        let t = n.nodeValue || "";
-
-        t = t.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => "$$" + repairFractions(inner) + "$$");
-        t = t.replace(/\$([^$\n]+?)\$/g, (_, inner) => "$" + repairFractions(inner) + "$");
-        t = t.replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => "\\[" + repairFractions(inner) + "\\]");
-        t = t.replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => "\\(" + repairFractions(inner) + "\\)");
-
-        n.nodeValue = t;
-      });
     }
 
     function enhanceRichText(root) {
@@ -2843,7 +3011,77 @@
     }
 
     function normalizeCodeLanguage(lang) {
-      return String(lang || "code").trim().toLowerCase();
+      const normalized = String(lang || "code").trim().toLowerCase();
+      const aliases = {
+        js: "javascript",
+        jsx: "javascript",
+        ts: "typescript",
+        tsx: "typescript",
+        py: "python",
+        sh: "bash",
+        shell: "bash",
+        yml: "yaml",
+        htm: "html",
+        cplusplus: "cpp",
+        csharp: "csharp",
+        cs: "csharp",
+        md: "markdown"
+      };
+      return aliases[normalized] || normalized;
+    }
+
+    function detectCodeLanguage(codeText, fallback = "code") {
+      const text = codeText || "";
+      const trimmed = text.trim();
+      if (!trimmed) return fallback || "code";
+      if (/^\s*<!doctype\s+html/i.test(text) || /<\/(?:html|body|div|script|style|main|section)>/i.test(text)) return "html";
+      if (/^\s*<svg[\s>]/i.test(text)) return "svg";
+      if (/^\s*[{[][\s\S]*[}\]]\s*$/.test(text)) return "json";
+      if (/^\s*(import|export|const|let|var|function|class)\b/m.test(text)) return "javascript";
+      if (/^\s*(def|class|import|from)\s+\w+/m.test(text)) return "python";
+      if (/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER)\b/im.test(text)) return "sql";
+      if (/^\s*#include\s+[<"]/m.test(text)) return "cpp";
+      if (/^\s*package\s+[\w.]+;/m.test(text) || /\bpublic\s+class\s+\w+/m.test(text)) return "java";
+      if (/^\s*package\s+\w+/m.test(text) && /\bfunc\s+\w+\s*\(/m.test(text)) return "go";
+      return fallback || "code";
+    }
+
+    function codeTextFromBlock(code) {
+      return code.dataset.rawCode || code.textContent || "";
+    }
+
+    function highlightedCodeHtml(lang, codeText) {
+      const text = String(codeText || "");
+      if (!window.hljs) return escapeHtml(text);
+
+      try {
+        const normalized = normalizeCodeLanguage(lang);
+        if (normalized !== "code" && hljs.getLanguage && hljs.getLanguage(normalized)) {
+          return hljs.highlight(text, { language: normalized, ignoreIllegals: true }).value;
+        }
+        return hljs.highlightAuto(text).value;
+      } catch (e) {
+        return escapeHtml(text);
+      }
+    }
+
+    function decorateCodeLines(pre, code, codeText, htmlText = "") {
+      const raw = String(codeText || "").replace(/\n$/, "");
+      const escaped = htmlText || escapeHtml(raw);
+      const lines = raw.split("\n");
+      const htmlLines = escaped.replace(/\n$/, "").split("\n");
+      code.innerHTML = "";
+
+      lines.forEach((line, index) => {
+        const span = document.createElement("span");
+        span.className = "code-line";
+        span.dataset.line = String(index + 1);
+        span.innerHTML = htmlLines[index] || (line ? escapeHtml(line) : " ");
+        code.appendChild(span);
+      });
+
+      pre.classList.toggle("code-tall", lines.length > 24);
+      return lines.length;
     }
 
     function isRenderableCode(lang, codeText) {
@@ -2929,11 +3167,15 @@
         const code = pre.querySelector("code");
         if (!code) return;
 
+        const rawCode = code.textContent || "";
+        code.dataset.rawCode = rawCode;
+
         // 语言标签
         let lang = "code";
         const cls = code.className || "";
         const m = cls.match(/language-([a-zA-Z0-9_+\-#]+)/);
         if (m) lang = m[1];
+        lang = detectCodeLanguage(rawCode, lang);
 
         const toolbar = document.createElement("div");
         toolbar.className = "code-toolbar";
@@ -2942,60 +3184,78 @@
         label.className = "code-lang-label";
         label.textContent = lang;
 
+        const lineCount = document.createElement("div");
+        lineCount.className = "code-line-count";
+
         const foldBtn = document.createElement("button");
-        foldBtn.className = "code-tool-btn";
+        foldBtn.className = "code-tool-btn code-fold-btn";
         foldBtn.type = "button";
+        foldBtn.title = "折叠或展开代码块";
         foldBtn.textContent = "折叠";
 
         const previewBtn = document.createElement("button");
         previewBtn.className = "code-tool-btn";
         previewBtn.type = "button";
+        previewBtn.title = "预览 HTML/SVG/Markdown，或全屏查看源码";
         previewBtn.textContent = "预览";
+
+        const wrapBtn = document.createElement("button");
+        wrapBtn.className = "code-tool-btn";
+        wrapBtn.type = "button";
+        wrapBtn.title = "切换长行自动换行";
+        wrapBtn.textContent = "换行";
+
+        const lineBtn = document.createElement("button");
+        lineBtn.className = "code-tool-btn active";
+        lineBtn.type = "button";
+        lineBtn.title = "显示或隐藏行号";
+        lineBtn.textContent = "行号";
 
         const copyBtn = document.createElement("button");
         copyBtn.className = "code-tool-btn";
         copyBtn.type = "button";
+        copyBtn.title = "复制原始代码";
         copyBtn.textContent = "复制";
 
         toolbar.appendChild(label);
+        toolbar.appendChild(lineCount);
         toolbar.appendChild(foldBtn);
+        toolbar.appendChild(wrapBtn);
+        toolbar.appendChild(lineBtn);
         toolbar.appendChild(previewBtn);
         toolbar.appendChild(copyBtn);
         pre.appendChild(toolbar);
 
-        // 使用 IntersectionObserver 懒加载代码高亮，避免初始渲染卡顿
-        if (window.hljs && window.IntersectionObserver) {
-          const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-              if (entry.isIntersecting && !code.dataset.highlighted) {
-                code.dataset.highlighted = "1";
-                try {
-                  hljs.highlightElement(code);
-                } catch (e) {}
-                observer.unobserve(pre);
-              }
-            });
-          }, { rootMargin: "200px" });
-          observer.observe(pre);
-        } else if (window.hljs) {
-          // 降级方案：直接高亮
-          try {
-            hljs.highlightElement(code);
-          } catch (e) {}
-        }
+        const totalLines = decorateCodeLines(pre, code, rawCode, highlightedCodeHtml(lang, rawCode));
+        lineCount.textContent = `${totalLines} 行`;
 
-        foldBtn.addEventListener("click", () => {
-          pre.classList.toggle("code-collapsed");
-          foldBtn.textContent = pre.classList.contains("code-collapsed") ? "展开" : "折叠";
+        code.dataset.highlighted = "1";
+
+        wrapBtn.addEventListener("click", () => {
+          pre.classList.toggle("code-wrap");
+          wrapBtn.classList.toggle("active", pre.classList.contains("code-wrap"));
+        });
+
+        lineBtn.addEventListener("click", () => {
+          pre.classList.toggle("hide-lines");
+          const active = !pre.classList.contains("hide-lines");
+          lineBtn.classList.toggle("active", active);
+        });
+
+        code.addEventListener("click", e => {
+          const line = e.target.closest(".code-line");
+          if (!line || !code.contains(line)) return;
+          code.querySelectorAll(".active-line").forEach(el => el.classList.remove("active-line"));
+          line.classList.add("active-line");
         });
 
         previewBtn.addEventListener("click", () => {
-          const text = code.innerText || code.textContent || "";
+          const text = codeTextFromBlock(code);
           openCodePreview(lang, text);
         });
 
         copyBtn.addEventListener("click", async () => {
-          const text = code.innerText || code.textContent || "";
+          const text = codeTextFromBlock(code);
 
           try {
             await navigator.clipboard.writeText(text);
@@ -3023,7 +3283,6 @@
     }
 
     function renderMath(root) {
-      repairMath(root);
       if (window.MathJax && MathJax.typesetPromise) {
         // 先标记数学公式容器，避免渲染后高度突变导致页面跳动
         const mathElements = root.querySelectorAll('mjx-container');
@@ -3063,22 +3322,35 @@
       }
     }
 
+    function configureMarked() {
+      if (!window.marked || !marked.parse || marked._claudeWebConfigured) return;
+
+      const renderer = new marked.Renderer();
+      const originalLink = renderer.link.bind(renderer);
+      renderer.link = (href, title, text) => {
+        const html = originalLink(href, title, text);
+        return html.replace("<a ", '<a target="_blank" rel="noopener noreferrer" ');
+      };
+
+      marked.setOptions({
+        gfm: true,
+        breaks: true,
+        mangle: false,
+        headerIds: false,
+        renderer
+      });
+
+      marked._claudeWebConfigured = true;
+    }
+
     function renderMarkdown(text) {
       const normalized = normalizeMathDelimiters(text || "");
-      const protectedMath = protectMathSpans(normalized);
+      const protectedMath = protectMathForMarkdown(normalized);
       if (window.marked && marked.parse) {
-        if (marked.setOptions && !marked._claudeWebConfigured) {
-          marked.setOptions({
-            gfm: true,
-            breaks: true,
-            mangle: false,
-            headerIds: false
-          });
-          marked._claudeWebConfigured = true;
-        }
-        return restoreMathSpans(marked.parse(protectedMath.text), protectedMath.blocks);
+        configureMarked();
+        return restoreMarkdownMath(marked.parse(protectedMath.text), protectedMath.blocks);
       }
-      return restoreMathSpans(escapeHtml(protectedMath.text).replace(/\n/g, "<br>"), protectedMath.blocks);
+      return restoreMarkdownMath(escapeHtml(protectedMath.text).replace(/\n/g, "<br>"), protectedMath.blocks);
     }
 
     function parseMessageSources(value) {
@@ -3417,6 +3689,46 @@
       return btn;
     }
 
+    function makeMessageFoldButton(msg, idx) {
+      const btn = document.createElement("button");
+      btn.className = "message-fold-btn";
+      btn.type = "button";
+      btn.dataset.msgId = getMessageId(msg) || ("idx:" + idx);
+      btn.dataset.idx = String(idx);
+      btn.textContent = "展开全文";
+      btn.hidden = true;
+      return btn;
+    }
+
+    function updateMessageFoldButton(btn, collapsed) {
+      if (!btn) return;
+      btn.textContent = collapsed ? "展开全文" : "折叠全文";
+      btn.title = collapsed ? "展开这条长消息" : "折叠这条长消息";
+    }
+
+    function applyMessageCollapse(wrap, forceCheck = false) {
+      if (!wrap) return;
+
+      const bubble = wrap.querySelector(".bubble");
+      const foldBtn = wrap.querySelector(".message-fold-btn");
+      if (!bubble || !foldBtn || bubble.querySelector(".thinking")) return;
+
+      const key = wrap.dataset.msgId || foldBtn.dataset.msgId || foldBtn.dataset.idx || "";
+      const isLong = forceCheck || longMessageKeys.has(key) || bubble.scrollHeight > 380;
+      if (!isLong) return;
+
+      longMessageKeys.add(key);
+      foldBtn.hidden = false;
+
+      if (wrap.classList.contains("user") && !collapsedMessageKeys.has(key) && !bubble.dataset.userExpanded) {
+        collapsedMessageKeys.add(key);
+      }
+
+      const collapsed = collapsedMessageKeys.has(key);
+      bubble.classList.toggle("message-collapsed", collapsed);
+      updateMessageFoldButton(foldBtn, collapsed);
+    }
+
     function createMessageElement(msg, idx, lightweight = false) {
       const wrap = document.createElement("div");
       wrap.className = "msg-wrap " + msg.role;
@@ -3425,6 +3737,7 @@
         wrap.dataset.supersededBy = msg.supersededBy;
       }
       wrap.dataset.msgId = getMessageId(msg);
+      if (!wrap.dataset.msgId) wrap.dataset.msgId = "idx:" + idx;
 
       const row = document.createElement("div");
       row.className = "msg " + msg.role;
@@ -3479,6 +3792,13 @@
 
       row.appendChild(bubble);
       wrap.appendChild(row);
+
+      if (!isThinkingMessage(msg)) {
+        const foldBar = document.createElement("div");
+        foldBar.className = "message-fold-bar";
+        foldBar.appendChild(makeMessageFoldButton(msg, idx));
+        wrap.appendChild(foldBar);
+      }
 
       const actions = document.createElement("div");
       actions.className = "msg-actions";
@@ -3548,6 +3868,7 @@
       }
 
       wrap.appendChild(actions);
+      requestAnimationFrame(() => applyMessageCollapse(wrap));
       return wrap;
     }
 
@@ -3569,6 +3890,7 @@
           enhanceRichText(bubble);
           enhanceCodeBlocks(bubble);
           renderMath(bubble);
+          applyMessageCollapse(bubble.closest(".msg-wrap"));
           processed += 1;
         }
 
@@ -3744,6 +4066,7 @@
         enhanceRichText(bubble);
         enhanceCodeBlocks(bubble);
         renderMath(bubble);
+        applyMessageCollapse(bubble.closest(".msg-wrap"), true);
       }
 
       // 渲染后，如果用户不在底部且内容高度变化了，保持滚动位置
@@ -4363,6 +4686,9 @@
 
       const model = apiModel.value.trim() || "claude-opus-4-7";
       setModel(model);
+      const useWebSearch = webSearchEnabled === true;
+      webSearchEnabled = false;
+      renderWebSearchButton();
 
       try {
         let resp;
@@ -4375,7 +4701,8 @@
           form.append("api_auth_token", apiKey.value.trim());
           form.append("api_model", model);
           form.append("api_profile_name", providerName());
-          form.append("web_search", webSearchEnabled ? "true" : "false");
+          form.append("web_search", useWebSearch ? "true" : "false");
+          form.append("web_search_explicit", useWebSearch ? "true" : "false");
 
           for (const f of files) form.append("files", f);
 
@@ -4387,7 +4714,8 @@
             body: JSON.stringify({
               conversation_id: activeConversationId,
               prompt: text,
-              web_search: webSearchEnabled,
+              web_search: useWebSearch,
+              web_search_explicit: useWebSearch,
               api_base_url: apiUrl.value.trim(),
               api_auth_token: apiKey.value.trim(),
               api_model: model,
@@ -4486,7 +4814,8 @@
             api_auth_token: apiKey.value.trim(),
             api_model: apiModel.value.trim() || "claude-opus-4-7",
             api_profile_name: providerName(),
-            web_search: webSearchEnabled
+            web_search: webSearchEnabled,
+            web_search_explicit: webSearchEnabled
           })
         });
 
@@ -4689,7 +5018,6 @@
 
     webSearchBtn.onclick = () => {
       webSearchEnabled = !webSearchEnabled;
-      localStorage.setItem("web_search_enabled", webSearchEnabled ? "1" : "0");
       renderWebSearchButton();
     };
 
@@ -4781,6 +5109,36 @@
     }
 
     chatList.onclick = e => {
+      const codeFoldBtn = e.target.closest(".code-fold-btn");
+      if (codeFoldBtn) {
+        const pre = codeFoldBtn.closest("pre");
+        if (!pre) return;
+        pre.classList.toggle("code-collapsed");
+        codeFoldBtn.textContent = pre.classList.contains("code-collapsed") ? "展开" : "折叠";
+        return;
+      }
+
+      const messageFoldBtn = e.target.closest(".message-fold-btn");
+      if (messageFoldBtn) {
+        const wrap = messageFoldBtn.closest(".msg-wrap");
+        const bubble = wrap && wrap.querySelector(".bubble");
+        if (!wrap || !bubble) return;
+
+        const key = wrap.dataset.msgId || messageFoldBtn.dataset.msgId || messageFoldBtn.dataset.idx || "";
+        const collapsed = !bubble.classList.contains("message-collapsed");
+
+        bubble.classList.toggle("message-collapsed", collapsed);
+        if (collapsed) {
+          collapsedMessageKeys.add(key);
+          delete bubble.dataset.userExpanded;
+        } else {
+          collapsedMessageKeys.delete(key);
+          bubble.dataset.userExpanded = "1";
+        }
+        updateMessageFoldButton(messageFoldBtn, collapsed);
+        return;
+      }
+
       const del = e.target.closest(".delete-msg");
       if (del) {
         const found = findMessageByButton(del);

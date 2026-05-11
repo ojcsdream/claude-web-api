@@ -6,6 +6,7 @@ UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 DEFAULT_MODEL = "claude-opus-4-7"
+MODEL_TEMPERATURE = 0.4
 
 # 极速模式：限制每次传给模型的历史上下文
 # 数值越小越快，但长期记忆越弱

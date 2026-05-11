@@ -49,15 +49,14 @@ from schemas import (
 )
 from services import (
     build_sources_context_block,
-    call_direct_vision_api,
     collect_search_sources,
     enhance_prompt_with_url_fetch,
     extract_urls_from_text,
     load_uploaded_text_from_path,
-    looks_like_search_request,
     save_uploaded_file_dual_paths,
     stream_direct_and_save,
     stream_direct_api_text,
+    stream_direct_vision_api_text,
     stream_direct_vision_and_save,
 )
 
@@ -449,7 +448,7 @@ def chat_stream(body: ChatBody):
         return f"\n[[STATUS:{name}]]\n"
 
     def gen():
-        should_search = body.web_search or looks_like_search_request(body.prompt)
+        should_search = body.web_search and body.web_search_explicit
 
         if should_search or extract_urls_from_text(body.prompt):
             yield status_line("parsing")
@@ -458,7 +457,7 @@ def chat_stream(body: ChatBody):
         sources = []
 
         if should_search:
-            sources = collect_search_sources(body.prompt)
+            sources = collect_search_sources(body.prompt, context_messages=history)
             source_context = build_sources_context_block(sources)
             if source_context:
                 effective_prompt = source_context + "\n\n用户原始问题：\n" + body.prompt
@@ -509,9 +508,9 @@ def _stream_and_save_regenerated_answer(inner_gen, cid, api_model, provider_name
 def _build_regenerate_prompt_with_search(context_messages, last_user_prompt, web_search=False):
     sources = []
     search_context = ""
-    should_search = web_search or looks_like_search_request(last_user_prompt)
+    should_search = web_search
     if should_search:
-        sources = collect_search_sources(last_user_prompt)
+        sources = collect_search_sources(last_user_prompt, context_messages=context_messages)
         search_context = build_sources_context_block(sources)
 
     final_user_prompt = last_user_prompt
@@ -776,6 +775,7 @@ async def chat_upload_stream(
     prompt: str = Form(""),
     messages_json: str = Form("[]"),
     web_search: bool = Form(False),
+    web_search_explicit: bool = Form(False),
     api_base_url: str = Form(""),
     api_auth_token: str = Form(""),
     api_model: str = Form(DEFAULT_MODEL),
@@ -861,9 +861,9 @@ async def chat_upload_stream(
 
     sources = []
     search_context = ""
-    should_search = web_search or looks_like_search_request(user_prompt)
+    should_search = web_search and web_search_explicit
     if should_search:
-        sources = collect_search_sources(user_prompt)
+        sources = collect_search_sources(user_prompt, context_messages=history)
         search_context = build_sources_context_block(sources)
 
     # 有图片时，强制走 base64 视觉 API
@@ -903,23 +903,21 @@ async def chat_upload_stream(
         vision_prompt = "\n".join(vision_prompt_parts)
 
         def gen():
+            prefix = f"正在分析 {len(local_image_paths)} 张图片...\n\n"
+            full = ""
+            yield prefix
             try:
-                answer = call_direct_vision_api(
+                for chunk in stream_direct_vision_api_text(
                     vision_prompt,
                     local_image_paths,
                     api_base_url,
                     api_auth_token,
                     api_model or DEFAULT_MODEL,
-                )
+                ):
+                    full += chunk
+                    yield chunk
 
-                route_label = "直连视觉"
-                debug = (
-                    f"【{route_label}已调用｜图片数: {len(local_image_paths)}"
-                    f"｜模型: {api_model or DEFAULT_MODEL}"
-                    f"｜接入商: {api_profile_name or api_base_url}】\n\n"
-                )
-
-                final_answer = debug + answer
+                final_answer = full
 
                 token_count = estimate_round_tokens(
                     vision_prompt,
@@ -936,8 +934,6 @@ async def chat_upload_stream(
                     token_count=token_count,
                     sources=json.dumps(sources, ensure_ascii=False) if sources else "",
                 )
-
-                yield final_answer
 
             except Exception as e:
                 final_answer = (
@@ -996,8 +992,10 @@ async def chat_upload_stream(
         prompt=final_user_prompt,
     )
 
-    return StreamingResponse(
-        stream_direct_and_save(
+    def gen_text_upload():
+        if text_files:
+            yield f"正在读取 {len(text_files)} 个附件...\n\n"
+        yield from stream_direct_and_save(
             cid,
             final_prompt,
             api_base_url,
@@ -1005,7 +1003,10 @@ async def chat_upload_stream(
             api_model or DEFAULT_MODEL,
             api_profile_name or "",
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-        ),
+        )
+
+    return StreamingResponse(
+        gen_text_upload(),
         media_type="text/plain; charset=utf-8",
     )
 

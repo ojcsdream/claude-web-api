@@ -42,3 +42,65 @@ https://kindling-shaft-creamer.ngrok-free.dev
 ```
 
 Do not use Cloudflare Tunnel as the default public entry unless the user explicitly asks for Cloudflare.
+
+## Runtime Monitoring And Termux Keepalive
+
+This project is intended to run on Termux/Android and can be killed by Android power management. Always check the runtime system before assuming the app code is broken.
+
+Primary paths:
+
+```text
+Project: /home/ai/claude-web
+Local health: http://127.0.0.1:8000/api/health
+Backend tmux session: claude-web-backend
+Public URL file: /home/ai/claude-web/ngrok-url.txt
+ngrok log: /home/ai/claude-web/logs/ngrok.log
+Backend log: /home/ai/claude-web/logs/backend.log
+```
+
+Termux scripts currently installed outside the repository:
+
+```text
+/data/data/com.termux/files/home/keep-termux-alive.sh
+/data/data/com.termux/files/home/check-claude-web.sh
+/data/data/com.termux/files/home/check-claude-web-public.sh
+/data/data/com.termux/files/home/restart-claude-web.sh
+/data/data/com.termux/files/home/.termux/boot/keepalive
+```
+
+JobScheduler tasks:
+
+```text
+9001 keep-termux-alive.sh: keeps wake lock and persistent notification active.
+9002 check-claude-web.sh: checks local backend health and restarts backend if needed.
+9003 check-claude-web-public.sh: checks public ngrok health and restarts public tunnel if needed.
+```
+
+Use these commands to inspect the monitoring system:
+
+```bash
+termux-job-scheduler --pending
+/data/data/com.termux/files/home/check-claude-web.sh
+/data/data/com.termux/files/home/check-claude-web-public.sh
+curl -fsS http://127.0.0.1:8000/api/health
+tmux ls
+pgrep -af 'uvicorn|ngrok|cloudflared'
+tail -n 80 /home/ai/claude-web/logs/backend.log
+tail -n 80 /home/ai/claude-web/logs/ngrok.log
+```
+
+Use these commands to restart components:
+
+```bash
+/data/data/com.termux/files/home/restart-claude-web.sh
+cd /home/ai/claude-web && ./start-public.sh
+```
+
+Important operating notes:
+
+- `termux-wake-lock` reduces sleep-related kills, but it cannot override aggressive OEM background killing by itself.
+- Termux, Termux:API, and the hosting app should be set to unrestricted battery mode in Android settings and locked in Recents when possible.
+- A public ngrok link is not a hard uptime guarantee. The monitor can restart it, but network loss, ngrok account limits, Android process kills, or heartbeat timeouts can still interrupt access.
+- `start-public.sh` is the default public script. `start-ngrok.sh` performs the actual ngrok launch. `start-cloudflare.sh` exists but should only be used when Cloudflare is explicitly requested.
+- The external helper `/home/ai/claude-web-ngrok.sh` is a more verbose tmux-based ngrok supervisor, but the current active default is the repository script `./start-public.sh`.
+- Do not reintroduce `/root/claude-web` paths. The active project is `/home/ai/claude-web`.

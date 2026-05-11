@@ -1,4 +1,5 @@
 from pathlib import Path
+from contextlib import contextmanager
 import json
 import os
 import uuid
@@ -9,8 +10,191 @@ from urllib.parse import quote, urlparse, parse_qs, unquote
 from fastapi import UploadFile
 
 from chat_utils import estimate_round_tokens, is_image_file
-from config import BASE_DIR, DEFAULT_MODEL, MAX_IMAGE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, UPLOAD_DIR
+from config import BASE_DIR, DEFAULT_MODEL, MAX_IMAGE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, MODEL_TEMPERATURE, UPLOAD_DIR
 from db import db_add_message
+
+
+DNS_CACHE = {}
+
+
+def _is_dns_resolution_error(exc) -> bool:
+    text = str(exc).lower()
+    return (
+        "name resolution" in text
+        or "temporary failure in name resolution" in text
+        or "nodename nor servname" in text
+        or "name or service not known" in text
+        or "getaddrinfo failed" in text
+    )
+
+
+def _decode_dns_name(data: bytes, offset: int) -> tuple[str, int]:
+    labels = []
+    jumped = False
+    next_offset = offset
+
+    while offset < len(data):
+        length = data[offset]
+        if length == 0:
+            offset += 1
+            if not jumped:
+                next_offset = offset
+            break
+
+        if length & 0xC0 == 0xC0:
+            if offset + 1 >= len(data):
+                break
+            pointer = ((length & 0x3F) << 8) | data[offset + 1]
+            if not jumped:
+                next_offset = offset + 2
+            offset = pointer
+            jumped = True
+            continue
+
+        offset += 1
+        labels.append(data[offset:offset + length].decode("ascii", errors="ignore"))
+        offset += length
+        if not jumped:
+            next_offset = offset
+
+    return ".".join(label for label in labels if label), next_offset
+
+
+def _query_dns_a_record(hostname: str, server: str, timeout: float = 1.8) -> list[str]:
+    import random
+    import socket
+    import struct
+
+    query_id = random.randint(0, 65535)
+    packet = struct.pack("!HHHHHH", query_id, 0x0100, 1, 0, 0, 0)
+    for label in hostname.strip(".").split("."):
+        raw = label.encode("ascii")
+        if not raw or len(raw) > 63:
+            return []
+        packet += bytes([len(raw)]) + raw
+    packet += b"\x00" + struct.pack("!HH", 1, 1)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(packet, (server, 53))
+        data, _ = sock.recvfrom(512)
+    finally:
+        sock.close()
+
+    if len(data) < 12:
+        return []
+
+    resp_id, _flags, qdcount, ancount, _nscount, _arcount = struct.unpack("!HHHHHH", data[:12])
+    if resp_id != query_id:
+        return []
+
+    offset = 12
+    for _ in range(qdcount):
+        _name, offset = _decode_dns_name(data, offset)
+        offset += 4
+
+    ips = []
+    for _ in range(ancount):
+        _name, offset = _decode_dns_name(data, offset)
+        if offset + 10 > len(data):
+            break
+        rtype, rclass, _ttl, rdlength = struct.unpack("!HHIH", data[offset:offset + 10])
+        offset += 10
+        rdata = data[offset:offset + rdlength]
+        offset += rdlength
+        if rtype == 1 and rclass == 1 and rdlength == 4:
+            ips.append(socket.inet_ntoa(rdata))
+
+    return ips
+
+
+def resolve_hostname_resilient(hostname: str) -> list[str]:
+    import socket
+    import time
+
+    host = (hostname or "").strip().strip(".").lower()
+    if not host or host == "localhost":
+        return []
+
+    cached = DNS_CACHE.get(host)
+    now = time.time()
+    if cached and cached.get("expires", 0) > now:
+        return list(cached.get("ips") or [])
+
+    ips = []
+    try:
+        for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM):
+            ip = item[4][0]
+            if ":" not in ip and ip not in ips:
+                ips.append(ip)
+    except Exception:
+        pass
+
+    if not ips:
+        for server in ("223.5.5.5", "119.29.29.29", "8.8.8.8", "1.1.1.1"):
+            try:
+                for ip in _query_dns_a_record(host, server):
+                    if ip not in ips:
+                        ips.append(ip)
+            except Exception:
+                continue
+            if ips:
+                break
+
+    if ips:
+        DNS_CACHE[host] = {"ips": ips, "expires": now + 300}
+    return ips
+
+
+@contextmanager
+def patched_getaddrinfo_for_host(hostname: str, ips: list[str]):
+    import socket
+
+    host = (hostname or "").strip().strip(".").lower()
+    original_getaddrinfo = socket.getaddrinfo
+
+    def patched(host_arg, port, family=0, type=0, proto=0, flags=0):
+        if str(host_arg or "").strip().strip(".").lower() == host and ips:
+            results = []
+            socktype = type or socket.SOCK_STREAM
+            protocol = proto or socket.IPPROTO_TCP
+            for ip in ips:
+                results.append((socket.AF_INET, socktype, protocol, "", (ip, port)))
+            return results
+        return original_getaddrinfo(host_arg, port, family, type, proto, flags)
+
+    socket.getaddrinfo = patched
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
+
+
+def resilient_urlopen(req, timeout=300):
+    import time
+    import urllib.request
+
+    parsed = urlparse(req.full_url)
+    host = parsed.hostname or ""
+    ips = resolve_hostname_resilient(host)
+    last_exc = None
+
+    for attempt in range(3):
+        try:
+            if ips:
+                with patched_getaddrinfo_for_host(host, ips):
+                    return urllib.request.urlopen(req, timeout=timeout)
+            return urllib.request.urlopen(req, timeout=timeout)
+        except Exception as exc:
+            last_exc = exc
+            if not _is_dns_resolution_error(exc) or attempt >= 2:
+                raise
+            DNS_CACHE.pop(host.strip().strip(".").lower(), None)
+            ips = resolve_hostname_resilient(host)
+            time.sleep(0.35 * (attempt + 1))
+
+    raise last_exc
 
 
 def extract_urls_from_text(text: str, max_urls: int = 3):
@@ -229,6 +413,66 @@ def looks_like_search_request(text: str) -> bool:
     return any(p in value for p in patterns)
 
 
+SEARCH_COMMAND_PATTERNS = [
+    r"^(你)?(帮我|给我|请)?(联网)?(搜索|搜一下|搜一搜|查一下|查一查|查找|检索|搜)(这个|一下|看看|下)?[。.!！\s]*$",
+    r"^(search|look up|browse|web search)\s*(this|it|that)?[。.!！\s]*$",
+]
+
+
+def _strip_search_command_words(text: str) -> str:
+    value = (text or "").strip()
+    value = re.sub(r"^(你)?(帮我|给我|请)?", "", value).strip()
+    value = re.sub(r"^(联网)?(搜索|搜一下|搜一搜|查一下|查一查|查找|检索|搜)\s*", "", value).strip()
+    value = re.sub(r"^(search|look up|browse|web search)\s+", "", value, flags=re.I).strip()
+    value = re.sub(r"(一下|看看|查查|搜搜|相关信息|最新消息|最新新闻)[。.!！\s]*$", "", value).strip()
+    return value
+
+
+def _is_bare_search_command(text: str) -> bool:
+    value = (text or "").strip().lower()
+    if not value:
+        return False
+    return any(re.match(pattern, value, flags=re.I) for pattern in SEARCH_COMMAND_PATTERNS)
+
+
+def _clean_context_for_search(text: str) -> str:
+    value = re.sub(r"\s+", " ", (text or "")).strip()
+    value = re.sub(r"\[[0-9]+\]", "", value)
+    value = re.sub(r"```[\s\S]*?```", " ", value)
+    return value.strip()
+
+
+def build_contextual_search_query(user_prompt: str, context_messages=None, max_chars: int = 120) -> str:
+    prompt = (user_prompt or "").strip()
+    cleaned_prompt = _strip_search_command_words(prompt)
+
+    if cleaned_prompt and not _is_bare_search_command(prompt):
+        return cleaned_prompt[:max_chars]
+
+    candidates = []
+    for msg in reversed(context_messages or []):
+        if getattr(msg, "role", "") not in ("user", "assistant"):
+            continue
+        content = _clean_context_for_search(getattr(msg, "content", "") or "")
+        if not content or _is_bare_search_command(content):
+            continue
+        candidates.append(content)
+        if len(candidates) >= 3:
+            break
+
+    if candidates:
+        # 优先使用最近一条实质用户问题；如果没有，再用助手回答的主题。
+        for msg in reversed(context_messages or []):
+            if getattr(msg, "role", "") != "user":
+                continue
+            content = _clean_context_for_search(getattr(msg, "content", "") or "")
+            if content and not _is_bare_search_command(content):
+                return _strip_search_command_words(content)[:max_chars]
+        return candidates[0][:max_chars]
+
+    return cleaned_prompt[:max_chars] if cleaned_prompt else prompt[:max_chars]
+
+
 BAD_SOURCE_PATTERNS = [
     "zhihu.com",
     "baidu.com/jingyan",
@@ -356,7 +600,7 @@ def fetch_searchfree_results(query: str, max_results: int = 5) -> list[dict]:
     import urllib.request
     import urllib.error
 
-    q = rewrite_search_query(query)
+    q = (query or "").strip()
     if not q:
         return []
 
@@ -415,7 +659,7 @@ def fetch_search1api_results(query: str, max_results: int = 5) -> list[dict]:
     if not token:
         return []
 
-    q = rewrite_search_query(query)
+    q = (query or "").strip()
     if not q:
         return []
 
@@ -488,24 +732,7 @@ def merge_search_results(result_groups: list[list[dict]], max_results: int = 5) 
 
 
 def fetch_primary_search_results(query: str, max_results: int = 5) -> list[dict]:
-    from concurrent.futures import ThreadPoolExecutor
-
-    per_provider_limit = max(1, min(int(max_results or 5), 10))
-    providers = [
-        lambda: fetch_search1api_results(query, max_results=per_provider_limit),
-        lambda: fetch_searchfree_results(query, max_results=per_provider_limit),
-    ]
-
-    groups = []
-    with ThreadPoolExecutor(max_workers=len(providers)) as pool:
-        futures = [pool.submit(provider) for provider in providers]
-        for future in futures:
-            try:
-                groups.append(future.result(timeout=25))
-            except Exception:
-                groups.append([])
-
-    return merge_search_results(groups, max_results=max_results)
+    return fetch_search1api_results(query, max_results=max_results)
 
 
 def select_balanced_sources(results: list[dict], max_results: int) -> list[dict]:
@@ -551,111 +778,7 @@ def select_balanced_sources(results: list[dict], max_results: int) -> list[dict]
 
 
 def fetch_search_results(query: str, max_results: int = 5) -> list[dict]:
-    import urllib.request
-    from html.parser import HTMLParser
-
-    class BingParser(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.results = []
-            self._in_link = False
-            self._href = ""
-            self._text_parts = []
-            self._li_depth = 0
-            self._h2_depth = 0
-
-        def handle_starttag(self, tag, attrs):
-            tag = tag.lower()
-            attrs_dict = dict(attrs)
-            if tag == "li":
-                cls = attrs_dict.get("class", "")
-                if "b_algo" in cls:
-                    self._li_depth += 1
-                return
-            if tag == "h2" and self._li_depth > 0:
-                self._h2_depth += 1
-                return
-            if tag != "a":
-                return
-            href = attrs_dict.get("href", "")
-            if self._li_depth > 0 and self._h2_depth > 0 and href.startswith("http"):
-                self._in_link = True
-                self._href = href
-                self._text_parts = []
-
-        def handle_endtag(self, tag):
-            tag = tag.lower()
-            if tag == "a" and self._in_link:
-                title = normalize_source_title("".join(self._text_parts), self._href)
-                url = normalize_source_url(self._href)
-                if url:
-                    self.results.append({"title": title, "url": url})
-                self._in_link = False
-                self._href = ""
-                self._text_parts = []
-                return
-            if tag == "h2" and self._h2_depth > 0:
-                self._h2_depth -= 1
-                return
-            if tag == "li" and self._li_depth > 0:
-                self._li_depth -= 1
-
-        def handle_data(self, data):
-            if self._in_link and data:
-                self._text_parts.append(data)
-
-    query = rewrite_search_query(query)
-    if not query:
-        return []
-
-    primary_results = fetch_primary_search_results(query, max_results=max_results)
-    if primary_results:
-        return primary_results
-
-    api_results = fetch_brave_search_results(query, max_results=max_results)
-    if api_results:
-        return api_results
-
-    candidates = [
-        "https://www.bing.com/search?q=" + quote(query) + "&setlang=zh-Hans&ensearch=1",
-        "https://cn.bing.com/search?q=" + quote(query),
-        "https://html.duckduckgo.com/html/?q=" + quote(query),
-    ]
-
-    for url in candidates:
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 Claude-Web/1.0",
-                    "Accept": "text/html,application/xhtml+xml",
-                },
-                method="GET",
-            )
-            with urllib.request.urlopen(req, timeout=16) as resp:
-                html = resp.read(1024 * 512).decode("utf-8", errors="ignore")
-            parser = BingParser()
-            parser.feed(html)
-            cleaned = []
-            seen = set()
-            for item in parser.results:
-                href = normalize_source_url(item.get("url", ""))
-                if not href or href in seen:
-                    continue
-                seen.add(href)
-                cleaned.append({
-                    "title": normalize_source_title(item.get("title", ""), href),
-                    "url": href,
-                    "score": source_relevance_score(query, item.get("title", ""), href),
-                })
-            cleaned.sort(key=lambda x: x.get("score", 0), reverse=True)
-            filtered = [item for item in cleaned if item.get("score", 0) >= 8][:max_results]
-            if filtered:
-                return filtered
-        except Exception:
-            continue
-
-    return []
+    return fetch_search1api_results(query, max_results=max_results)
 
 
 def fetch_brave_search_results(query: str, max_results: int = 5) -> list[dict]:
@@ -733,7 +856,10 @@ def build_sources_context_block(sources: list[dict]) -> str:
         title = item.get("title", "未命名来源")
         url = item.get("url", "")
         excerpt = item.get("excerpt", "")
+        query = item.get("query", "")
         parts.append(f"[{idx}] {title}")
+        if query:
+            parts.append(f"实际搜索词: {query}")
         if url:
             parts.append(f"URL: {url}")
         if excerpt:
@@ -748,27 +874,24 @@ def build_sources_context_block(sources: list[dict]) -> str:
     return "\n".join(parts).strip()
 
 
-def collect_search_sources(user_prompt: str, max_results: int = 4) -> list[dict]:
+def collect_search_sources(user_prompt: str, max_results: int = 4, context_messages=None) -> list[dict]:
     results = []
 
-    if looks_like_search_request(user_prompt):
-        search_results = fetch_primary_search_results(user_prompt, max_results=max_results * 2)
-        for item in search_results:
-            excerpt = item.get("description") or ""
-            if not excerpt:
-                excerpt = extract_webpage_via_api(item["url"], max_chars=1400)
-            score = item.get("score", source_relevance_score(user_prompt, item["title"], item["url"], excerpt))
-            if score < 8:
-                continue
-            results.append({
-                "title": item["title"],
-                "url": item["url"],
-                "excerpt": excerpt,
-                "score": score,
-                "provider": item.get("provider", ""),
-            })
+    search_query = build_contextual_search_query(user_prompt, context_messages=context_messages)
+    search_results = fetch_search1api_results(search_query, max_results=max_results)
+    for item in search_results:
+        excerpt = item.get("description") or ""
+        score = item.get("score", source_relevance_score(user_prompt, item["title"], item["url"], excerpt))
+        results.append({
+            "title": item["title"],
+            "url": item["url"],
+            "excerpt": excerpt,
+            "score": score,
+            "provider": "search1api",
+            "query": search_query,
+        })
 
-    results = select_balanced_sources(results, max_results)
+    results = results[:max_results]
     final = []
     for idx, item in enumerate(results, 1):
         final.append({
@@ -777,6 +900,7 @@ def collect_search_sources(user_prompt: str, max_results: int = 4) -> list[dict]
             "url": item.get("url", ""),
             "excerpt": item.get("excerpt", ""),
             "provider": item.get("provider", ""),
+            "query": item.get("query", ""),
         })
     return final
 
@@ -845,7 +969,7 @@ def stream_direct_api_text(
             "messages": [
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.3,
+            "temperature": MODEL_TEMPERATURE,
             "stream": True,
         }
         headers = {
@@ -863,7 +987,7 @@ def stream_direct_api_text(
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with resilient_urlopen(req, timeout=300) as resp:
                 for raw in resp:
                     line = raw.decode("utf-8", errors="ignore").strip()
                     if not line:
@@ -896,10 +1020,18 @@ def stream_direct_api_text(
                 + (err or str(e))
             )
         except Exception as e:
+            hint = ""
+            if _is_dns_resolution_error(e):
+                parsed = urlparse(url)
+                ips = resolve_hostname_resilient(parsed.hostname or "")
+                hint = "\nDNS解析失败，已尝试系统DNS和备用DNS回退。"
+                if ips:
+                    hint += " 备用解析结果: " + ", ".join(ips)
             yield (
                 "\n[直连OpenAI流式接口失败]\n"
                 f"请求地址: {url}\n"
                 + str(e)
+                + hint
             )
 
         return
@@ -909,6 +1041,7 @@ def stream_direct_api_text(
     body = {
         "model": model,
         "max_tokens": 4096,
+        "temperature": MODEL_TEMPERATURE,
         "messages": [
             {"role": "user", "content": prompt}
         ],
@@ -931,7 +1064,7 @@ def stream_direct_api_text(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with resilient_urlopen(req, timeout=300) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", errors="ignore").strip()
                 if not line:
@@ -973,10 +1106,18 @@ def stream_direct_api_text(
             + (err or str(e))
         )
     except Exception as e:
+        hint = ""
+        if _is_dns_resolution_error(e):
+            parsed = urlparse(url)
+            ips = resolve_hostname_resilient(parsed.hostname or "")
+            hint = "\nDNS解析失败，已尝试系统DNS和备用DNS回退。"
+            if ips:
+                hint += " 备用解析结果: " + ", ".join(ips)
         yield (
             "\n[直连Claude流式接口失败]\n"
             f"请求地址: {url}\n"
             + str(e)
+            + hint
         )
 
 
@@ -1066,6 +1207,172 @@ def stream_direct_vision_and_save(
         )
 
 
+def build_vision_payload_parts(prompt: str, image_local_paths: list[str]):
+    if not image_local_paths:
+        raise RuntimeError("没有图片")
+
+    images = []
+    for local_path in image_local_paths:
+        abs_path = local_upload_path_to_abs(local_path)
+        if not abs_path.exists():
+            raise RuntimeError(f"图片不存在: {local_path}")
+
+        raw = abs_path.read_bytes()
+        b64 = base64.b64encode(raw).decode("utf-8")
+        media_type = guess_media_type(local_path)
+        images.append({
+            "local_path": local_path,
+            "media_type": media_type,
+            "base64": b64,
+        })
+
+    openai_content = [{"type": "text", "text": prompt}]
+    anthropic_content = [{"type": "text", "text": prompt}]
+
+    for img in images:
+        openai_content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{img['media_type']};base64,{img['base64']}"
+            }
+        })
+        anthropic_content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": img["media_type"],
+                "data": img["base64"],
+            }
+        })
+
+    return openai_content, anthropic_content
+
+
+def stream_direct_vision_api_text(
+    prompt: str,
+    image_local_paths: list[str],
+    api_base_url: str,
+    api_auth_token: str,
+    api_model: str,
+):
+    import urllib.request
+    import urllib.error
+
+    base_url = api_base_url.strip().rstrip("/")
+    token = api_auth_token.strip()
+    model = api_model.strip() or DEFAULT_MODEL
+
+    if not base_url:
+        yield "缺少 API URL"
+        return
+    if not token:
+        yield "缺少 API Key"
+        return
+
+    openai_content, anthropic_content = build_vision_payload_parts(prompt, image_local_paths)
+    lower_model = model.lower()
+
+    if lower_model.startswith("gpt") or "gpt-" in lower_model:
+        url = build_api_url(base_url, "/v1/chat/completions")
+        body = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": openai_content,
+                }
+            ],
+            "temperature": MODEL_TEMPERATURE,
+            "stream": True,
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream, application/json, text/plain, */*",
+                "Authorization": "Bearer " + token,
+            },
+            method="POST",
+        )
+
+        try:
+            with resilient_urlopen(req, timeout=300) as resp:
+                for raw in resp:
+                    line = raw.decode("utf-8", errors="ignore").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                        delta = obj.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if delta:
+                            yield delta
+                    except Exception:
+                        continue
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="ignore")
+            yield "\n[视觉流式接口失败]\n" + (err or str(e))
+        except Exception as e:
+            yield "\n[视觉流式接口失败]\n" + str(e)
+        return
+
+    url = build_api_url(base_url, "/v1/messages")
+    body = {
+        "model": model,
+        "max_tokens": 4096,
+        "temperature": MODEL_TEMPERATURE,
+        "messages": [
+            {
+                "role": "user",
+                "content": anthropic_content,
+            }
+        ],
+        "stream": True,
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream, application/json, text/plain, */*",
+            "x-api-key": token,
+            "Authorization": "Bearer " + token,
+            "anthropic-version": "2023-06-01",
+        },
+        method="POST",
+    )
+
+    try:
+        with resilient_urlopen(req, timeout=300) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", errors="ignore").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                    if obj.get("type") == "content_block_delta":
+                        text = obj.get("delta", {}).get("text", "")
+                        if text:
+                            yield text
+                    elif "completion" in obj:
+                        text = obj.get("completion") or ""
+                        if text:
+                            yield text
+                except Exception:
+                    continue
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="ignore")
+        yield "\n[视觉流式接口失败]\n" + (err or str(e))
+    except Exception as e:
+        yield "\n[视觉流式接口失败]\n" + str(e)
+
+
 def guess_media_type(path: str) -> str:
     ext = Path(path).suffix.lower()
     if ext in [".jpg", ".jpeg"]:
@@ -1109,48 +1416,21 @@ def call_direct_vision_api(
         raise RuntimeError("缺少 API URL")
     if not token:
         raise RuntimeError("缺少 API Key")
-    if not image_local_paths:
-        raise RuntimeError("没有图片")
-
-    images = []
-    for local_path in image_local_paths:
-        abs_path = local_upload_path_to_abs(local_path)
-        if not abs_path.exists():
-            raise RuntimeError(f"图片不存在: {local_path}")
-
-        raw = abs_path.read_bytes()
-        b64 = base64.b64encode(raw).decode("utf-8")
-        media_type = guess_media_type(local_path)
-
-        images.append({
-            "local_path": local_path,
-            "media_type": media_type,
-            "base64": b64,
-        })
+    openai_content, anthropic_content = build_vision_payload_parts(prompt, image_local_paths)
 
     lower_model = model.lower()
 
     # GPT / OpenAI compatible
     if lower_model.startswith("gpt") or "gpt-" in lower_model:
-        content = [{"type": "text", "text": prompt}]
-
-        for img in images:
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:{img['media_type']};base64,{img['base64']}"
-                }
-            })
-
         body = {
             "model": model,
             "messages": [
                 {
                     "role": "user",
-                    "content": content
+                    "content": openai_content
                 }
             ],
-            "temperature": 0.3
+            "temperature": MODEL_TEMPERATURE
         }
 
         url = base_url + "/v1/chat/completions"
@@ -1166,7 +1446,7 @@ def call_direct_vision_api(
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=180) as resp:
+            with resilient_urlopen(req, timeout=180) as resp:
                 data = json.loads(resp.read().decode("utf-8", errors="ignore"))
 
             return (
@@ -1181,25 +1461,14 @@ def call_direct_vision_api(
             raise RuntimeError("OpenAI视觉接口失败: " + (err or str(e)))
 
     # Anthropic compatible
-    content = [{"type": "text", "text": prompt}]
-
-    for img in images:
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": img["media_type"],
-                "data": img["base64"],
-            }
-        })
-
     body = {
         "model": model,
         "max_tokens": 4096,
+        "temperature": MODEL_TEMPERATURE,
         "messages": [
             {
                 "role": "user",
-                "content": content,
+                "content": anthropic_content,
             }
         ]
     }
@@ -1219,7 +1488,7 @@ def call_direct_vision_api(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with resilient_urlopen(req, timeout=180) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="ignore"))
 
         parts = []
