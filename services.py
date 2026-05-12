@@ -20,6 +20,7 @@ DNS_CACHE = {}
 SEARCH_CACHE = {}
 PLANNER_CACHE = {}
 PAGE_CACHE = {}
+TAVILY_CLIENT = None
 
 
 def _cache_get(cache: dict, key: str):
@@ -38,6 +39,23 @@ def _cache_set(cache: dict, key: str, value, ttl_seconds: int):
         "expires_at": time.time() + max(1, int(ttl_seconds)),
     }
     return value
+
+
+def get_tavily_client():
+    global TAVILY_CLIENT
+    if TAVILY_CLIENT is not None:
+        return TAVILY_CLIENT
+    api_key = os.environ.get("TAVILY_API_KEY", "").strip()
+    if not api_key:
+        TAVILY_CLIENT = False
+        return None
+    try:
+        from tavily import TavilyClient
+        TAVILY_CLIENT = TavilyClient(api_key=api_key)
+        return TAVILY_CLIENT
+    except Exception:
+        TAVILY_CLIENT = False
+        return None
 
 
 def _strip_html_tags(text: str) -> str:
@@ -364,6 +382,18 @@ def extract_webpage_via_api(url: str, max_chars: int = 12000) -> str:
     """
     import urllib.request
     import urllib.error
+
+    tavily_client = get_tavily_client()
+    if tavily_client:
+        try:
+            data = tavily_client.extract(urls=[url], extract_depth="basic", include_images=False)
+            results = data.get("results") or []
+            if results:
+                text = (results[0].get("raw_content") or results[0].get("content") or "").strip()
+                if text:
+                    return text[:max_chars] + ("\n\n[网页内容过长，已截断]" if len(text) > max_chars else "")
+        except Exception as e:
+            return f"[Tavily 网页解析失败：{e}]"
 
     tavily_key = os.environ.get("TAVILY_API_KEY", "").strip()
     if tavily_key:
@@ -773,6 +803,47 @@ def fetch_bing_search_results(query: str, max_results: int = 5) -> list[dict]:
     return items[:max_results]
 
 
+def fetch_tavily_search_results(query: str, max_results: int = 5) -> list[dict]:
+    client = get_tavily_client()
+    if not client:
+        return []
+
+    q = rewrite_search_query((query or "").strip())
+    if not q:
+        return []
+
+    try:
+        data = client.search(
+            q,
+            search_depth="advanced",
+            max_results=max(1, min(int(max_results or 5), 10)),
+            include_raw_content=False,
+        )
+    except Exception:
+        return []
+
+    items = data.get("results") or []
+    cleaned = []
+    seen = set()
+    for item in items:
+        href = normalize_source_url(item.get("url", ""))
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        title = normalize_source_title(item.get("title", ""), href)
+        excerpt = _trim_excerpt(item.get("content") or item.get("snippet") or "", 2200)
+        score = source_relevance_score(q, title, href, excerpt) + 18
+        cleaned.append({
+            "title": title,
+            "url": href,
+            "description": excerpt,
+            "score": score,
+            "provider": "tavily",
+        })
+    cleaned.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return cleaned[:max_results]
+
+
 def fetch_search1api_results(query: str, max_results: int = 5) -> list[dict]:
     import urllib.request
 
@@ -883,6 +954,7 @@ def select_balanced_sources(results: list[dict], max_results: int) -> list[dict]
                 return
 
     add_first(lambda item: not item.get("provider"))
+    add_first(lambda item: item.get("provider") == "tavily")
     add_first(lambda item: item.get("provider") == "search1api")
     add_first(lambda item: item.get("provider") == "searchfree")
 
@@ -910,6 +982,7 @@ def fetch_search_results(query: str, max_results: int = 5) -> list[dict]:
 
     limit = max(1, min(int(max_results or 5), 10))
     groups = [
+        fetch_tavily_search_results(q, max_results=limit),
         fetch_search1api_results(q, max_results=limit),
         fetch_bing_search_results(q, max_results=limit),
         fetch_brave_search_results(q, max_results=limit),
