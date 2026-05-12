@@ -4281,7 +4281,11 @@
     }
 
     function getMsgSnapshotKey(msgs) {
-      return msgs.map(m => getMessageId(m) + ":" + (m.role || "") + ":" + ((m.content || "").length) + ":" + (m.supersededBy || "")).join("|");
+      return msgs.map(m => {
+        const content = m.content || "";
+        const contentSig = content.length + ":" + content.slice(0, 48) + ":" + content.slice(-48);
+        return getMessageId(m) + ":" + (m.role || "") + ":" + contentSig + ":" + (m.supersededBy || "") + ":" + (m.sources || "");
+      }).join("|");
     }
 
     function renderMessages(forceScroll = false) {
@@ -4346,6 +4350,7 @@
     let streamingDisplayContent = "";
     let streamingTargetContent = "";
     let streamingTypewriterTimer = null;
+    let streamingScheduleSeq = 0;
     let isAssistantTyping = false;
     let thinkingMotionTimer = null;
 
@@ -4582,6 +4587,7 @@
 
     function beginStreamingAssistantMessage() {
       stopStreamingTypewriter(false);
+      streamingScheduleSeq += 1;
       pendingStreamingContent = "";
       streamingDisplayContent = "";
       streamingTargetContent = "";
@@ -4604,6 +4610,7 @@
 
     function scheduleStreamingAssistantUpdate(content) {
       pendingStreamingContent = content || "";
+      const seq = ++streamingScheduleSeq;
 
       if (streamingRenderQueued) return;
 
@@ -4614,6 +4621,7 @@
       if (timeSinceLastRender < STREAMING_RENDER_THROTTLE) {
         streamingRenderQueued = true;
         setTimeout(() => {
+          if (seq !== streamingScheduleSeq) return;
           streamingRenderQueued = false;
           lastStreamingRenderTime = Date.now();
           const text = pendingStreamingContent;
@@ -4628,6 +4636,7 @@
       lastStreamingRenderTime = now;
 
       requestAnimationFrame(() => {
+        if (seq !== streamingScheduleSeq) return;
         streamingRenderQueued = false;
         const text = pendingStreamingContent;
         pendingStreamingContent = "";
@@ -4637,10 +4646,14 @@
     }
 
     function flushStreamingAssistantUpdate(finalRender = true) {
+      streamingScheduleSeq += 1;
       streamingRenderQueued = false;
       const text = pendingStreamingContent || (messages.length ? (messages[messages.length - 1].content || "") : "");
       pendingStreamingContent = "";
       streamingTargetContent = text;
+      if (messages.length && messages[messages.length - 1].role === "assistant") {
+        messages[messages.length - 1].content = text;
+      }
       stopStreamingTypewriter(finalRender);
       updateLastAssistantBubble(streamingTargetContent, finalRender, false);
     }
@@ -5088,10 +5101,12 @@
 
         await loadConversations();
         await loadMessages();
+        lastRenderedMsgKey = "";
         renderAll();
       } catch (e) {
         stopStreamingTypewriter(false);
         messages[messages.length - 1].content = "请求失败: " + e;
+        lastRenderedMsgKey = "";
         renderMessages();
       } finally {
         sending = false;
@@ -5169,10 +5184,12 @@
         flushStreamingAssistantUpdate(true);
 
         await loadMessages();
+        lastRenderedMsgKey = "";
         renderAll();
       } catch (e) {
         stopStreamingTypewriter(false);
         messages[messages.length - 1].content = "重新生成失败: " + e;
+        lastRenderedMsgKey = "";
         renderMessages();
       } finally {
         sending = false;
