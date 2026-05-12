@@ -26,10 +26,10 @@ When the user asks to start this project, start it with the stable ngrok public 
 
 ```bash
 cd /home/ai/claude-web
-./start-public.sh
+./start-local.sh
 ```
 
-`start-public.sh` uses:
+`start-local.sh` starts the local backend and then calls `start-public.sh`, which uses:
 
 ```bash
 NGROK_URL=kindling-shaft-creamer.ngrok-free.dev ./start-ngrok.sh
@@ -93,7 +93,7 @@ Use these commands to restart components:
 
 ```bash
 /data/data/com.termux/files/home/restart-claude-web.sh
-cd /home/ai/claude-web && ./start-public.sh
+cd /home/ai/claude-web && ./start-local.sh
 ```
 
 Important operating notes:
@@ -101,6 +101,6 @@ Important operating notes:
 - `termux-wake-lock` reduces sleep-related kills, but it cannot override aggressive OEM background killing by itself.
 - Termux, Termux:API, and the hosting app should be set to unrestricted battery mode in Android settings and locked in Recents when possible.
 - A public ngrok link is not a hard uptime guarantee. The monitor can restart it, but network loss, ngrok account limits, Android process kills, or heartbeat timeouts can still interrupt access.
-- `start-public.sh` is the default public script. `start-ngrok.sh` performs the actual ngrok launch. `start-cloudflare.sh` exists but should only be used when Cloudflare is explicitly requested.
-- The external helper `/home/ai/claude-web-ngrok.sh` is a more verbose tmux-based ngrok supervisor, but the current active default is the repository script `./start-public.sh`.
+- `start-local.sh` is the default project startup script and opens the public ngrok entry when possible. `start-public.sh` and `start-ngrok.sh` perform the actual ngrok launch. `start-cloudflare.sh` exists but should only be used when Cloudflare is explicitly requested.
+- The external helper `/home/ai/claude-web-ngrok.sh` is a more verbose tmux-based ngrok supervisor, but the current active default is the repository script `./start-local.sh`.
 - Do not reintroduce `/root/claude-web` paths. The active project is `/home/ai/claude-web`.

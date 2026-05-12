@@ -26,7 +26,7 @@ if ! command -v "$CLOUDFLARED_BIN" >/dev/null 2>&1; then
   fail "cloudflared command not found. Install cloudflared first."
 fi
 
-./start-local.sh >/dev/null
+START_PUBLIC=0 ./start-local.sh >/dev/null
 
 if [ -f "$CF_PID_FILE" ]; then
   OLD_PID="$(cat "$CF_PID_FILE" 2>/dev/null || true)"

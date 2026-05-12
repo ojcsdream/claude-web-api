@@ -19,7 +19,7 @@
         load: ["[tex]/mhchem"]
       },
       tex: {
-        inlineMath: [["$", "$"], ["\\(", "\\)"]],
+        inlineMath: [["\\(", "\\)"]],
         displayMath: [["$$", "$$"], ["\\[", "\\]"]],
         processEscapes: true,
         processEnvironments: true,
@@ -2940,8 +2940,7 @@
         .replace(/\$\$[\s\S]*?\$\$/g, m => addBlock(m, true))
         .replace(/\\\[[\s\S]*?\\\]/g, m => addBlock(m, true))
         .replace(/\\begin\{(?:equation|align|aligned|gather|multline|cases|matrix|pmatrix|bmatrix|vmatrix)\*?\}[\s\S]*?\\end\{(?:equation|align|aligned|gather|multline|cases|matrix|pmatrix|bmatrix|vmatrix)\*?\}/g, m => addBlock(`$$\n${m.trim()}\n$$`, true))
-        .replace(/\\\([\s\S]*?\\\)/g, m => addBlock(m, false))
-        .replace(/\$(?!\$)(?:\\.|[^$\n])+\$/g, m => addBlock(m, false));
+        .replace(/\\\([\s\S]*?\\\)/g, m => addBlock(m, false));
 
       return { text: protectedText, blocks };
     }
@@ -2966,7 +2965,7 @@
 
       x = x
         .replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => `\n$$\n${inner.trim()}\n$$\n`)
-        .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => `$${inner.trim()}$`);
+        .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => `\\(${inner.trim()}\\)`);
 
       x = normalizeDisplayMathBlocks(x);
 
@@ -3318,7 +3317,7 @@
       } else {
         root.innerHTML = root.innerHTML
           .replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => `<span class="math-display-fallback">${escapeHtml(inner.trim())}</span>`)
-          .replace(/\$([^$\n]+?)\$/g, (_, inner) => `<span class="math-inline-fallback">${escapeHtml(inner.trim())}</span>`);
+          .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => `<span class="math-inline-fallback">${escapeHtml(inner.trim())}</span>`);
       }
     }
 

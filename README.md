@@ -66,7 +66,7 @@ claude-web/
 ├── services.py         # 直连 API、视觉 API、上传/网页读取服务
 ├── requirements.txt    # Python 运行依赖
 ├── install.sh          # Linux 一键安装脚本
-├── start-local.sh      # 本地后台启动脚本
+├── start-local.sh      # 默认后台启动脚本，会同时启动固定 ngrok 公网入口
 ├── static/
 │   ├── index.html      # 主聊天界面
 │   ├── lite.html       # 极简备用聊天界面
@@ -86,18 +86,26 @@ claude-web/
 - `python3-venv`
 - `pip`
 - `curl`
+- `tar`
 
 从 GitHub 克隆后执行：
 
 ```bash
-git clone <你的仓库地址> claude-web
+git clone git@github.com:ojcsdream/api-.git claude-web
 cd claude-web
 chmod +x install.sh start-local.sh
 ./install.sh
 ./start-local.sh
 ```
 
-安装脚本会创建 `.venv`、安装 Python 依赖、创建 `uploads/` 和 `logs/`，并进行 Python 语法检查。它不会写入 API Key，也不会复制历史数据库。
+安装脚本会创建 `.venv`、安装 Python 依赖、创建 `uploads/` 和 `logs/`，并进行 Python 语法检查。它会尝试安装 `ngrok` 到 `~/.local/bin/ngrok`。它不会写入 API Key，也不会复制历史数据库。
+
+如果要让固定公网域名自动可用，首次部署前先提供 ngrok token：
+
+```bash
+export NGROK_AUTHTOKEN="你的 ngrok token"
+./install.sh
+```
 
 首次启动时会自动创建全新的 `chat.db`。请在 Web 管理界面配置 API 接入商；不要把 API Key 写入公开仓库。
 
@@ -105,6 +113,7 @@ chmod +x install.sh start-local.sh
 
 ```text
 http://127.0.0.1:8000/
+https://kindling-shaft-creamer.ngrok-free.dev
 ```
 
 ## 启动方式
@@ -119,10 +128,13 @@ cd /home/ai/claude-web
 `start-local.sh` 会：
 
 - 停掉旧的 `127.0.0.1:8000` uvicorn 进程
-- 使用 `--workers 2` 启动服务
+- 使用 `--workers 1` 启动服务
 - 关闭 access log，减少手机环境下的日志压力
 - 写入 `logs/uvicorn-local.log`
 - 等待 `/api/health` 可用
+- 自动调用 `start-public.sh`，打开固定 ngrok 公网入口
+- 把公网地址写入 `ngrok-url.txt`
+- 如果公网隧道启动失败，本地服务仍会保持运行并输出提示
 
 手动启动：
 
@@ -140,11 +152,13 @@ curl http://127.0.0.1:8000/api/health
 
 ## 公网访问
 
-默认服务只监听 `127.0.0.1:8000`。如果需要公网访问，建议使用 Nginx、Caddy、SSH tunnel、Cloudflare Tunnel 或其它受控反向代理，并先处理认证、CORS 和 API Key 安全。
+项目启动脚本默认会启动本地服务并打开固定 ngrok 公网入口。如果需要换成其它公网方案，建议使用 Nginx、Caddy、SSH tunnel、Cloudflare Tunnel 或其它受控反向代理，并先处理认证、CORS 和 API Key 安全。
+
+固定 ngrok 域名需要已配置 ngrok 账号 token。如果 `./start-local.sh` 提示公网隧道未启动，本地入口 `http://127.0.0.1:8000/` 仍然可用；配置 `NGROK_AUTHTOKEN` 后重新运行 `./install.sh` 和 `./start-local.sh` 即可。
 
 ### 默认公网启动
 
-当前推荐默认使用固定 ngrok 域名启动：
+当前 `./start-local.sh` 已默认打开固定 ngrok 域名；也可以直接运行公网脚本：
 
 ```bash
 cd /home/ai/claude-web
@@ -190,7 +204,7 @@ export CLOUDFLARE_PUBLIC_URL="https://你的域名"
 ./start-cloudflare.sh
 ```
 
-`start-ngrok.sh` 仅建议用于临时调试，不建议默认公网暴露，也不要提交 `ngrok-url.txt` 或任何隧道 token。
+`start-ngrok.sh` 是底层 ngrok 启动脚本；一般直接使用 `start-local.sh` 或 `start-public.sh`。
 
 公网 ngrok 隧道：
 

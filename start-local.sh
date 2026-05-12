@@ -12,6 +12,21 @@ fi
 
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
+START_PUBLIC="${START_PUBLIC:-1}"
+
+start_public_if_enabled() {
+  if [ "$START_PUBLIC" != "1" ] || [ ! -x ./start-public.sh ]; then
+    return 0
+  fi
+
+  if START_PUBLIC=0 START_LOCAL=0 ./start-public.sh "$PORT"; then
+    return 0
+  fi
+
+  echo "warning: public tunnel did not start; local service is still running"
+  echo "warning: see logs/ngrok.log"
+  return 0
+}
 
 if pgrep -f "uvicorn app:app .*--port ${PORT}" >/dev/null 2>&1; then
   pkill -f "uvicorn app:app .*--port ${PORT}" || true
@@ -28,6 +43,7 @@ setsid .venv/bin/python -m uvicorn app:app \
 echo $! > logs/uvicorn-local.pid
 for _ in 1 2 3 4 5; do
   if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+    start_public_if_enabled
     echo "started: http://${HOST}:${PORT}"
     exit 0
   fi
@@ -36,3 +52,4 @@ done
 
 echo "started: http://${HOST}:${PORT}"
 echo "warning: health check did not respond yet; see logs/uvicorn-local.log"
+start_public_if_enabled

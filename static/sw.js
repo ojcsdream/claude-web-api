@@ -1,4 +1,4 @@
-const CACHE_NAME = "claude-web-shell-v2";
+const CACHE_NAME = "claude-web-shell-v3";
 const SHELL_ASSETS = [
   "/",
   "/static/index.html",

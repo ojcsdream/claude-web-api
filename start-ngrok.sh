@@ -7,12 +7,31 @@ mkdir -p logs
 PORT="${1:-8000}"
 NGROK_BIN="${NGROK_BIN:-ngrok}"
 NGROK_API="http://127.0.0.1:4040/api/tunnels"
+NGROK_CONFIG_FILE="${HOME}/.config/ngrok/ngrok.yml"
 NGROK_LOG="logs/ngrok.log"
 NGROK_PID_FILE="logs/ngrok.pid"
 NGROK_URL_FILE="ngrok-url.txt"
 NGROK_URL="${NGROK_URL:-}"
+START_LOCAL="${START_LOCAL:-1}"
 
-./start-local.sh >/dev/null
+if [ "$START_LOCAL" = "1" ]; then
+  START_PUBLIC=0 ./start-local.sh >/dev/null
+fi
+
+if ! command -v "$NGROK_BIN" >/dev/null 2>&1; then
+  if [ -x "${HOME}/.local/bin/ngrok" ]; then
+    NGROK_BIN="${HOME}/.local/bin/ngrok"
+  else
+    echo "ngrok command not found. Run ./install.sh or install ngrok first."
+    exit 1
+  fi
+fi
+
+if [ -n "$NGROK_URL" ] && [ -z "${NGROK_AUTHTOKEN:-}" ] && ! grep -q "authtoken:" "$NGROK_CONFIG_FILE" 2>/dev/null; then
+  echo "ngrok authtoken is not configured; fixed domain requires an authenticated ngrok account."
+  echo "Set NGROK_AUTHTOKEN and run ./install.sh, or run: ngrok config add-authtoken <token>"
+  exit 1
+fi
 
 if pgrep -f "ngrok http" >/dev/null 2>&1; then
   pkill -f "ngrok http" || true
@@ -20,6 +39,10 @@ if pgrep -f "ngrok http" >/dev/null 2>&1; then
 fi
 
 rm -f "$NGROK_LOG" "$NGROK_PID_FILE"
+
+if [ -n "${NGROK_AUTHTOKEN:-}" ]; then
+  "$NGROK_BIN" config add-authtoken "$NGROK_AUTHTOKEN" >/dev/null 2>&1 || true
+fi
 
 if [ -n "$NGROK_URL" ]; then
   setsid "$NGROK_BIN" http --log=stdout --url="$NGROK_URL" "http://127.0.0.1:${PORT}" \
@@ -63,7 +86,7 @@ fi
 printf '%s\n' "$PUBLIC_URL" > "$NGROK_URL_FILE"
 
 for _ in 1 2 3 4 5 6 7 8; do
-  if curl -fsS "${PUBLIC_URL}/api/health" >/dev/null 2>&1; then
+  if curl -fsS -H "ngrok-skip-browser-warning: 1" "${PUBLIC_URL}/api/health" >/dev/null 2>&1; then
     echo "started: ${PUBLIC_URL}"
     exit 0
   fi
