@@ -55,6 +55,7 @@ from schemas import (
 from services import (
     build_sources_context_block,
     collect_search_sources,
+    collect_search_sources_autonomous,
     enhance_prompt_with_url_fetch,
     extract_urls_from_text,
     load_uploaded_text_from_path,
@@ -81,6 +82,35 @@ def with_system_prompt(final_prompt: str, system_prompt: str = "") -> str:
         + "\n\n"
         + (final_prompt or "").strip()
     ).strip()
+
+
+def iter_search_status_lines(enabled: bool, sources=None):
+    if not enabled:
+        return
+    yield "\n[[STATUS:planning_search]]\n"
+    yield "\n[[STATUS:searching]]\n"
+    if sources:
+        yield "\n[[STATUS:reading_sources]]\n"
+
+
+def resolve_search_context(
+    user_prompt: str,
+    history,
+    web_search: bool,
+    api_base_url: str,
+    api_auth_token: str,
+    api_model: str,
+):
+    if not web_search:
+        return "", [], {}
+    sources, plan = collect_search_sources_autonomous(
+        user_prompt,
+        context_messages=history,
+        api_base_url=api_base_url,
+        api_auth_token=api_auth_token,
+        api_model=api_model,
+    )
+    return build_sources_context_block(sources), sources, plan
 
 app.add_middleware(
     CORSMiddleware,
@@ -497,22 +527,31 @@ def chat_stream(body: ChatBody):
     db_add_message(cid, "user", body.prompt)
     db_update_title_if_needed(cid, body.prompt)
 
-    def status_line(name: str):
-        return f"\n[[STATUS:{name}]]\n"
-
     def gen():
         should_search = body.web_search and body.web_search_explicit
 
         if should_search or extract_urls_from_text(body.prompt):
-            yield status_line("parsing")
+            yield "\n[[STATUS:parsing]]\n"
+        if should_search:
+            yield "\n[[STATUS:planning_search]]\n"
 
         effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
         sources = []
+        plan = {}
 
         if should_search:
-            sources = collect_search_sources(body.prompt, context_messages=history)
-            source_context = build_sources_context_block(sources)
+            yield "\n[[STATUS:searching]]\n"
+            source_context, sources, plan = resolve_search_context(
+                body.prompt,
+                history,
+                should_search,
+                body.api_base_url,
+                body.api_auth_token,
+                body.api_model or DEFAULT_MODEL,
+            )
             if source_context:
+                if plan.get("parse_links"):
+                    yield "\n[[STATUS:reading_sources]]\n"
                 effective_prompt = source_context + "\n\n用户原始问题：\n" + body.prompt
 
         final_prompt = with_system_prompt(
@@ -561,13 +600,26 @@ def _stream_and_save_regenerated_answer(inner_gen, cid, api_model, provider_name
     _save_regenerated_answer(cid, full, api_model, provider_name, old_message_id, final_prompt, sources=sources)
 
 
-def _build_regenerate_prompt_with_search(context_messages, last_user_prompt, web_search=False, system_prompt=""):
+def _build_regenerate_prompt_with_search(
+    context_messages,
+    last_user_prompt,
+    web_search=False,
+    system_prompt="",
+    api_base_url="",
+    api_auth_token="",
+    api_model=DEFAULT_MODEL,
+):
     sources = []
     search_context = ""
-    should_search = web_search
-    if should_search:
-        sources = collect_search_sources(last_user_prompt, context_messages=context_messages)
-        search_context = build_sources_context_block(sources)
+    if web_search:
+        search_context, sources, _plan = resolve_search_context(
+            last_user_prompt,
+            context_messages,
+            True,
+            api_base_url,
+            api_auth_token,
+            api_model,
+        )
 
     final_user_prompt = last_user_prompt
     if search_context:
@@ -679,6 +731,9 @@ def regenerate_from_stream(body: ChatBody):
         last_user_prompt,
         body.web_search,
         body.system_prompt,
+        body.api_base_url,
+        body.api_auth_token,
+        body.api_model or DEFAULT_MODEL,
     )
 
     _api_model = body.api_model or DEFAULT_MODEL
@@ -686,6 +741,7 @@ def regenerate_from_stream(body: ChatBody):
 
     if keep_old:
         def gen_direct():
+            yield from iter_search_status_lines(body.web_search, sources)
             inner = stream_direct_api_text(
                 final_prompt,
                 body.api_base_url,
@@ -699,18 +755,19 @@ def regenerate_from_stream(body: ChatBody):
             )
         return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
-    return StreamingResponse(
-        stream_direct_and_save(
-            cid,
-            final_prompt,
-            body.api_base_url,
-            body.api_auth_token,
-            _api_model,
-            _api_profile_name,
-            sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-        ),
-        media_type="text/plain; charset=utf-8",
-    )
+    def gen_stream():
+        yield from iter_search_status_lines(body.web_search, sources)
+        yield from stream_direct_and_save(
+                cid,
+                final_prompt,
+                body.api_base_url,
+                body.api_auth_token,
+                _api_model,
+                _api_profile_name,
+                sources=json.dumps(sources, ensure_ascii=False) if sources else "",
+            )
+
+    return StreamingResponse(gen_stream(), media_type="text/plain; charset=utf-8")
 
 
 @app.post("/api/chat/regenerate_stream")
@@ -795,6 +852,9 @@ def regenerate_stream(body: ChatBody):
         last_user_prompt,
         body.web_search,
         body.system_prompt,
+        body.api_base_url,
+        body.api_auth_token,
+        body.api_model or DEFAULT_MODEL,
     )
 
     _api_model = body.api_model or DEFAULT_MODEL
@@ -802,6 +862,7 @@ def regenerate_stream(body: ChatBody):
 
     if keep_old and old_assistant_id:
         def gen_direct():
+            yield from iter_search_status_lines(body.web_search, sources)
             inner = stream_direct_api_text(
                 final_prompt,
                 body.api_base_url,
@@ -815,8 +876,9 @@ def regenerate_stream(body: ChatBody):
             )
         return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
-    return StreamingResponse(
-        stream_direct_and_save(
+    def gen_regen():
+        yield from iter_search_status_lines(body.web_search, sources)
+        yield from stream_direct_and_save(
             cid,
             final_prompt,
             body.api_base_url,
@@ -824,9 +886,9 @@ def regenerate_stream(body: ChatBody):
             _api_model,
             _api_profile_name,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-        ),
-        media_type="text/plain; charset=utf-8",
-    )
+        )
+
+    return StreamingResponse(gen_regen(), media_type="text/plain; charset=utf-8")
 
 
 @app.post("/api/chat/upload_stream")
@@ -924,8 +986,14 @@ async def chat_upload_stream(
     search_context = ""
     should_search = web_search and web_search_explicit
     if should_search:
-        sources = collect_search_sources(user_prompt, context_messages=history)
-        search_context = build_sources_context_block(sources)
+        search_context, sources, _plan = resolve_search_context(
+            user_prompt,
+            history,
+            True,
+            api_base_url,
+            api_auth_token,
+            api_model or DEFAULT_MODEL,
+        )
 
     # 有图片时，强制走 base64 视觉 API
     if image_files:
@@ -966,6 +1034,7 @@ async def chat_upload_stream(
         def gen():
             prefix = f"正在分析 {len(local_image_paths)} 张图片...\n\n"
             full = ""
+            yield from iter_search_status_lines(should_search, sources)
             yield prefix
             try:
                 for chunk in stream_direct_vision_api_text(
@@ -1057,6 +1126,7 @@ async def chat_upload_stream(
     )
 
     def gen_text_upload():
+        yield from iter_search_status_lines(should_search, sources)
         if text_files:
             yield f"正在读取 {len(text_files)} 个附件...\n\n"
         yield from stream_direct_and_save(

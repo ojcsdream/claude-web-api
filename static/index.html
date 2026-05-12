@@ -3700,7 +3700,10 @@
 
     const STREAM_STATUS_RE = /\[\[STATUS:([a-z_]+)\]\]/gi;
     const STATUS_LABELS = {
-      parsing: "网页解析中"
+      parsing: "网页解析中",
+      planning_search: "规划搜索中",
+      searching: "联网搜索中",
+      reading_sources: "读取来源中"
     };
     let activeToolStatuses = [];
     let lastUserPromptForThinking = "";
