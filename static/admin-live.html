@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Claude Web Live Console</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #0f100f;
+      color: #d8e0d4;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: rgba(12, 13, 12, 0.94);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(12px);
+    }
+    .brand {
+      flex: 1;
+      color: #f1f5ee;
+      font-size: 14px;
+      letter-spacing: 0.02em;
+    }
+    .status {
+      color: #9aaa9b;
+      font-size: 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px;
+      padding: 4px 9px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      background: rgba(255,255,255,0.015);
+      flex-wrap: wrap;
+    }
+    input, button {
+      font: inherit;
+    }
+    input {
+      width: min(320px, 52vw);
+      padding: 9px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: #171917;
+      color: #eef4ea;
+      outline: none;
+    }
+    button {
+      padding: 9px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: #1b1d1b;
+      color: #d8e0d4;
+      cursor: pointer;
+    }
+    button.primary {
+      background: #dbe5d4;
+      color: #101110;
+      border-color: transparent;
+      font-weight: 700;
+    }
+    .console {
+      flex: 1;
+      overflow: auto;
+      padding: 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.55;
+      font-size: 12px;
+    }
+    .line {
+      margin: 0 0 10px;
+      padding: 0;
+    }
+    .muted { color: #8d998d; }
+    .ok { color: #8ee39f; }
+    .warn { color: #f2d47f; }
+    .bad { color: #ff918f; }
+    .accent { color: #c6d6ff; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Claude Web Live Console</div>
+    <div class="status" id="state">未连接</div>
+  </div>
+  <div class="toolbar">
+    <input id="tokenInput" type="password" placeholder="输入管理员密码后连接" />
+    <button class="primary" id="connectBtn">连接</button>
+    <button id="pauseBtn">暂停滚动</button>
+    <button id="clearBtn">清屏</button>
+    <button id="backBtn">返回后台</button>
+  </div>
+  <div class="console" id="console"></div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const tokenInput = $("tokenInput");
+    const connectBtn = $("connectBtn");
+    const pauseBtn = $("pauseBtn");
+    const clearBtn = $("clearBtn");
+    const backBtn = $("backBtn");
+    const stateEl = $("state");
+    const consoleEl = $("console");
+
+    let pollTimer = null;
+    let follow = true;
+
+    function line(text, cls = "") {
+      const div = document.createElement("div");
+      div.className = "line " + cls;
+      div.textContent = text;
+      consoleEl.appendChild(div);
+      if (follow) {
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+      }
+    }
+
+    function fmtLog(item) {
+      const status = Number(item.status_code || 0);
+      const cls = status >= 400 ? "bad" : status >= 300 ? "warn" : "ok";
+      const parts = [
+        `[${item.created_at || "-"}]`,
+        `${item.method || "-"}`,
+        `${item.path || "-"}`,
+        status ? `status=${status}` : "status=-",
+        `cost=${item.duration_ms || 0}ms`,
+      ];
+      if (item.api_profile_name) parts.push(`provider=${item.api_profile_name}`);
+      if (item.api_model) parts.push(`model=${item.api_model}`);
+      if (item.client_ip) parts.push(`ip=${item.client_ip}`);
+      const head = parts.join("  ");
+      const qs = item.query_string ? `\n  query: ${item.query_string}` : "";
+      const summary = item.request_summary ? `\n  req: ${item.request_summary}` : "";
+      const err = item.error_message ? `\n  err: ${item.error_message}` : "";
+      return { text: head + qs + summary + err, cls };
+    }
+
+    function renderSnapshot(payload) {
+      consoleEl.innerHTML = "";
+      line(`== Claude Web Live Console ==`, "accent");
+      line(`time=${payload.server_time || "-"}  total=${payload.stats?.total || 0}  errors=${payload.stats?.errors || 0}  chats=${payload.stats?.chat_count || 0}  avg=${payload.stats?.avg_ms || 0}ms`, "muted");
+      line("", "");
+
+      if (payload.latest_error) {
+        line("LATEST ERROR", "bad");
+        const err = payload.latest_error;
+        line(`[${err.created_at}] ${err.method || "-"} ${err.path || "-"} status=${err.status_code || 0} cost=${err.duration_ms || 0}ms`, "bad");
+        if (err.api_profile_name || err.api_model) {
+          line(`provider=${err.api_profile_name || "-"} model=${err.api_model || "-"}`, "bad");
+        }
+        if (err.error_message) line(err.error_message, "bad");
+        line("", "");
+      }
+
+      if (Array.isArray(payload.top_paths) && payload.top_paths.length) {
+        line("TOP PATHS", "accent");
+        payload.top_paths.forEach(item => {
+          line(`${String(item.count).padStart(4, " ")}x  avg=${Math.round(item.avg_ms || 0)}ms  ${item.path}`, "muted");
+        });
+        line("", "");
+      }
+
+      if (Array.isArray(payload.recent_errors) && payload.recent_errors.length) {
+        line("RECENT ERRORS", "accent");
+        payload.recent_errors.forEach(item => {
+          line(`[${item.created_at}] ${item.method || "-"} ${item.path || "-"} status=${item.status_code || 0} cost=${item.duration_ms || 0}ms`, "bad");
+          if (item.error_message) line(`  ${item.error_message}`, "bad");
+        });
+        line("", "");
+      }
+
+      line("RECENT REQUESTS", "accent");
+      (payload.recent || []).forEach(item => {
+        const view = fmtLog(item);
+        line(view.text, view.cls);
+      });
+    }
+
+    async function fetchSnapshot() {
+      const token = tokenInput.value.trim();
+      if (!token) return;
+      const res = await fetch("/api/admin/live-stream", {
+        headers: { "X-Admin-Token": token }
+      });
+      if (!res.ok) throw new Error("认证失败");
+      return await res.json();
+    }
+
+    async function connect() {
+      const token = tokenInput.value.trim();
+      if (!token) {
+        line("请输入管理员密码。", "warn");
+        return;
+      }
+
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+
+      stateEl.textContent = "连接中";
+      stateEl.className = "status warn";
+      try {
+        const payload = await fetchSnapshot();
+        renderSnapshot(payload);
+        stateEl.textContent = "已连接";
+        stateEl.className = "status ok";
+      } catch (e) {
+        stateEl.textContent = "认证失败";
+        stateEl.className = "status bad";
+        line("连接失败：" + e.message, "bad");
+        return;
+      }
+
+      pollTimer = setInterval(async () => {
+        try {
+          const payload = await fetchSnapshot();
+          renderSnapshot(payload);
+          stateEl.textContent = "实时运行";
+          stateEl.className = "status ok";
+        } catch (e) {
+          stateEl.textContent = "连接中断";
+          stateEl.className = "status bad";
+          line("刷新失败：" + e.message, "bad");
+        }
+      }, 2000);
+    }
+
+    connectBtn.onclick = connect;
+    pauseBtn.onclick = () => {
+      follow = !follow;
+      pauseBtn.textContent = follow ? "暂停滚动" : "恢复滚动";
+    };
+    clearBtn.onclick = () => {
+      consoleEl.innerHTML = "";
+    };
+    backBtn.onclick = () => {
+      location.href = "/admin";
+    };
+
+    if (tokenInput.value.trim()) {
+      connect();
+    }
+  </script>
+</body>
+</html>

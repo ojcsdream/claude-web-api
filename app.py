@@ -1494,6 +1494,11 @@ def admin_page():
     return FileResponse(STATIC_DIR / "admin.html")
 
 
+@app.get("/admin/live")
+def admin_live_page():
+    return FileResponse(STATIC_DIR / "admin-live.html")
+
+
 @app.get("/api/admin/token-hint")
 def admin_token_hint():
     return {
@@ -1541,6 +1546,75 @@ def admin_stats(_: bool = Depends(require_admin_token)):
         "recent": dict(recent) if recent else None,
         "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+
+@app.get("/api/admin/live-stream")
+def admin_live_stream(_: bool = Depends(require_admin_token)):
+    def build_snapshot():
+        conn = get_conn()
+        try:
+            stats = admin_stats(True)
+            recent_rows = conn.execute(
+                """
+                SELECT id, created_at, method, path, query_string, status_code, duration_ms, client_ip, route_mode,
+                       api_model, api_profile_name, request_summary, error_message
+                FROM admin_request_logs
+                ORDER BY id DESC
+                LIMIT 40
+                """
+            ).fetchall()
+            latest_error = conn.execute(
+                """
+                SELECT id, created_at, method, path, status_code, duration_ms, api_model, api_profile_name, error_message
+                FROM admin_request_logs
+                WHERE status_code >= 400 OR (error_message IS NOT NULL AND error_message != '')
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            recent_errors = conn.execute(
+                """
+                SELECT id, created_at, method, path, status_code, duration_ms, error_message
+                FROM admin_request_logs
+                WHERE status_code >= 400 OR (error_message IS NOT NULL AND error_message != '')
+                ORDER BY id DESC
+                LIMIT 10
+                """
+            ).fetchall()
+            top_paths = conn.execute(
+                """
+                SELECT path, COUNT(*) AS count, AVG(duration_ms) AS avg_ms
+                FROM admin_request_logs
+                GROUP BY path
+                ORDER BY count DESC, avg_ms DESC
+                LIMIT 8
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+
+        return {
+            "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "stats": stats,
+            "recent": [dict(r) for r in recent_rows],
+            "latest_error": dict(latest_error) if latest_error else None,
+            "recent_errors": [dict(r) for r in recent_errors],
+            "top_paths": [dict(r) for r in top_paths],
+        }
+
+    def event_stream():
+        last_payload = ""
+        while True:
+            snapshot = build_snapshot()
+            payload = json.dumps(snapshot, ensure_ascii=False)
+            if payload != last_payload:
+                last_payload = payload
+                yield f"data: {payload}\n\n"
+            else:
+                yield ": keep-alive\n\n"
+            time.sleep(2)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.get("/api/admin/logs")
