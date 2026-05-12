@@ -681,31 +681,11 @@
       color: #a6a093;
     }
 
-    .thinking-orbit {
+    .thinking-shell {
       display: flex;
-      align-items: center;
-      gap: 6px;
-      width: auto;
-      height: auto;
-      margin: 0;
-      border: 0;
-      background: transparent;
-      box-shadow: none;
-      animation: none;
-    }
-
-    .thinking-orbit::before,
-    .thinking-orbit::after {
-      content: "";
-      position: static;
-      display: block;
-      width: 5px;
-      height: 5px;
-      border-radius: 999px;
-      background: rgba(245, 234, 216, 0.62);
-      opacity: 0.52;
-      box-shadow: none;
-      animation: none;
+      flex-direction: column;
+      gap: 8px;
+      width: min(100%, 520px);
     }
 
     .thinking-panel {
@@ -714,15 +694,27 @@
       flex-direction: column;
       gap: 8px;
       padding: 12px 14px 12px 14px;
-      border: 1px solid rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.065);
       border-radius: 18px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.018));
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.038), rgba(255,255,255,0.018)),
+        rgba(30, 30, 28, 0.72);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.035),
+        0 10px 30px rgba(0,0,0,0.10);
       overflow: visible;
+      cursor: pointer;
+      transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
     }
 
-    .thinking-panel::before {
-      display: none;
+    .thinking-panel:hover {
+      border-color: rgba(255,255,255,0.10);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.022)),
+        rgba(30, 30, 28, 0.78);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.04),
+        0 12px 34px rgba(0,0,0,0.12);
     }
 
     .thinking-kicker {
@@ -730,7 +722,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      color: #d7d0c5;
+      color: #e0d9cc;
       font-size: 12px;
       font-weight: 650;
       letter-spacing: 0;
@@ -745,12 +737,12 @@
       font-weight: 600;
       padding: 4px 8px;
       border-radius: 999px;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.055);
     }
 
     .thinking-query {
-      max-width: min(100vw - 48px, 580px);
+      max-width: min(100vw - 48px, 620px);
       color: #a8a093;
       font-size: 12px;
       line-height: 1.45;
@@ -764,6 +756,70 @@
       flex-direction: column;
       gap: 10px;
       padding-left: 0;
+      max-height: 0;
+      opacity: 0;
+      overflow: hidden;
+      transform: translateY(-4px);
+      transition: max-height .28s ease, opacity .22s ease, transform .22s ease;
+      pointer-events: none;
+    }
+
+    .thinking-panel.open .thinking-chain {
+      max-height: 220px;
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    .thinking-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: #d9d2c7;
+      font-size: 14px;
+      line-height: 1.45;
+      letter-spacing: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .thinking-status::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(245, 234, 216, 0.72);
+      box-shadow: 0 0 0 4px rgba(245, 234, 216, 0.05);
+      flex: 0 0 auto;
+    }
+
+    .thinking-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: #9f988d;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .thinking-meta .thinking-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.055);
+      background: rgba(255,255,255,0.03);
+      color: #b2aa9f;
+    }
+
+    .thinking-meta .thinking-progress-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 48ch;
     }
 
     .thinking-step {
@@ -824,21 +880,42 @@
       box-shadow: 0 0 0 5px rgba(245, 234, 216, 0.08);
     }
 
-    .thinking-progress {
-      display: none;
+    .thinking-summary {
+      color: #d8d1c6;
+      font-size: 14px;
+      line-height: 1.5;
+      letter-spacing: 0;
     }
 
-    .thinking-progress span {
-      display: none;
+    .thinking-summary .quiet {
+      color: #a9a194;
+    }
+
+    .thinking-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #9f988d;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0;
+      user-select: none;
+    }
+
+    .thinking-toggle::after {
+      content: "⌄";
+      display: inline-block;
+      transform: translateY(-1px);
+      transition: transform .18s ease;
+    }
+
+    .thinking-panel.open .thinking-toggle::after {
+      transform: rotate(180deg) translateY(1px);
     }
 
     @media (max-width: 520px) {
       .thinking {
         max-width: 100%;
-      }
-
-      .thinking-orbit {
-        gap: 6px;
       }
 
       .thinking-step {
@@ -3882,6 +3959,121 @@
       return { title, detail };
     }
 
+    function getThinkingStateVariant() {
+      const prompt = (thinkingContext.prompt || lastUserPromptForThinking || "").trim();
+      const inputType = thinkingContext.imageCount > 0
+        ? "vision"
+        : thinkingContext.fileCount > 0
+          ? "file"
+          : /[+\-*/=√∑∫π]|方程|几何|证明|导数|积分|数学/.test(prompt)
+            ? "math"
+            : /代码|bug|报错|函数|接口|sql|python|js|ts|html|css|java|go|rust|node/i.test(prompt.toLowerCase())
+              ? "code"
+              : /总结|概括|润色|翻译|改写|写一段|写文章|文案|邮件/.test(prompt)
+                ? "writing"
+                : "general";
+      const streamLen = (streamingTargetContent || streamingDisplayContent || "").trim().length;
+      const hasSources = activeStreamingSources.length > 0 || !!(lastAssistantMessageHasSources());
+      const phase = activeToolStatuses.includes("parsing")
+        ? "parsing"
+        : activeToolStatuses.includes("planning_search")
+          ? "planning"
+          : activeToolStatuses.includes("searching")
+            ? "searching"
+            : hasSources
+              ? "answering_with_sources"
+              : streamLen < 36
+                ? "starting"
+                : streamLen < 180
+                  ? "shaping"
+                  : "polishing";
+      return { inputType, phase, prompt };
+    }
+
+    function lastAssistantMessageHasSources() {
+      const last = getLastAssistantMessage();
+      if (!last) return false;
+      const s = parseMessageSources(last.sources);
+      return Array.isArray(s) && s.length > 0;
+    }
+
+    function getThinkingSummary(variant) {
+      const inputType = variant.inputType;
+      const phase = variant.phase;
+      const prompt = variant.prompt;
+      const promptHint = prompt ? compactPrompt(prompt, 64) : "";
+
+      const linesByInput = {
+        vision: [
+          "正在读取画面中的可见线索…",
+          "正在把图像与上下文对齐…",
+          "正在组织一个简洁可用的回答…"
+        ],
+        file: [
+          "正在梳理文件里的关键信息…",
+          "正在提取可直接引用的片段…",
+          "正在收束成更清晰的结论…"
+        ],
+        math: [
+          "正在整理条件与约束…",
+          "正在检查推导路径…",
+          "正在校验结果是否自洽…"
+        ],
+        code: [
+          "正在理解代码的意图…",
+          "正在定位影响结果的关键点…",
+          "正在组织可执行的建议…"
+        ],
+        writing: [
+          "正在收拢表达的重心…",
+          "正在调整语气与节奏…",
+          "正在打磨更自然的版本…"
+        ],
+        general: [
+          "正在理解你的问题…",
+          "正在整理回答的结构…",
+          "正在把想法压成更清晰的表达…"
+        ]
+      };
+
+      const linesByPhase = {
+        parsing: "正在读取可用信息…",
+        planning: "正在判断是否需要补充外部信息…",
+        searching: "正在检索更可靠的来源…",
+        starting: "正在理解你的问题…",
+        shaping: "正在整理思路…",
+        answering_with_sources: "正在根据来源组织回答…",
+        polishing: "正在收束表达…"
+      };
+
+      const pool = linesByInput[inputType] || linesByInput.general;
+      const phaseText = linesByPhase[phase] || linesByPhase.starting;
+      const indexSeed = Math.abs(hashPrompt(prompt + "|" + inputType + "|" + phase));
+      const stepText = pool[indexSeed % pool.length];
+      const detailText = phase === "searching"
+        ? "会优先采用更可靠、更新的外部来源。"
+        : phase === "answering_with_sources"
+          ? "回答会尽量基于已找到的来源。"
+          : "尽量保持简洁、准确、不过度展开。";
+
+      return {
+        status: phaseText,
+        detail: stepText,
+        hint: promptHint,
+        meta: inputType === "general" ? "安静思考" : inputType,
+        detailText
+      };
+    }
+
+    function hashPrompt(text) {
+      let h = 0;
+      for (let i = 0; i < text.length; i++) {
+        h = ((h << 5) - h) + text.charCodeAt(i);
+        h |= 0;
+      }
+      return h;
+    }
+
     function getThinkingSteps() {
       const mode = inferThinkingMode();
       const route = selectedThinkingRouteLabel();
@@ -3953,19 +4145,23 @@
     }
 
     function renderThinkingHtml() {
+      const variant = getThinkingStateVariant();
       const steps = getThinkingSteps();
       const activeIndex = getThinkingProgressIndex(steps);
       const currentIndex = Math.min(activeIndex, steps.length - 1);
-      const mode = inferThinkingMode();
       const promptPreview = compactPrompt(thinkingContext.prompt || lastUserPromptForThinking || "");
       const fileMeta = thinkingContext.fileCount
         ? ` · ${thinkingContext.fileCount} 个附件${thinkingContext.imageCount ? ` / ${thinkingContext.imageCount} 张图片` : ""}`
         : "";
-      const title = thinkingContext.regenerate ? "重新规划回答" : "正在形成思考大纲";
+      const title = thinkingContext.regenerate ? "重新规划回答" : "思考中";
       const query = promptPreview
         ? `<div class="thinking-query">${escapeHtml(promptPreview)}${escapeHtml(fileMeta)}</div>`
         : (fileMeta ? `<div class="thinking-query">${escapeHtml(fileMeta.replace(/^ · /, ""))}</div>` : "");
 
+      const summary = escapeHtml(variant.status);
+      const detail = escapeHtml(variant.detail);
+      const meta = escapeHtml(variant.meta);
+      const hintBlock = variant.hint ? `<div class="thinking-query"><span class="quiet">${escapeHtml(variant.hint)}</span></div>` : "";
       const chain = steps.map((step, idx) => {
         let cls = "thinking-step";
         if (idx <= activeIndex) cls += " active";
@@ -3982,15 +4178,21 @@
 
       return (
         `<div class="thinking">` +
-          `<div class="thinking-orbit" aria-hidden="true"></div>` +
-          `<div class="thinking-panel">` +
-            `<div class="thinking-kicker">` +
-              `<span>${escapeHtml(title)}</span>` +
-              `<span class="thinking-badge">${escapeHtml(mode)} · ${escapeHtml(selectedThinkingRouteLabel())}</span>` +
+          `<div class="thinking-shell">` +
+            `<div class="thinking-panel" data-thinking-panel>` +
+              `<div class="thinking-kicker">` +
+                `<span>${escapeHtml(title)}</span>` +
+                `<span class="thinking-badge">${meta}</span>` +
+              `</div>` +
+              `<div class="thinking-summary"><span class="quiet">` + summary + `</span> · ` + detail + `</div>` +
+              query +
+              `<div class="thinking-meta">` +
+                `<span class="thinking-tag">` + escapeHtml(selectedThinkingRouteLabel()) + `</span>` +
+                `<span class="thinking-toggle">展开思路</span>` +
+              `</div>` +
+              `<div class="thinking-chain">${chain}</div>` +
             `</div>` +
-            query +
-            `<div class="thinking-chain">${chain}</div>` +
-            `<div class="thinking-progress"><span></span></div>` +
+            hintBlock +
           `</div>` +
         `</div>`
       );
@@ -4572,6 +4774,13 @@
       }
 
       renderAssistantContentIntoBubble(bubble, content, finalRender, showCaret);
+      const panel = bubble.querySelector("[data-thinking-panel]");
+      if (panel && !panel.dataset.bound) {
+        panel.dataset.bound = "1";
+        panel.addEventListener("click", () => {
+          panel.classList.toggle("open");
+        });
+      }
       followBottomDuringStreaming();
       return true;
     }
