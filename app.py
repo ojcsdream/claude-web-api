@@ -58,6 +58,7 @@ from services import (
     collect_search_sources_autonomous,
     enhance_prompt_with_url_fetch,
     extract_urls_from_text,
+    looks_like_search_request,
     load_uploaded_text_from_path,
     save_uploaded_file_dual_paths,
     stream_direct_and_save,
@@ -124,6 +125,12 @@ def resolve_search_context(
             "parse_links": plan.get("parse_links", []),
         },
     ), sources, plan
+
+
+def should_autonomous_search(prompt: str, force: bool = False) -> bool:
+    if force:
+        return True
+    return bool(looks_like_search_request(prompt or ""))
 
 app.add_middleware(
     CORSMiddleware,
@@ -541,7 +548,7 @@ def chat_stream(body: ChatBody):
     db_update_title_if_needed(cid, body.prompt)
 
     def gen():
-        should_search = body.web_search and body.web_search_explicit
+        should_search = should_autonomous_search(body.prompt, force=body.web_search)
 
         if should_search or extract_urls_from_text(body.prompt):
             yield "\n[[STATUS:parsing]]\n"
@@ -1000,7 +1007,7 @@ async def chat_upload_stream(
 
     sources = []
     search_context = ""
-    should_search = web_search and web_search_explicit
+    should_search = should_autonomous_search(user_prompt, force=web_search)
     if should_search:
         search_context, sources, _plan = resolve_search_context(
             user_prompt,

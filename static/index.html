@@ -2728,7 +2728,6 @@
         <label id="plusBtn" class="plus-btn" for="fileInput" role="button" tabindex="0" aria-label="上传文件">+</label>
         <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf" />
         <button id="modelPill" class="model-pill">Opus 4.7⌄</button>
-        <button id="webSearchBtn" class="web-search-btn" type="button" title="联网搜索">⌕</button>
         <button id="sendBtn" class="send-btn" aria-label="发送消息">
           <span class="send-arrow">↑</span>
           <svg class="voice-icon" viewBox="0 0 36 36" fill="none" aria-hidden="true">
@@ -2802,7 +2801,6 @@
 
     const promptEl = $("prompt");
     const sendBtn = $("sendBtn");
-    const webSearchBtn = $("webSearchBtn");
     const fileInput = $("fileInput");
     const fileInfo = $("fileInfo");
     const preview = $("preview");
@@ -2838,16 +2836,10 @@
     let loadSeq = 0;
     let renderMessagesJob = 0;
     let lastRenderedMsgKey = "";
-    localStorage.removeItem("web_search_enabled");
     let webSearchEnabled = false;
     const collapsedMessageKeys = new Set();
     const longMessageKeys = new Set();
     let activeCodePreview = null;
-
-    function renderWebSearchButton() {
-      webSearchBtn.classList.toggle("active", webSearchEnabled);
-      webSearchBtn.title = webSearchEnabled ? "下一条消息将联网搜索" : "联网搜索下一条消息";
-    }
 
     function isWelcomeEmptyConversation() {
       return !sending && (!messages || messages.length === 0);
@@ -5051,9 +5043,7 @@
       const model = apiModel.value.trim() || "claude-opus-4-7";
       const systemPrompt = activeSystemPromptText();
       setModel(model);
-      const useWebSearch = webSearchEnabled === true;
-      webSearchEnabled = false;
-      renderWebSearchButton();
+      const useWebSearch = false;
 
       try {
         let resp;
@@ -5067,8 +5057,8 @@
           form.append("api_model", model);
           form.append("api_profile_name", providerName());
           form.append("system_prompt", systemPrompt);
-          form.append("web_search", useWebSearch ? "true" : "false");
-          form.append("web_search_explicit", useWebSearch ? "true" : "false");
+          form.append("web_search", "false");
+          form.append("web_search_explicit", "false");
 
           for (const f of files) form.append("files", f);
 
@@ -5080,8 +5070,8 @@
             body: JSON.stringify({
               conversation_id: activeConversationId,
               prompt: text,
-              web_search: useWebSearch,
-              web_search_explicit: useWebSearch,
+              web_search: false,
+              web_search_explicit: false,
               api_base_url: apiUrl.value.trim(),
               api_auth_token: apiKey.value.trim(),
               api_model: model,
@@ -5184,8 +5174,8 @@
             api_model: apiModel.value.trim() || "claude-opus-4-7",
             api_profile_name: providerName(),
             system_prompt: activeSystemPromptText(),
-            web_search: webSearchEnabled,
-            web_search_explicit: webSearchEnabled
+            web_search: false,
+            web_search_explicit: false
           })
         });
 
@@ -5396,10 +5386,6 @@
       });
     };
 
-    webSearchBtn.onclick = () => {
-      webSearchEnabled = !webSearchEnabled;
-      renderWebSearchButton();
-    };
 
     codePreviewCloseBtn.onclick = closeCodePreview;
 
@@ -5577,7 +5563,6 @@
       }, 8000);
 
       try {
-        renderWebSearchButton();
         await loadProfiles();
         await loadSystemPrompts();
         if (seq !== loadSeq) return;
