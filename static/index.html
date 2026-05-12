@@ -44,11 +44,28 @@
   <style>
     * { box-sizing: border-box; }
 
+    :root {
+      --ui-bg: #1f1f1d;
+      --ui-bg-soft: rgba(255,255,255,0.04);
+      --ui-panel: rgba(45, 44, 40, 0.86);
+      --ui-panel-strong: rgba(39, 38, 35, 0.96);
+      --ui-border: rgba(255,255,255,0.08);
+      --ui-border-strong: rgba(255,255,255,0.14);
+      --ui-text: #f0ece3;
+      --ui-muted: #b9b2a5;
+      --ui-dim: #857f75;
+      --ui-accent: #e1d5c4;
+      --ui-accent-ink: #171715;
+      --ui-glow: 0 18px 52px rgba(0,0,0,0.24);
+    }
+
     html, body {
       margin: 0;
       padding: 0;
-      background: #1f1f1d;
-      color: #f0ece3;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)),
+        var(--ui-bg);
+      color: var(--ui-text);
       font-family: ui-serif, Georgia, "Times New Roman", "Songti SC", "Noto Serif CJK SC", serif;
     }
 
@@ -62,24 +79,25 @@
       top: 0;
       left: 0;
       right: 0;
-      height: 64px;
+      height: 68px;
       z-index: 20;
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 0 16px;
-      background: rgba(31,31,29,0.96);
-      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding: 0 18px;
+      background: rgba(28, 28, 26, 0.72);
+      backdrop-filter: blur(18px);
+      border-bottom: 1px solid rgba(255,255,255,0.05);
     }
 
     .menu-btn {
-      width: 42px;
-      height: 42px;
-      border: 0;
-      background: transparent;
-      color: #d8d3c8;
+      width: 40px;
+      height: 40px;
+      border: 1px solid transparent;
+      background: rgba(255,255,255,0.03);
+      color: #ddd7cb;
       font-size: 28px;
-      border-radius: 10px;
+      border-radius: 12px;
     }
 
     .menu-btn svg,
@@ -91,9 +109,9 @@
 
     .title {
       flex: 1;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 18px;
-      font-weight: 750;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Noto Serif SC", serif;
+      font-size: 19px;
+      font-weight: 600;
       color: #eee8dc;
       white-space: nowrap;
       overflow: hidden;
@@ -101,13 +119,13 @@
     }
 
     .share-btn {
-      height: 40px;
-      padding: 0 16px;
-      border-radius: 13px;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: transparent;
+      height: 38px;
+      padding: 0 15px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.03);
       color: #f0ece3;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 650;
     }
 
@@ -116,9 +134,9 @@
     }
 
     .wrap {
-      max-width: 760px;
+      max-width: 820px;
       margin: 0 auto;
-      padding: 86px 18px 260px;
+      padding: 94px 20px 268px;
     }
 
     #chatList {
@@ -886,32 +904,47 @@
       right: 0;
       bottom: 0;
       z-index: 25;
-      padding: 10px 12px calc(14px + env(safe-area-inset-bottom));
-      background: linear-gradient(180deg, rgba(31,31,29,0), rgba(31,31,29,0.92) 20%, rgba(31,31,29,0.98));
+      padding: 12px 14px calc(16px + env(safe-area-inset-bottom));
+      background: linear-gradient(180deg, rgba(31,31,29,0), rgba(31,31,29,0.90) 20%, rgba(31,31,29,0.98));
     }
 
     .composer-inner {
-      max-width: 760px;
+      max-width: 820px;
       margin: 0 auto;
-      background: #2f2f2c;
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 26px;
-      padding: 10px 10px 8px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02)),
+        var(--ui-panel);
+      border: 1px solid rgba(255,255,255,0.09);
+      box-shadow: var(--ui-glow), inset 0 1px 0 rgba(255,255,255,0.05);
+      backdrop-filter: blur(20px);
+      border-radius: 28px;
+      padding: 12px 12px 10px;
+    }
+
+    .composer-inner:focus-within {
+      border-color: rgba(255,255,255,0.15);
+      box-shadow: 0 22px 60px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.07);
     }
 
     textarea {
       width: 100%;
-      min-height: 46px;
-      max-height: 160px;
+      min-height: 52px;
+      max-height: 170px;
       border: 0;
       background: transparent;
       color: #f0ece3;
-      padding: 8px 10px;
+      padding: 10px 12px 8px;
       resize: none;
       outline: none;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 17px;
-      line-height: 1.4;
+      line-height: 1.5;
+      letter-spacing: 0;
+    }
+
+    textarea::placeholder {
+      color: rgba(226, 221, 212, 0.44);
+      opacity: 1;
     }
 
     .file-info {
@@ -932,17 +965,17 @@
     .toolbar {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 0 4px;
+      gap: 8px;
+      padding: 2px 4px 0;
     }
 
     .plus-btn {
-      width: 40px;
-      height: 40px;
-      border: 0;
-      background: transparent;
+      width: 36px;
+      height: 36px;
+      border: 1px solid rgba(255,255,255,0.07);
+      background: rgba(255,255,255,0.04);
       color: #d8d3c8;
-      font-size: 30px;
+      font-size: 25px;
       border-radius: 999px;
       display: inline-flex;
       align-items: center;
@@ -961,32 +994,57 @@
 
     .model-pill {
       flex: 1;
-      text-align: center;
+      text-align: left;
       background: transparent;
       border: 0;
-      color: #bdb6aa;
-      font-size: 14px;
+      color: #beb7aa;
+      font-size: 13px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      padding-left: 2px;
     }
 
     .send-btn {
-      width: 40px;
-      height: 40px;
-      border: 0;
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(255,255,255,0.08);
       border-radius: 999px;
-      background: #ece5d7;
-      color: #1f1f1d;
-      font-size: 24px;
+      background: var(--ui-accent);
+      color: var(--ui-accent-ink);
+      font-size: 18px;
       font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+    }
+
+    .send-btn.is-stop {
+      background: rgba(255,255,255,0.10);
+      color: #f0ece3;
+      border-color: rgba(255,255,255,0.12);
+      box-shadow: none;
     }
 
     .voice-icon {
       width: 31px;
       height: 31px;
       display: none;
+    }
+
+    .send-arrow {
+      transform: translateY(-0.5px);
+    }
+
+    .stop-icon {
+      display: none;
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      background: currentColor;
     }
 
     .drawer-overlay {
@@ -2057,19 +2115,23 @@
   }
 
   .web-search-btn {
-    width: 40px;
-    height: 40px;
-    border: 0;
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(255,255,255,0.08);
     border-radius: 999px;
-    background: transparent;
-    color: #bdb6aa;
-    font-size: 18px;
+    background: rgba(255,255,255,0.04);
+    color: #c5bcae;
+    font-size: 15px;
     font-weight: 750;
     flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .web-search-btn.active {
     background: rgba(236,229,215,0.16);
+    border-color: rgba(236,229,215,0.24);
     color: #fff7ea;
   }
 </style>
@@ -2372,10 +2434,7 @@
     height: 34px;
     margin-left: auto;
     color: rgba(216, 214, 204, 0.72);
-    font-size: 16px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    font-size: 15px;
   }
 
   body.welcome-mode .web-search-btn.active {
@@ -2403,7 +2462,7 @@
     height: 34px;
     padding: 0;
     border-radius: 999px;
-    background: transparent;
+    background: rgba(255,255,255,0.04);
     color: rgba(216, 214, 204, 0.72);
     font-size: 0;
     font-weight: 650;
@@ -2429,11 +2488,11 @@
   }
 
   body.welcome-mode.has-input .send-btn {
-    width: 52px;
-    height: 52px;
-    background: rgba(216, 214, 204, 0.78);
+    width: 38px;
+    height: 38px;
+    background: rgba(216, 214, 204, 0.88);
     color: #1c1c1a;
-    font-size: 24px;
+    font-size: 18px;
   }
 
   body.welcome-mode.has-input .send-arrow {
@@ -2728,8 +2787,10 @@
         <label id="plusBtn" class="plus-btn" for="fileInput" role="button" tabindex="0" aria-label="上传文件">+</label>
         <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf" />
         <button id="modelPill" class="model-pill">Opus 4.7⌄</button>
+        <button id="webSearchBtn" class="web-search-btn" type="button" title="强制联网搜索">⌕</button>
         <button id="sendBtn" class="send-btn" aria-label="发送消息">
           <span class="send-arrow">↑</span>
+          <span class="stop-icon" aria-hidden="true"></span>
           <svg class="voice-icon" viewBox="0 0 36 36" fill="none" aria-hidden="true">
             <path d="M7 20v-4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
             <path d="M12.5 24v-12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
@@ -2801,6 +2862,7 @@
 
     const promptEl = $("prompt");
     const sendBtn = $("sendBtn");
+    const webSearchBtn = $("webSearchBtn");
     const fileInput = $("fileInput");
     const fileInfo = $("fileInfo");
     const preview = $("preview");
@@ -2837,6 +2899,7 @@
     let renderMessagesJob = 0;
     let lastRenderedMsgKey = "";
     let webSearchEnabled = false;
+    let activeStreamController = null;
     const collapsedMessageKeys = new Set();
     const longMessageKeys = new Set();
     let activeCodePreview = null;
@@ -2862,6 +2925,7 @@
         "has-input",
         document.body.classList.contains("welcome-mode") && !!promptEl.value.trim()
       );
+      renderSendButtonState();
     }
 
     function renderWelcomeEmpty() {
@@ -5000,7 +5064,10 @@
     }
 
     async function sendPrompt() {
-      if (sending) return;
+      if (sending) {
+        if (activeStreamController) activeStreamController.abort();
+        return;
+      }
 
       const text = promptEl.value.trim();
       const files = fileInput.files;
@@ -5008,7 +5075,7 @@
       if (!text && (!files || !files.length)) return;
 
       sending = true;
-      sendBtn.disabled = true;
+      renderSendButtonState();
       setWelcomeMode(false);
 
       let fileName = null;
@@ -5043,7 +5110,10 @@
       const model = apiModel.value.trim() || "claude-opus-4-7";
       const systemPrompt = activeSystemPromptText();
       setModel(model);
-      const useWebSearch = false;
+      const useWebSearch = webSearchEnabled === true;
+      webSearchEnabled = false;
+      renderWebSearchButton();
+      activeStreamController = new AbortController();
 
       try {
         let resp;
@@ -5057,21 +5127,26 @@
           form.append("api_model", model);
           form.append("api_profile_name", providerName());
           form.append("system_prompt", systemPrompt);
-          form.append("web_search", "false");
-          form.append("web_search_explicit", "false");
+          form.append("web_search", useWebSearch ? "true" : "false");
+          form.append("web_search_explicit", useWebSearch ? "true" : "false");
 
           for (const f of files) form.append("files", f);
 
-          resp = await fetch("/api/chat/upload_stream", { method: "POST", body: form });
+          resp = await fetch("/api/chat/upload_stream", {
+            method: "POST",
+            body: form,
+            signal: activeStreamController.signal
+          });
         } else {
           resp = await fetch("/api/chat/stream", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal: activeStreamController.signal,
             body: JSON.stringify({
               conversation_id: activeConversationId,
               prompt: text,
-              web_search: false,
-              web_search_explicit: false,
+              web_search: useWebSearch,
+              web_search_explicit: useWebSearch,
               api_base_url: apiUrl.value.trim(),
               api_auth_token: apiKey.value.trim(),
               api_model: model,
@@ -5115,12 +5190,14 @@
         renderAll();
       } catch (e) {
         stopStreamingTypewriter(false);
-        messages[messages.length - 1].content = "请求失败: " + e;
+        const aborted = e && (e.name === "AbortError" || String(e).includes("AbortError"));
+        messages[messages.length - 1].content = aborted ? "已暂停本次回复。" : "请求失败: " + e;
         lastRenderedMsgKey = "";
         renderMessages();
       } finally {
         sending = false;
-        sendBtn.disabled = false;
+        activeStreamController = null;
+        renderSendButtonState();
       }
     }
 
@@ -5146,7 +5223,7 @@
       if (!confirm("确定重新回答吗？旧回复将保留并可随时查看。")) return;
 
       sending = true;
-      sendBtn.disabled = true;
+      renderSendButtonState();
 
       // 添加占位消息用于流式输出
       messages.push({ role: "assistant", content: "思考中..." });
@@ -5162,9 +5239,11 @@
       renderMessages(true);
 
       try {
+        activeStreamController = new AbortController();
         const resp = await fetch("/api/chat/regenerate_from_stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: activeStreamController.signal,
           body: JSON.stringify({
             conversation_id: activeConversationId,
             message_id: msg.id,
@@ -5174,8 +5253,8 @@
             api_model: apiModel.value.trim() || "claude-opus-4-7",
             api_profile_name: providerName(),
             system_prompt: activeSystemPromptText(),
-            web_search: false,
-            web_search_explicit: false
+            web_search: webSearchEnabled,
+            web_search_explicit: webSearchEnabled
           })
         });
 
@@ -5198,12 +5277,14 @@
         renderAll();
       } catch (e) {
         stopStreamingTypewriter(false);
-        messages[messages.length - 1].content = "重新生成失败: " + e;
+        const aborted = e && (e.name === "AbortError" || String(e).includes("AbortError"));
+        messages[messages.length - 1].content = aborted ? "已暂停本次回复。" : "重新生成失败: " + e;
         lastRenderedMsgKey = "";
         renderMessages();
       } finally {
         sending = false;
-        sendBtn.disabled = false;
+        activeStreamController = null;
+        renderSendButtonState();
       }
     }
 
@@ -5419,6 +5500,13 @@
       }
     };
 
+    if (webSearchBtn) {
+      webSearchBtn.onclick = () => {
+        webSearchEnabled = !webSearchEnabled;
+        renderWebSearchButton();
+      };
+    }
+
     document.addEventListener("keydown", e => {
       if (e.key === "Escape" && systemPromptEditor.classList.contains("open")) {
         closeSystemPromptEditor();
@@ -5587,3 +5675,21 @@
   </script>
 </body>
 </html>
+    function renderWebSearchButton() {
+      if (!webSearchBtn) return;
+      webSearchBtn.classList.toggle("active", webSearchEnabled);
+      webSearchBtn.title = webSearchEnabled ? "本条消息将强制联网搜索" : "强制联网搜索";
+    }
+
+    function renderSendButtonState() {
+      const hasInput = !!promptEl.value.trim();
+      sendBtn.classList.toggle("is-stop", sending);
+      sendBtn.classList.toggle("has-input", hasInput);
+      const arrow = sendBtn.querySelector(".send-arrow");
+      const stopIcon = sendBtn.querySelector(".stop-icon");
+      const voice = sendBtn.querySelector(".voice-icon");
+      if (arrow) arrow.style.display = sending ? "none" : (hasInput ? "inline" : "none");
+      if (stopIcon) stopIcon.style.display = sending ? "block" : "none";
+      if (voice) voice.style.display = !sending && !hasInput ? "block" : "none";
+      sendBtn.setAttribute("aria-label", sending ? "暂停回复" : "发送消息");
+    }
