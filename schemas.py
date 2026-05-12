@@ -22,6 +22,7 @@ class MessageItem(BaseModel):
 class ChatBody(BaseModel):
     conversation_id: str = ""
     prompt: str = ""
+    system_prompt: str = ""
     messages: List[MessageItem] = Field(default_factory=list)
     message_id: Optional[int] = None
     api_base_url: str = ""
@@ -52,3 +53,9 @@ class ApiProfileBody(BaseModel):
     auth_token: str
     model: str = DEFAULT_MODEL
     is_default: bool = False
+
+
+class SystemPromptBody(BaseModel):
+    title: str = "系统提示词"
+    content: str = ""
+    enabled: bool = False

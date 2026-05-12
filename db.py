@@ -5,7 +5,7 @@ import uuid
 from typing import Optional
 
 from config import DEFAULT_MODEL
-from schemas import ApiProfileBody, MessageItem
+from schemas import ApiProfileBody, MessageItem, SystemPromptBody
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "chat.db"
@@ -78,6 +78,19 @@ def init_db():
     """)
 
     cur.execute("CREATE INDEX IF NOT EXISTS idx_api_profiles_updated_at ON api_profiles(updated_at)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS system_prompts (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )
+    """)
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_system_prompts_updated_at ON system_prompts(updated_at)")
     conn.commit()
     conn.close()
 
@@ -238,6 +251,65 @@ def db_set_default_api_profile(profile_id: str):
     conn.execute(
         "UPDATE api_profiles SET is_default=1, updated_at=? WHERE id=?",
         (now_ms(), profile_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def db_list_system_prompts():
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, title, content, enabled, created_at, updated_at FROM system_prompts ORDER BY enabled DESC, updated_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def db_save_system_prompt(prompt_id: str, body: SystemPromptBody):
+    ts = now_ms()
+    pid = prompt_id or new_id()
+    title = (body.title or "").strip() or "系统提示词"
+    content = (body.content or "").strip()
+
+    conn = get_conn()
+    old = conn.execute("SELECT id FROM system_prompts WHERE id=?", (pid,)).fetchone()
+
+    if old:
+        conn.execute(
+            """
+            UPDATE system_prompts
+            SET title=?, content=?, enabled=?, updated_at=?
+            WHERE id=?
+            """,
+            (title, content, 1 if body.enabled else 0, ts, pid),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO system_prompts
+            (id, title, content, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (pid, title, content, 1 if body.enabled else 0, ts, ts),
+        )
+
+    conn.commit()
+    conn.close()
+    return pid
+
+
+def db_delete_system_prompt(prompt_id: str):
+    conn = get_conn()
+    conn.execute("DELETE FROM system_prompts WHERE id=?", (prompt_id,))
+    conn.commit()
+    conn.close()
+
+
+def db_set_system_prompt_enabled(prompt_id: str, enabled: bool):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE system_prompts SET enabled=?, updated_at=? WHERE id=?",
+        (1 if enabled else 0, now_ms(), prompt_id),
     )
     conn.commit()
     conn.close()

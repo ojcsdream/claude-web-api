@@ -1264,6 +1264,191 @@
       outline: none;
     }
 
+    .field textarea {
+      width: 100%;
+      min-height: 78px;
+      max-height: 150px;
+      border-radius: 11px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: #1f1f1d;
+      color: #f0ece3;
+      padding: 10px;
+      resize: vertical;
+      outline: none;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .system-prompt-list {
+      display: grid;
+      gap: 7px;
+      margin-bottom: 10px;
+    }
+
+    .system-prompt-item {
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      border-radius: 10px;
+      padding: 9px;
+    }
+
+    .system-prompt-row {
+      display: grid;
+      grid-template-columns: 1fr 46px 52px;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .system-prompt-title {
+      color: #f0ece3;
+      font-size: 14px;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .system-prompt-preview {
+      margin-top: 6px;
+      color: #aaa297;
+      font-size: 12px;
+      line-height: 1.45;
+      max-height: 38px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .system-prompt-preview.open {
+      max-height: none;
+      white-space: pre-wrap;
+    }
+
+    .switch-btn {
+      width: 46px;
+      height: 26px;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.13);
+      padding: 3px;
+      cursor: pointer;
+    }
+
+    .switch-btn::after {
+      content: "";
+      display: block;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      background: #a9a197;
+      transition: transform 0.18s, background 0.18s;
+    }
+
+    .switch-btn.on {
+      background: rgba(238, 221, 190, 0.24);
+    }
+
+    .switch-btn.on::after {
+      transform: translateX(20px);
+      background: #f0dfbd;
+    }
+
+    .system-prompt-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+      margin-top: 8px;
+    }
+
+    .system-edit-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 120;
+      background: #1f1f1d;
+      display: none;
+      padding: max(18px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+      overflow-y: auto;
+    }
+
+    .system-edit-backdrop.open {
+      display: block;
+    }
+
+    .system-edit-page {
+      width: min(880px, 100%);
+      min-height: calc(100vh - 40px);
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .system-edit-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.09);
+    }
+
+    .system-edit-title {
+      color: #f0ece3;
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .system-edit-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .system-edit-btn {
+      min-height: 38px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.055);
+      color: #ded6c9;
+      padding: 0 13px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .system-edit-btn.primary {
+      background: #ece5d7;
+      color: #1f1f1d;
+    }
+
+    .system-edit-body {
+      display: grid;
+      gap: 12px;
+    }
+
+    .system-edit-body input,
+    .system-edit-body textarea {
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.11);
+      background: #171714;
+      color: #f0ece3;
+      outline: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .system-edit-body input {
+      min-height: 48px;
+      padding: 0 14px;
+      font-size: 16px;
+    }
+
+    .system-edit-body textarea {
+      min-height: min(58vh, 560px);
+      padding: 14px;
+      resize: vertical;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+
     .danger {
       color: #e0a199;
     }
@@ -2518,6 +2703,12 @@
       <button id="defaultProfileBtn" class="drawer-btn">设为默认</button>
       <button id="deleteProfileBtn" class="drawer-btn danger">删除接入商</button>
     </div>
+
+    <div class="section">
+      <div class="section-title">系统提示词</div>
+      <div id="systemPromptList" class="system-prompt-list"></div>
+      <button id="newSystemPromptBtn" class="drawer-btn">新增系统提示词</button>
+    </div>
   </aside>
 
   <main class="wrap">
@@ -2566,6 +2757,23 @@
     </div>
   </div>
 
+  <div id="systemPromptEditor" class="system-edit-backdrop" aria-hidden="true">
+    <div class="system-edit-page" role="dialog" aria-modal="true" aria-labelledby="systemPromptEditorTitle">
+      <div class="system-edit-head">
+        <div id="systemPromptEditorTitle" class="system-edit-title">系统提示词</div>
+        <div class="system-edit-actions">
+          <button id="systemPromptEditorDelete" class="system-edit-btn danger" type="button">删除</button>
+          <button id="systemPromptEditorCancel" class="system-edit-btn" type="button">关闭</button>
+          <button id="systemPromptEditorSave" class="system-edit-btn primary" type="button">保存</button>
+        </div>
+      </div>
+      <div class="system-edit-body">
+        <input id="systemPromptTitle" placeholder="标题，例如 翻译模式" />
+        <textarea id="systemPromptContent" placeholder="输入每次请求都要附带的系统提示词"></textarea>
+      </div>
+    </div>
+  </div>
+
 <script>
     const $ = id => document.getElementById(id);
 
@@ -2605,6 +2813,14 @@
     const codePreviewCopyBtn = $("codePreviewCopyBtn");
     const codePreviewOpenBtn = $("codePreviewOpenBtn");
     const codePreviewCloseBtn = $("codePreviewCloseBtn");
+    const systemPromptList = $("systemPromptList");
+    const newSystemPromptBtn = $("newSystemPromptBtn");
+    const systemPromptEditor = $("systemPromptEditor");
+    const systemPromptTitle = $("systemPromptTitle");
+    const systemPromptContent = $("systemPromptContent");
+    const systemPromptEditorSave = $("systemPromptEditorSave");
+    const systemPromptEditorCancel = $("systemPromptEditorCancel");
+    const systemPromptEditorDelete = $("systemPromptEditorDelete");
 
     let conversations = [];
     let autoScrollEnabled = true;
@@ -2615,6 +2831,9 @@
     let messages = [];
     let profiles = [];
     let activeProfileId = "";
+    let systemPrompts = [];
+    let activeSystemPromptId = "";
+    let editingSystemPromptId = "";
     let sending = false;
     let loadSeq = 0;
     let renderMessagesJob = 0;
@@ -2725,6 +2944,119 @@
       } finally {
         clearTimeout(timer);
       }
+    }
+
+    function activeSystemPromptText() {
+      const enabled = systemPrompts.filter(p => p.enabled);
+      return enabled.map(p => (p.content || "").trim()).filter(Boolean).join("\n\n");
+    }
+
+    function renderSystemPrompts() {
+      if (!systemPromptList) return;
+      systemPromptList.innerHTML = "";
+
+      if (!systemPrompts.length) {
+        systemPromptList.innerHTML = '<div class="session-empty">暂无系统提示词</div>';
+        return;
+      }
+
+      systemPrompts.forEach(item => {
+        const wrap = document.createElement("div");
+        wrap.className = "system-prompt-item";
+
+        const row = document.createElement("div");
+        row.className = "system-prompt-row";
+
+        const title = document.createElement("div");
+        title.className = "system-prompt-title";
+        title.textContent = item.title || "系统提示词";
+
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "switch-btn" + (item.enabled ? " on" : "");
+        toggle.title = item.enabled ? "关闭系统提示词" : "开启系统提示词";
+        toggle.onclick = async () => {
+          await api("POST", `/api/system-prompts/${item.id}/enabled`, {
+            title: item.title || "系统提示词",
+            content: item.content || "",
+            enabled: !item.enabled
+          });
+          await loadSystemPrompts();
+        };
+
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "section-title-btn";
+        edit.textContent = "编辑";
+        edit.onclick = () => openSystemPromptEditor(item);
+
+        const preview = document.createElement("div");
+        preview.className = "system-prompt-preview";
+        preview.textContent = item.content || "空提示词";
+        preview.title = "点击展开或折叠";
+        preview.onclick = () => preview.classList.toggle("open");
+
+        row.appendChild(title);
+        row.appendChild(toggle);
+        row.appendChild(edit);
+        wrap.appendChild(row);
+        wrap.appendChild(preview);
+        systemPromptList.appendChild(wrap);
+      });
+    }
+
+    async function loadSystemPrompts() {
+      const data = await api("GET", "/api/system-prompts");
+      systemPrompts = data.prompts || [];
+      if (!systemPrompts.find(p => p.id === activeSystemPromptId)) {
+        const enabled = systemPrompts.find(p => p.enabled);
+        activeSystemPromptId = enabled ? enabled.id : (systemPrompts[0] ? systemPrompts[0].id : "");
+      }
+      renderSystemPrompts();
+    }
+
+    function openSystemPromptEditor(item = null) {
+      editingSystemPromptId = item && item.id ? item.id : "";
+      systemPromptTitle.value = item ? (item.title || "") : "";
+      systemPromptContent.value = item ? (item.content || "") : "";
+      systemPromptEditorDelete.style.display = editingSystemPromptId ? "inline-flex" : "none";
+      systemPromptEditor.classList.add("open");
+      systemPromptEditor.setAttribute("aria-hidden", "false");
+      setTimeout(() => systemPromptTitle.focus(), 0);
+    }
+
+    function closeSystemPromptEditor() {
+      systemPromptEditor.classList.remove("open");
+      systemPromptEditor.setAttribute("aria-hidden", "true");
+      editingSystemPromptId = "";
+    }
+
+    async function saveSystemPromptFromEditor() {
+      const body = {
+        title: systemPromptTitle.value.trim() || "系统提示词",
+        content: systemPromptContent.value.trim(),
+        enabled: editingSystemPromptId
+          ? !!(systemPrompts.find(p => p.id === editingSystemPromptId) || {}).enabled
+          : false
+      };
+
+      if (editingSystemPromptId) {
+        await api("PUT", `/api/system-prompts/${editingSystemPromptId}`, body);
+      } else {
+        const data = await api("POST", "/api/system-prompts", body);
+        editingSystemPromptId = data.id || "";
+      }
+
+      await loadSystemPrompts();
+      closeSystemPromptEditor();
+    }
+
+    async function deleteSystemPromptFromEditor() {
+      if (!editingSystemPromptId) return closeSystemPromptEditor();
+      if (!confirm("确定删除这个系统提示词吗？")) return;
+      await api("DELETE", `/api/system-prompts/${editingSystemPromptId}`);
+      await loadSystemPrompts();
+      closeSystemPromptEditor();
     }
 
     function modelLabel(m) {
@@ -4684,6 +5016,7 @@
       promptEl.value = "";
 
       const model = apiModel.value.trim() || "claude-opus-4-7";
+      const systemPrompt = activeSystemPromptText();
       setModel(model);
       const useWebSearch = webSearchEnabled === true;
       webSearchEnabled = false;
@@ -4700,6 +5033,7 @@
           form.append("api_auth_token", apiKey.value.trim());
           form.append("api_model", model);
           form.append("api_profile_name", providerName());
+          form.append("system_prompt", systemPrompt);
           form.append("web_search", useWebSearch ? "true" : "false");
           form.append("web_search_explicit", useWebSearch ? "true" : "false");
 
@@ -4718,7 +5052,8 @@
               api_base_url: apiUrl.value.trim(),
               api_auth_token: apiKey.value.trim(),
               api_model: model,
-              api_profile_name: providerName()
+              api_profile_name: providerName(),
+              system_prompt: systemPrompt
             })
           });
         }
@@ -4813,6 +5148,7 @@
             api_auth_token: apiKey.value.trim(),
             api_model: apiModel.value.trim() || "claude-opus-4-7",
             api_profile_name: providerName(),
+            system_prompt: activeSystemPromptText(),
             web_search: webSearchEnabled,
             web_search_explicit: webSearchEnabled
           })
@@ -4979,6 +5315,14 @@
       await loadProfiles();
     };
 
+    newSystemPromptBtn.onclick = () => openSystemPromptEditor();
+    systemPromptEditorSave.onclick = saveSystemPromptFromEditor;
+    systemPromptEditorCancel.onclick = closeSystemPromptEditor;
+    systemPromptEditorDelete.onclick = deleteSystemPromptFromEditor;
+    systemPromptEditor.addEventListener("click", e => {
+      if (e.target === systemPromptEditor) closeSystemPromptEditor();
+    });
+
     function clearSelectedFiles() {
       fileInput.value = "";
       fileInfo.textContent = "";
@@ -5053,6 +5397,10 @@
     };
 
     document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && systemPromptEditor.classList.contains("open")) {
+        closeSystemPromptEditor();
+        return;
+      }
       if (e.key === "Escape" && codePreviewBackdrop.classList.contains("open")) {
         closeCodePreview();
       }
@@ -5194,6 +5542,7 @@
       try {
         renderWebSearchButton();
         await loadProfiles();
+        await loadSystemPrompts();
         if (seq !== loadSeq) return;
         restoreModel();
         loadProviderModels();

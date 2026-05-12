@@ -32,9 +32,13 @@ from db import (
     db_get_messages_before_id,
     db_get_regenerate_history,
     db_list_api_profiles,
+    db_list_system_prompts,
     db_mark_message_superseded,
     db_save_api_profile,
+    db_save_system_prompt,
     db_set_default_api_profile,
+    db_set_system_prompt_enabled,
+    db_delete_system_prompt,
     db_update_title_if_needed,
     get_conn,
     init_db,
@@ -46,6 +50,7 @@ from schemas import (
     ConversationCreateBody,
     ConversationPinBody,
     ConversationRenameBody,
+    SystemPromptBody,
 )
 from services import (
     build_sources_context_block,
@@ -63,6 +68,19 @@ from services import (
 init_db()
 
 app = FastAPI(title="Claude Web")
+
+
+def with_system_prompt(final_prompt: str, system_prompt: str = "") -> str:
+    text = (system_prompt or "").strip()
+    if not text:
+        return final_prompt
+    return (
+        "系统提示词：\n"
+        + text
+        + "\n\n请在整个回复中遵守上面的系统提示词。"
+        + "\n\n"
+        + (final_prompt or "").strip()
+    ).strip()
 
 app.add_middleware(
     CORSMiddleware,
@@ -258,6 +276,38 @@ def set_default_api_profile(profile_id: str):
     return {"ok": True}
 
 
+@app.get("/api/system-prompts")
+def list_system_prompts():
+    return {
+        "ok": True,
+        "prompts": db_list_system_prompts(),
+    }
+
+
+@app.post("/api/system-prompts")
+def create_system_prompt(body: SystemPromptBody):
+    pid = db_save_system_prompt("", body)
+    return {"ok": True, "id": pid}
+
+
+@app.put("/api/system-prompts/{prompt_id}")
+def update_system_prompt(prompt_id: str, body: SystemPromptBody):
+    pid = db_save_system_prompt(prompt_id, body)
+    return {"ok": True, "id": pid}
+
+
+@app.post("/api/system-prompts/{prompt_id}/enabled")
+def set_system_prompt_enabled(prompt_id: str, body: SystemPromptBody):
+    db_set_system_prompt_enabled(prompt_id, body.enabled)
+    return {"ok": True}
+
+
+@app.delete("/api/system-prompts/{prompt_id}")
+def delete_system_prompt(prompt_id: str):
+    db_delete_system_prompt(prompt_id)
+    return {"ok": True}
+
+
 
 
 @app.get("/api/search")
@@ -419,7 +469,10 @@ def echo(body: ChatBody):
     try:
         cid = db_ensure_conversation(body.conversation_id)
         history = db_get_messages(cid)
-        final_prompt = build_chat_prompt(history, body.prompt)
+        final_prompt = with_system_prompt(
+            build_chat_prompt(history, body.prompt),
+            body.system_prompt,
+        )
 
         db_add_message(cid, "user", body.prompt)
         db_update_title_if_needed(cid, body.prompt)
@@ -462,7 +515,10 @@ def chat_stream(body: ChatBody):
             if source_context:
                 effective_prompt = source_context + "\n\n用户原始问题：\n" + body.prompt
 
-        final_prompt = build_chat_prompt(history, effective_prompt)
+        final_prompt = with_system_prompt(
+            build_chat_prompt(history, effective_prompt),
+            body.system_prompt,
+        )
 
         yield from stream_direct_and_save(
             cid,
@@ -505,7 +561,7 @@ def _stream_and_save_regenerated_answer(inner_gen, cid, api_model, provider_name
     _save_regenerated_answer(cid, full, api_model, provider_name, old_message_id, final_prompt, sources=sources)
 
 
-def _build_regenerate_prompt_with_search(context_messages, last_user_prompt, web_search=False):
+def _build_regenerate_prompt_with_search(context_messages, last_user_prompt, web_search=False, system_prompt=""):
     sources = []
     search_context = ""
     should_search = web_search
@@ -517,10 +573,11 @@ def _build_regenerate_prompt_with_search(context_messages, last_user_prompt, web
     if search_context:
         final_user_prompt = search_context + "\n\n用户原始问题：\n" + last_user_prompt
 
-    return build_chat_prompt(
+    final_prompt = build_chat_prompt(
         messages=context_messages,
         prompt=final_user_prompt,
-    ), sources
+    )
+    return with_system_prompt(final_prompt, system_prompt), sources
 
 
 @app.post("/api/chat/regenerate_from_stream")
@@ -589,7 +646,7 @@ def regenerate_from_stream(body: ChatBody):
             vision_prompt_parts.append("如果你没有看到图片内容，请明确回复：我没有读取到图片内容。")
             vision_prompt_parts.append("")
             vision_prompt_parts.append("用户问题：" + (last_user_prompt.strip() or "请分析我上传的图片。"))
-            vision_prompt = "\n".join(vision_prompt_parts)
+            vision_prompt = with_system_prompt("\n".join(vision_prompt_parts), body.system_prompt)
 
             _api_base_url = body.api_base_url
             _api_auth_token = body.api_auth_token
@@ -621,6 +678,7 @@ def regenerate_from_stream(body: ChatBody):
         context_messages,
         last_user_prompt,
         body.web_search,
+        body.system_prompt,
     )
 
     _api_model = body.api_model or DEFAULT_MODEL
@@ -704,6 +762,7 @@ def regenerate_stream(body: ChatBody):
         if vision_prompt:
             vision_prompt += "\n\n"
         vision_prompt += "用户问题：" + (last_user_prompt.strip() or "请分析我上传的图片。")
+        vision_prompt = with_system_prompt(vision_prompt, body.system_prompt)
 
         _api_base_url = body.api_base_url
         _api_auth_token = body.api_auth_token
@@ -735,6 +794,7 @@ def regenerate_stream(body: ChatBody):
         context_messages,
         last_user_prompt,
         body.web_search,
+        body.system_prompt,
     )
 
     _api_model = body.api_model or DEFAULT_MODEL
@@ -780,6 +840,7 @@ async def chat_upload_stream(
     api_auth_token: str = Form(""),
     api_model: str = Form(DEFAULT_MODEL),
     api_profile_name: str = Form(""),
+    system_prompt: str = Form(""),
     files: list[UploadFile] = File([]),
 ):
     cid = db_ensure_conversation(conversation_id)
@@ -900,7 +961,7 @@ async def chat_upload_stream(
                 vision_prompt_parts.append(item["text"])
                 vision_prompt_parts.append("")
 
-        vision_prompt = "\n".join(vision_prompt_parts)
+        vision_prompt = with_system_prompt("\n".join(vision_prompt_parts), system_prompt)
 
         def gen():
             prefix = f"正在分析 {len(local_image_paths)} 张图片...\n\n"
@@ -987,9 +1048,12 @@ async def chat_upload_stream(
     if search_context:
         final_user_prompt = search_context + "\n\n用户原始问题：\n" + final_user_prompt
 
-    final_prompt = build_chat_prompt(
-        messages=history,
-        prompt=final_user_prompt,
+    final_prompt = with_system_prompt(
+        build_chat_prompt(
+            messages=history,
+            prompt=final_user_prompt,
+        ),
+        system_prompt,
     )
 
     def gen_text_upload():
