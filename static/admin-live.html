@@ -124,6 +124,11 @@
     let pollTimer = null;
     let follow = true;
 
+    try {
+      const cachedToken = localStorage.getItem("claude_web_admin_password") || "";
+      if (cachedToken) tokenInput.value = cachedToken;
+    } catch (e) {}
+
     function line(text, cls = "") {
       const div = document.createElement("div");
       div.className = "line " + cls;
@@ -198,9 +203,17 @@
     async function fetchSnapshot() {
       const token = tokenInput.value.trim();
       if (!token) return;
-      const res = await fetch("/api/admin/live-stream", {
-        headers: { "X-Admin-Token": token }
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      let res;
+      try {
+        res = await fetch("/api/admin/live-stream", {
+          headers: { "X-Admin-Token": token },
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       if (!res.ok) throw new Error("认证失败");
       return await res.json();
     }
@@ -225,7 +238,7 @@
         stateEl.textContent = "已连接";
         stateEl.className = "status ok";
       } catch (e) {
-        stateEl.textContent = "认证失败";
+        stateEl.textContent = e && e.name === "AbortError" ? "超时" : "认证失败";
         stateEl.className = "status bad";
         line("连接失败：" + e.message, "bad");
         return;
@@ -238,7 +251,7 @@
           stateEl.textContent = "实时运行";
           stateEl.className = "status ok";
         } catch (e) {
-          stateEl.textContent = "连接中断";
+          stateEl.textContent = e && e.name === "AbortError" ? "超时" : "连接中断";
           stateEl.className = "status bad";
           line("刷新失败：" + e.message, "bad");
         }
