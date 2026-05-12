@@ -110,7 +110,14 @@ def resolve_search_context(
         api_auth_token=api_auth_token,
         api_model=api_model,
     )
-    return build_sources_context_block(sources), sources, plan
+    return build_sources_context_block(
+        sources,
+        search_meta={
+            "searched": True,
+            "queries": plan.get("search_queries", []),
+            "parse_links": plan.get("parse_links", []),
+        },
+    ), sources, plan
 
 app.add_middleware(
     CORSMiddleware,

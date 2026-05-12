@@ -996,9 +996,34 @@ def fetch_brave_search_results(query: str, max_results: int = 5) -> list[dict]:
         return []
 
 
-def build_sources_context_block(sources: list[dict]) -> str:
-    if not sources:
+def build_sources_context_block(sources: list[dict], search_meta: dict | None = None) -> str:
+    search_meta = search_meta or {}
+    searched = bool(search_meta.get("searched"))
+    search_queries = [str(x).strip() for x in (search_meta.get("queries") or []) if str(x).strip()]
+    parse_links = [str(x).strip() for x in (search_meta.get("parse_links") or []) if str(x).strip()]
+
+    if not sources and not searched:
         return ""
+
+    if not sources and searched:
+        parts = [
+            "系统已经在后端完成了实时联网搜索/网页读取，但本次没有检索到足够可靠的来源摘录。",
+            "回答时不得说“我不能联网”“我无法实时搜索”“截至我可用信息范围”等模板话。",
+            "你必须明确说明：本次联网搜索已经执行，但没有找到足够可靠的来源来确认答案。",
+            "如果用户需要，你可以建议用户换一个更具体的搜索目标、提供官方网站链接，或缩小时间范围。",
+            "",
+        ]
+        if search_queries:
+            parts.append("本次实际搜索词：")
+            for idx, query in enumerate(search_queries, 1):
+                parts.append(f"{idx}. {query}")
+            parts.append("")
+        if parse_links:
+            parts.append("本次尝试读取的链接：")
+            for idx, url in enumerate(parse_links, 1):
+                parts.append(f"{idx}. {url}")
+            parts.append("")
+        return "\n".join(parts).strip()
 
     parts = [
         "系统已经在后端完成了实时联网搜索/网页读取。以下内容就是本次实时联网检索到的来源摘录。",
@@ -1008,6 +1033,12 @@ def build_sources_context_block(sources: list[dict]) -> str:
         "不要编造不存在的来源编号。",
         "",
     ]
+
+    if search_queries:
+        parts.append("本次实际搜索词：")
+        for idx, query in enumerate(search_queries, 1):
+            parts.append(f"{idx}. {query}")
+        parts.append("")
 
     for item in sources:
         idx = item.get("index")
