@@ -93,6 +93,12 @@ def iter_search_status_lines(enabled: bool, sources=None):
         yield "\n[[STATUS:reading_sources]]\n"
 
 
+def emit_sources_marker(sources):
+    if not sources:
+        return ""
+    return "\n[[SOURCES:" + json.dumps(sources, ensure_ascii=False) + "]]\n"
+
+
 def resolve_search_context(
     user_prompt: str,
     history,
@@ -559,6 +565,9 @@ def chat_stream(body: ChatBody):
             if source_context:
                 if plan.get("parse_links"):
                     yield "\n[[STATUS:reading_sources]]\n"
+                marker = emit_sources_marker(sources)
+                if marker:
+                    yield marker
                 effective_prompt = source_context + "\n\n用户原始问题：\n" + body.prompt
 
         final_prompt = with_system_prompt(

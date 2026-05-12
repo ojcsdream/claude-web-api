@@ -1,5 +1,6 @@
 from pathlib import Path
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 import uuid
@@ -854,10 +855,17 @@ def fetch_search_results(query: str, max_results: int = 5) -> list[dict]:
         return cached
 
     limit = max(1, min(int(max_results or 5), 10))
-    groups = [
-        fetch_tavily_search_results(q, max_results=limit),
-        fetch_serpapi_search_results(q, max_results=limit),
-    ]
+    groups = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(fetch_tavily_search_results, q, limit),
+            executor.submit(fetch_serpapi_search_results, q, limit),
+        ]
+        for future in as_completed(futures):
+            try:
+                groups.append(future.result() or [])
+            except Exception:
+                groups.append([])
 
     round_robin = []
     seen = set()
@@ -1102,73 +1110,24 @@ def plan_search_actions(
     api_model: str = DEFAULT_MODEL,
 ) -> dict:
     prompt = (user_prompt or "").strip()
-    context_digest = _recent_context_digest(context_messages=context_messages)
     cache_key = json.dumps({
         "prompt": prompt[:600],
-        "context": context_digest[:1200],
-        "model": (api_model or DEFAULT_MODEL).strip(),
+        "context": _recent_context_digest(context_messages=context_messages)[:600],
     }, ensure_ascii=False, sort_keys=True)
     cached = _cache_get(PLANNER_CACHE, cache_key)
     if cached is not None:
         return cached
 
     urls = extract_urls_from_text(prompt, max_urls=4)
+    query = build_contextual_search_query(prompt, context_messages=context_messages)
     heuristic = {
         "should_search": bool(looks_like_search_request(prompt)),
-        "search_queries": [build_contextual_search_query(prompt, context_messages=context_messages)] if prompt else [],
+        "search_queries": [query] if query else [],
         "parse_links": urls[:2],
     }
-
-    if not api_base_url.strip() or not api_auth_token.strip():
-        return _cache_set(PLANNER_CACHE, cache_key, heuristic, ttl_seconds=180)
-
-    planner_prompt = "\n".join([
-        "你是一个搜索规划器。你不能直接回答用户问题，只能决定是否需要联网搜索和读取网页。",
-        "请仅输出 JSON，不要输出解释、Markdown、代码块。",
-        'JSON 格式: {"should_search": boolean, "search_queries": ["..."], "parse_links": ["https://..."]}',
-        "规则：",
-        "1. 只有当问题需要最新信息、外部事实核验、新闻、版本变化、网页内容时，should_search 才为 true。",
-        "2. search_queries 最多 3 个，必须短、具体，优先英文检索词。",
-        "3. parse_links 只填写用户消息里明确给出的 URL，最多 2 个。",
-        "4. 如果问题可直接基于上下文回答，不要搜索。",
-        "",
-        "最近对话：",
-        context_digest or "(无)",
-        "",
-        "当前用户问题：",
-        prompt or "(空)",
-    ])
-
-    try:
-        raw = call_direct_text_api(
-            planner_prompt,
-            api_base_url,
-            api_auth_token,
-            api_model,
-            max_tokens=500,
-            temperature=0,
-        )
-        obj = _extract_json_object(raw) or {}
-        planned_queries = obj.get("search_queries")
-        if not isinstance(planned_queries, list):
-            planned_queries = []
-        planned_links = obj.get("parse_links")
-        if not isinstance(planned_links, list):
-            planned_links = []
-        result = {
-            "should_search": bool(obj.get("should_search")) or bool(planned_queries),
-            "search_queries": [str(x).strip()[:140] for x in planned_queries if str(x).strip()][:3],
-            "parse_links": [str(x).strip() for x in planned_links if str(x).strip().startswith(("http://", "https://"))][:2],
-        }
-        if not result["search_queries"] and heuristic["search_queries"]:
-            result["search_queries"] = heuristic["search_queries"][:1]
-        if not result["parse_links"] and heuristic["parse_links"]:
-            result["parse_links"] = heuristic["parse_links"][:2]
-        if not result["should_search"] and result["parse_links"]:
-            result["should_search"] = True
-        return _cache_set(PLANNER_CACHE, cache_key, result, ttl_seconds=180)
-    except Exception:
-        return _cache_set(PLANNER_CACHE, cache_key, heuristic, ttl_seconds=180)
+    if heuristic["parse_links"]:
+        heuristic["should_search"] = True
+    return _cache_set(PLANNER_CACHE, cache_key, heuristic, ttl_seconds=300)
 
 
 def compile_search_sources_from_queries(
@@ -1181,7 +1140,7 @@ def compile_search_sources_from_queries(
     seen = set()
     links = parse_links or []
 
-    for query in search_queries[:3]:
+    for query in search_queries[:1]:
         search_results = fetch_search_results(query, max_results=max(4, max_results))
         for item in search_results:
             href = normalize_source_url(item.get("url", ""))
@@ -1227,17 +1186,20 @@ def compile_search_sources_from_queries(
     return final
 
 
-def enrich_sources_with_page_content(sources: list[dict], max_pages: int = 2, max_chars: int = 2200) -> list[dict]:
+def enrich_sources_with_page_content(
+    sources: list[dict],
+    parse_links: list[str] | None = None,
+    max_pages: int = 2,
+    max_chars: int = 2200,
+) -> list[dict]:
     enriched = []
     page_reads = 0
+    explicit_links = {normalize_source_url(url) for url in (parse_links or []) if normalize_source_url(url)}
     for source in sources or []:
         item = dict(source)
         url = item.get("url", "")
         current_excerpt = (item.get("excerpt") or "").strip()
-        should_read = page_reads < max_pages and url and (
-            len(current_excerpt) < 220
-            or item.get("provider") in ("direct-link", "serpapi")
-        )
+        should_read = page_reads < max_pages and url and url in explicit_links
         if should_read:
             cache_key = f"page:{url}:{max_chars}"
             fetched = _cache_get(PAGE_CACHE, cache_key)
@@ -1266,7 +1228,7 @@ def collect_search_sources_autonomous(
         api_auth_token=api_auth_token,
         api_model=api_model,
     )
-    queries = [q for q in plan.get("search_queries", []) if q][:3]
+    queries = [q for q in plan.get("search_queries", []) if q][:1]
     if not queries and plan.get("should_search"):
         fallback_query = build_contextual_search_query(user_prompt, context_messages=context_messages)
         if fallback_query:
@@ -1277,7 +1239,12 @@ def collect_search_sources_autonomous(
         parse_links=plan.get("parse_links", []),
         max_results=max_results,
     )
-    sources = enrich_sources_with_page_content(sources, max_pages=2, max_chars=2200)
+    sources = enrich_sources_with_page_content(
+        sources,
+        parse_links=plan.get("parse_links", []),
+        max_pages=1,
+        max_chars=1800,
+    )
     for idx, item in enumerate(sources, 1):
         item["index"] = idx
     return sources, plan

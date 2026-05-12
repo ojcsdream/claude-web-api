@@ -3699,6 +3699,7 @@
     }
 
     const STREAM_STATUS_RE = /\[\[STATUS:([a-z_]+)\]\]/gi;
+    const STREAM_SOURCES_RE = /\[\[SOURCES:([\s\S]*?)\]\]/gi;
     const STATUS_LABELS = {
       parsing: "网页解析中",
       planning_search: "规划搜索中",
@@ -3706,6 +3707,7 @@
       reading_sources: "读取来源中"
     };
     let activeToolStatuses = [];
+    let activeStreamingSources = [];
     let lastUserPromptForThinking = "";
     let thinkingContext = {
       prompt: "",
@@ -3910,7 +3912,14 @@
 
     function stripStreamingStatusMarkers(text) {
       const nextStatuses = [];
-      const cleaned = String(text || "").replace(STREAM_STATUS_RE, (_, name) => {
+      const withoutSources = String(text || "").replace(STREAM_SOURCES_RE, (_, raw) => {
+        try {
+          const parsed = JSON.parse(raw);
+          activeStreamingSources = Array.isArray(parsed) ? parsed : [];
+        } catch (e) {}
+        return "";
+      });
+      const cleaned = withoutSources.replace(STREAM_STATUS_RE, (_, name) => {
         const key = String(name || "").trim().toLowerCase();
         if (key && !nextStatuses.includes(key)) nextStatuses.push(key);
         return "";
@@ -4377,7 +4386,8 @@
 
       const text = stripStreamingStatusMarkers(content || "");
       const lastAssistantMsg = getLastAssistantMessage();
-      const sources = lastAssistantMsg ? parseMessageSources(lastAssistantMsg.sources) : [];
+      const savedSources = lastAssistantMsg ? parseMessageSources(lastAssistantMsg.sources) : [];
+      const sources = activeStreamingSources.length ? activeStreamingSources : savedSources;
 
       if (text.trim() === "思考中...") {
         bubble.innerHTML = renderThinkingHtml();
@@ -4595,6 +4605,7 @@
       streamingDisplayContent = "";
       streamingTargetContent = "";
       activeToolStatuses = [];
+      activeStreamingSources = [];
       thinkingMotionSeed = 0;
       lastStreamingRenderTime = 0;
       ensureThinkingMotion();
