@@ -4346,7 +4346,7 @@
     let streamingRenderQueued = false;
     let pendingStreamingContent = "";
     let lastStreamingRenderTime = 0;
-    const STREAMING_RENDER_THROTTLE = 16; // 约每帧更新一次，提升流式显示速度
+    const STREAMING_RENDER_THROTTLE = 33; // 限制到约 30fps，避免移动端 Markdown 重绘卡顿
     let streamingDisplayContent = "";
     let streamingTargetContent = "";
     let streamingTypewriterTimer = null;
@@ -4597,6 +4597,16 @@
       ensureThinkingMotion();
     }
 
+    function commitStreamingFrame(text) {
+      pendingStreamingContent = "";
+      streamingDisplayContent = text;
+      streamingTargetContent = text;
+      if (messages.length && messages[messages.length - 1].role === "assistant") {
+        messages[messages.length - 1].content = text;
+      }
+      updateLastAssistantBubble(text, false, true);
+    }
+
     function setThinkingContextFromInput(text, files, options = {}) {
       const list = files ? Array.from(files) : [];
       thinkingContext = {
@@ -4610,7 +4620,7 @@
 
     function scheduleStreamingAssistantUpdate(content) {
       pendingStreamingContent = content || "";
-      const seq = ++streamingScheduleSeq;
+      const seq = streamingScheduleSeq;
 
       if (streamingRenderQueued) return;
 
@@ -4621,13 +4631,10 @@
       if (timeSinceLastRender < STREAMING_RENDER_THROTTLE) {
         streamingRenderQueued = true;
         setTimeout(() => {
-          if (seq !== streamingScheduleSeq) return;
           streamingRenderQueued = false;
+          if (seq !== streamingScheduleSeq) return;
           lastStreamingRenderTime = Date.now();
-          const text = pendingStreamingContent;
-          pendingStreamingContent = "";
-          streamingTargetContent = text;
-          ensureStreamingTypewriter();
+          commitStreamingFrame(pendingStreamingContent);
         }, STREAMING_RENDER_THROTTLE - timeSinceLastRender);
         return;
       }
@@ -4636,12 +4643,11 @@
       lastStreamingRenderTime = now;
 
       requestAnimationFrame(() => {
-        if (seq !== streamingScheduleSeq) return;
         streamingRenderQueued = false;
+        if (seq !== streamingScheduleSeq) return;
         const text = pendingStreamingContent;
-        pendingStreamingContent = "";
-        streamingTargetContent = text;
-        ensureStreamingTypewriter();
+        lastStreamingRenderTime = Date.now();
+        commitStreamingFrame(text);
       });
     }
 
