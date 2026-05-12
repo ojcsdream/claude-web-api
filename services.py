@@ -690,119 +690,6 @@ def normalize_source_url(url: str) -> str:
     return url
 
 
-def fetch_searchfree_results(query: str, max_results: int = 5) -> list[dict]:
-    import urllib.request
-    import urllib.error
-
-    q = (query or "").strip()
-    if not q:
-        return []
-
-    payload = json.dumps({
-        "query": q,
-        "search_depth": "advanced",
-        "max_results": max(1, min(int(max_results or 5), 10)),
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        "https://searchfree.site/api/search",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Claude-Web/1.0",
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-    except Exception:
-        return []
-
-    items = data.get("results") or []
-    cleaned = []
-    seen = set()
-
-    for item in items:
-        href = normalize_source_url(item.get("url", ""))
-        if not href or href in seen:
-            continue
-        seen.add(href)
-        title = normalize_source_title(item.get("title", ""), href)
-        excerpt = (item.get("content") or item.get("description") or "").strip()
-        cleaned.append({
-            "title": title,
-            "url": href,
-            "description": excerpt[:2200],
-            "score": source_relevance_score(q, title, href, excerpt) + 14,
-            "provider": "searchfree",
-        })
-        if len(cleaned) >= max_results:
-            break
-
-    cleaned.sort(key=lambda x: x.get("score", 0), reverse=True)
-    return cleaned[:max_results]
-
-
-def fetch_bing_search_results(query: str, max_results: int = 5) -> list[dict]:
-    import urllib.request
-
-    q = rewrite_search_query((query or "").strip())
-    if not q:
-        return []
-
-    url = "https://www.bing.com/search?q=" + quote(q) + "&setlang=en-US&cc=us"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Cache-Control": "no-cache",
-            "Pragma": "no-cache",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        },
-        method="GET",
-    )
-
-    try:
-        with resilient_urlopen(req, timeout=16) as resp:
-            raw_html = resp.read(1024 * 1024).decode("utf-8", errors="ignore")
-    except Exception:
-        return []
-
-    items = []
-    seen = set()
-    pattern = re.compile(
-        r'<li class="b_algo".*?<h2><a href="(?P<url>[^"]+)".*?>(?P<title>.*?)</a></h2>.*?(?:<p>(?P<desc>.*?)</p>)?',
-        re.I | re.S,
-    )
-
-    for match in pattern.finditer(raw_html):
-        href = normalize_source_url(match.group("url") or "")
-        if not href or href in seen:
-            continue
-        seen.add(href)
-        title = normalize_source_title(_strip_html_tags(match.group("title") or ""), href)
-        desc = _trim_excerpt(_strip_html_tags(match.group("desc") or ""), 1200)
-        score = source_relevance_score(q, title, href, desc) + 6
-        if score < 4:
-            continue
-        items.append({
-            "title": title,
-            "url": href,
-            "description": desc,
-            "score": score,
-            "provider": "bing",
-        })
-        if len(items) >= max(3, max_results * 2):
-            break
-
-    items.sort(key=lambda x: x.get("score", 0), reverse=True)
-    return items[:max_results]
-
-
 def fetch_tavily_search_results(query: str, max_results: int = 5) -> list[dict]:
     client = get_tavily_client()
     if not client:
@@ -844,43 +731,31 @@ def fetch_tavily_search_results(query: str, max_results: int = 5) -> list[dict]:
     return cleaned[:max_results]
 
 
-def fetch_search1api_results(query: str, max_results: int = 5) -> list[dict]:
-    import urllib.request
-
-    token = os.environ.get("SEARCH1API_KEY", "").strip()
+def fetch_serpapi_search_results(query: str, max_results: int = 5) -> list[dict]:
+    token = os.environ.get("SERPAPI_API_KEY", "").strip()
     if not token:
         return []
 
-    q = (query or "").strip()
+    q = rewrite_search_query((query or "").strip())
     if not q:
         return []
 
-    payload = json.dumps({
-        "query": q,
-        "search_service": "google",
-        "max_results": max(1, min(int(max_results or 5), 10)),
-        "crawl_results": 0,
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        "https://api.search1api.com/search",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": "Bearer " + token,
-            "User-Agent": "Claude-Web/1.0",
-        },
-        method="POST",
-    )
-
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        import serpapi
+        client = serpapi.Client(api_key=token)
+        data = client.search({
+            "engine": "google",
+            "q": q,
+            "location": "Austin, Texas, United States",
+            "google_domain": "google.com",
+            "hl": "en",
+            "gl": "us",
+            "num": max(1, min(int(max_results or 5), 10)),
+        })
     except Exception:
         return []
 
-    items = data.get("results") or data.get("data") or []
+    items = data.get("organic_results") or data.get("results") or []
     cleaned = []
     seen = set()
 
@@ -890,13 +765,13 @@ def fetch_search1api_results(query: str, max_results: int = 5) -> list[dict]:
             continue
         seen.add(href)
         title = normalize_source_title(item.get("title", ""), href)
-        excerpt = (item.get("content") or item.get("snippet") or item.get("description") or "").strip()
+        excerpt = _trim_excerpt(item.get("snippet") or item.get("snippet_highlighted_words") or item.get("description") or "", 2200)
         cleaned.append({
             "title": title,
             "url": href,
-            "description": excerpt[:2200],
-            "score": source_relevance_score(q, title, href, excerpt) + 10,
-            "provider": "search1api",
+            "description": excerpt,
+            "score": source_relevance_score(q, title, href, excerpt) + 14,
+            "provider": "serpapi",
         })
         if len(cleaned) >= max_results:
             break
@@ -924,7 +799,7 @@ def merge_search_results(result_groups: list[list[dict]], max_results: int = 5) 
 
 
 def fetch_primary_search_results(query: str, max_results: int = 5) -> list[dict]:
-    return fetch_search1api_results(query, max_results=max_results)
+    return fetch_tavily_search_results(query, max_results=max_results)
 
 
 def select_balanced_sources(results: list[dict], max_results: int) -> list[dict]:
@@ -953,10 +828,8 @@ def select_balanced_sources(results: list[dict], max_results: int) -> list[dict]
                 selected_urls.add(url)
                 return
 
-    add_first(lambda item: not item.get("provider"))
     add_first(lambda item: item.get("provider") == "tavily")
-    add_first(lambda item: item.get("provider") == "search1api")
-    add_first(lambda item: item.get("provider") == "searchfree")
+    add_first(lambda item: item.get("provider") == "serpapi")
 
     for item in sorted_results:
         if len(selected) >= limit:
@@ -983,10 +856,7 @@ def fetch_search_results(query: str, max_results: int = 5) -> list[dict]:
     limit = max(1, min(int(max_results or 5), 10))
     groups = [
         fetch_tavily_search_results(q, max_results=limit),
-        fetch_search1api_results(q, max_results=limit),
-        fetch_bing_search_results(q, max_results=limit),
-        fetch_brave_search_results(q, max_results=limit),
-        fetch_searchfree_results(q, max_results=limit),
+        fetch_serpapi_search_results(q, max_results=limit),
     ]
 
     round_robin = []
@@ -1010,63 +880,6 @@ def fetch_search_results(query: str, max_results: int = 5) -> list[dict]:
     merged = merge_search_results([round_robin], max_results=max_pool)
     selected = select_balanced_sources(merged, limit)
     return _cache_set(SEARCH_CACHE, cache_key, selected, ttl_seconds=300)
-
-
-def fetch_brave_search_results(query: str, max_results: int = 5) -> list[dict]:
-    import urllib.request
-
-    token = os.environ.get("BRAVE_SEARCH_API_KEY", "").strip()
-    if not token:
-        return []
-
-    query = rewrite_search_query(query)
-    if not query:
-        return []
-
-    url = (
-        "https://api.search.brave.com/res/v1/web/search?q="
-        + quote(query)
-        + "&count="
-        + str(max(1, min(max_results, 10)))
-        + "&search_lang=en&country=us&spellcheck=1&text_decorations=0"
-    )
-
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "Accept": "application/json",
-                "Accept-Encoding": "identity",
-                "X-Subscription-Token": token,
-            },
-            method="GET",
-        )
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-        web_results = ((data.get("web") or {}).get("results") or [])
-        cleaned = []
-        seen = set()
-        for item in web_results:
-            href = normalize_source_url(item.get("url", ""))
-            if not href or href in seen:
-                continue
-            seen.add(href)
-            title = normalize_source_title(item.get("title", ""), href)
-            desc = item.get("description", "") or ""
-            score = source_relevance_score(query, title, href, desc)
-            if score < 8:
-                continue
-            cleaned.append({
-                "title": title,
-                "url": href,
-                "description": desc,
-                "score": score,
-                "provider": "brave",
-            })
-        cleaned.sort(key=lambda x: x.get("score", 0), reverse=True)
-        return cleaned[:max_results]
-    except Exception:
-        return []
 
 
 def build_sources_context_block(sources: list[dict], search_meta: dict | None = None) -> str:
@@ -1140,7 +953,7 @@ def collect_search_sources(user_prompt: str, max_results: int = 4, context_messa
     results = []
 
     search_query = build_contextual_search_query(user_prompt, context_messages=context_messages)
-    search_results = fetch_search1api_results(search_query, max_results=max_results)
+    search_results = fetch_search_results(search_query, max_results=max_results)
     for item in search_results:
         excerpt = item.get("description") or ""
         score = item.get("score", source_relevance_score(user_prompt, item["title"], item["url"], excerpt))
@@ -1149,7 +962,7 @@ def collect_search_sources(user_prompt: str, max_results: int = 4, context_messa
             "url": item["url"],
             "excerpt": excerpt,
             "score": score,
-            "provider": "search1api",
+            "provider": item.get("provider", ""),
             "query": search_query,
         })
 
@@ -1423,7 +1236,7 @@ def enrich_sources_with_page_content(sources: list[dict], max_pages: int = 2, ma
         current_excerpt = (item.get("excerpt") or "").strip()
         should_read = page_reads < max_pages and url and (
             len(current_excerpt) < 220
-            or item.get("provider") in ("direct-link", "bing")
+            or item.get("provider") in ("direct-link", "serpapi")
         )
         if should_read:
             cache_key = f"page:{url}:{max_chars}"
