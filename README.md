@@ -1,26 +1,35 @@
 # Claude Web 本地 AI 工作台
 
-这是一个运行在安卓手机 Termux + proot-distro Ubuntu 环境中的本地 AI Web 应用。
+Claude Web 是一个偏移动端、偏本地部署的 AI 聊天工作台。项目使用 `FastAPI + SQLite + 单文件前端`，界面风格接近 Claude，但保留了更强的本地化能力：多接入商管理、图片与文件分析、联网搜索、系统提示词、重新回答版本管理、公网访问脚本等。
 
-项目提供一个 Claude Web 风格的移动端聊天界面，并支持：
+项目当前主要面向这几类使用场景：
 
-- 第三方 OpenAI/Claude 兼容 API 直连流式模式
-- SQLite 本地会话持久化
-- 文本文件、代码文件、图片上传
-- 历史文件上下文保留
-- 网页 URL 内容读取
-- Markdown 导出
-- 会话搜索、固定、重命名、删除
-- API 接入商管理
-- 管理后台请求日志和系统状态页
+- 在手机 Termux / Linux 小机 / 轻量云主机上自建个人 AI 工作台
+- 通过第三方 OpenAI / Claude 兼容接口直连聊天
+- 上传代码、文本、图片后做连续问答
+- 让 AI 自主判断是否需要联网检索最新信息
+- 在本地持久化保存对话、版本、来源、接入商配置
+
+当前核心能力：
+
+- OpenAI / Anthropic 兼容接口直连流式聊天
+- Claude 风格主界面，支持流式输出、暂停回复、来源先行展示
+- AI 自主联网搜索，支持 Tavily + SerpAPI 双引擎
+- 用户可手动点按“强制联网搜索”按钮覆盖默认判断
+- 文本文件、代码文件、图片上传与历史上下文保留
+- 多系统提示词管理，可启用多个并写入数据库
+- 会话搜索、固定、重命名、删除、Markdown 导出
+- 重新回答并保留旧版本
+- SQLite 本地持久化
+- 管理后台、健康检查、公网启动脚本
 
 默认项目路径：
 
 ```bash
-/home/ai/claude-web
+/ai/claude-web
 ```
 
-推荐在普通用户 `ai` 下运行。
+推荐使用普通用户运行，并通过项目脚本启动。
 
 ## 页面入口
 
@@ -54,30 +63,34 @@ scripts/fetch_image_binary.py "<url>"
 
 该工具会解析 `http://127.0.0.1:8080/share/<hash>` 这类分享页，下载真实图片二进制到 `/tmp/codex-images/`，并输出本地路径、MIME、宽高和文件大小。拿到输出里的 `path` 后，再用图片查看工具识别图片内容。
 
-## 最新目录结构
+## 项目结构
 
 ```text
 claude-web/
-├── app.py              # FastAPI app 和路由编排
-├── config.py           # 路径、默认模型、上下文限制等配置
-├── schemas.py          # Pydantic 请求/响应数据结构
-├── db.py               # SQLite 初始化和数据访问层
-├── chat_utils.py       # token 估算、上下文裁剪、prompt 构造
-├── services.py         # 直连 API、视觉 API、上传/网页读取服务
+├── app.py              # FastAPI 路由、聊天入口、流式响应
+├── services.py         # 直连 API、联网搜索、网页提取、视觉请求
+├── db.py               # SQLite 初始化与数据访问
+├── chat_utils.py       # 上下文裁剪、prompt 构造、token 粗估
+├── schemas.py          # Pydantic 数据结构
+├── config.py           # 默认模型、路径、限制配置
 ├── requirements.txt    # Python 运行依赖
-├── install.sh          # Linux 一键安装脚本
-├── start-local.sh      # 默认后台启动脚本，会同时启动固定 ngrok 公网入口
+├── install.sh          # 一键安装脚本
+├── start-local.sh      # 启动本地服务，并默认尝试打开公网入口
+├── start-public.sh     # 公网入口启动脚本
 ├── static/
 │   ├── index.html      # 主聊天界面
-│   ├── lite.html       # 极简备用聊天界面
-│   └── admin.html      # 管理后台
-├── uploads/            # 上传文件目录，已被 .gitignore 忽略
-├── logs/               # 日志目录，已被 .gitignore 忽略
-├── chat.db             # SQLite 数据库，已被 .gitignore 忽略
+│   ├── lite.html       # 极简备用界面
+│   ├── admin.html      # 管理后台
+│   └── sw.js           # PWA / 缓存 service worker
+├── uploads/            # 上传文件目录，默认忽略
+├── logs/               # 运行日志目录，默认忽略
+├── chat.db             # SQLite 数据库，默认忽略
 └── README.md
 ```
 
-## Linux 一键部署
+## 快速开始
+
+### 1. 克隆与安装
 
 运行环境：
 
@@ -95,19 +108,40 @@ git clone git@github.com:ojcsdream/api-.git claude-web
 cd claude-web
 chmod +x install.sh start-local.sh
 ./install.sh
-./start-local.sh
 ```
 
-安装脚本会创建 `.venv`、安装 Python 依赖、创建 `uploads/` 和 `logs/`，并进行 Python 语法检查。它会尝试安装 `ngrok` 到 `~/.local/bin/ngrok`。它不会写入 API Key，也不会复制历史数据库。
+安装脚本会：
 
-如果要让固定公网域名自动可用，首次部署前先提供 ngrok token：
+- 创建 `.venv`
+- 安装 Python 依赖
+- 初始化 `uploads/`、`logs/`
+- 做基础 Python 语法检查
+- 尝试安装 `ngrok` 到 `~/.local/bin/ngrok`
+
+它不会替你写入 API Key，也不会复制历史数据库。
+
+### 2. 配置联网搜索与网页提取
+
+当前项目联网搜索只保留两个 provider：
+
+- `TAVILY_API_KEY`
+- `SERPAPI_API_KEY`
+
+推荐把它们放进项目根目录 `.env`：
 
 ```bash
-export NGROK_AUTHTOKEN="你的 ngrok token"
-./install.sh
+TAVILY_API_KEY="你的 Tavily key"
+SERPAPI_API_KEY="你的 SerpAPI key"
 ```
 
-首次启动时会自动创建全新的 `chat.db`。请在 Web 管理界面配置 API 接入商；不要把 API Key 写入公开仓库。
+如果没有这些 key，普通对话依然能运行，但联网搜索和网页提取能力会明显下降。
+
+### 3. 启动
+
+```bash
+cd /ai/claude-web
+./start-local.sh
+```
 
 默认访问地址：
 
@@ -116,12 +150,21 @@ http://127.0.0.1:8000/
 https://kindling-shaft-creamer.ngrok-free.dev
 ```
 
+如果要让固定公网域名自动可用，首次部署前先提供 ngrok token：
+
+```bash
+export NGROK_AUTHTOKEN="你的 ngrok token"
+./install.sh
+```
+
+首次启动会自动创建新的 `chat.db`。API 接入商建议在 Web 界面中配置；不要把 `.env`、`chat.db`、`uploads/` 提交到公开仓库。
+
 ## 启动方式
 
 推荐使用项目内脚本：
 
 ```bash
-cd /home/ai/claude-web
+cd /ai/claude-web
 ./start-local.sh
 ```
 
@@ -139,7 +182,7 @@ cd /home/ai/claude-web
 手动启动：
 
 ```bash
-cd /home/ai/claude-web
+cd /ai/claude-web
 source .venv/bin/activate
 python -m uvicorn app:app --host 127.0.0.1 --port 8000 --workers 2 --no-access-log
 ```
@@ -227,6 +270,71 @@ cd /home/ai/claude-web
 logs/ngrok.log
 ```
 
+## 功能概览
+
+### 1. 聊天体验
+
+- OpenAI / Anthropic 兼容接口真流式输出
+- 回复过程中支持暂停
+- 重新回答时可以保留旧版本
+- Markdown、代码块、高亮、公式渲染
+- 来源会在正文前提前显示，更接近研究型聊天体验
+
+### 2. AI 自主联网搜索
+
+联网搜索不再完全依赖手动按钮。当前逻辑是：
+
+- 默认由后端判断问题是否需要联网
+- 如果是“最新、新闻、搜索、网页、核验事实”这类问题，会自动触发联网
+- 用户也可以点输入框右侧的“强制联网搜索”按钮覆盖默认判断
+
+当前搜索链路：
+
+- 第一优先级：`Tavily`
+- 第二优先级：`SerpAPI`
+
+搜索结果会：
+
+- 先于正文流式出现在界面上
+- 写入 `messages.sources`
+- 在回答中用来源卡片和引用编号展示
+
+### 3. 文件与图片
+
+- 支持上传文本、代码、日志、配置文件
+- 支持上传图片并走视觉接口
+- 历史文件和图片上下文会保留到后续对话
+- 用户消息中的 URL 可自动读取网页正文
+
+### 4. 系统提示词
+
+- 支持多个系统提示词
+- 支持启用 / 禁用
+- 可同时启用多个并自动拼接
+- 数据库存储，刷新后仍保留
+
+### 5. 会话与版本
+
+- 会话搜索
+- 会话固定 / 取消固定
+- 新建、重命名、删除
+- Markdown 导出
+- 消息重新回答并保留历史版本
+
+### 6. 接入商管理
+
+- 保存多个 API 接入商
+- 设置默认接入商
+- 拉取当前接入商模型列表
+- 本地保存模型、URL、Key 等信息
+
+### 7. 部署与公网
+
+- 本地 `FastAPI` 服务
+- 默认启动脚本可同时尝试拉起固定 ngrok 公网入口
+- 支持 Cloudflare Tunnel
+- 自带健康检查和日志文件
+
 ## 直连聊天模式
 
 项目当前只保留第三方 API 直连流式模式。
@@ -244,65 +352,9 @@ logs/ngrok.log
 
 后端支持 API 优先的网页解析，避免直接抓网页时频繁遇到 403。
 
-推荐配置：
+网页正文提取当前优先走 `Tavily Extract API`。如果命中了用户显式提供的 URL，系统会优先尝试提取正文，再把摘要结果拼进回答上下文。
 
-```bash
-export TAVILY_API_KEY="你的 Tavily API key"
-```
-
-可选配置：
-
-```bash
-export FIRECRAWL_API_KEY="你的 Firecrawl API key"
-export JINA_API_KEY="你的 Jina Reader API key"
-```
-
-优先级：
-
-- 网页解析：优先 Tavily Extract API，其次 Firecrawl Scrape API，其次 Jina Reader，最后才直接抓网页。
-
-如果没有配置这些 key，功能仍可运行，但稳定性和抗 403 能力会明显下降。
-
-## 主要功能
-
-### 会话
-
-- 会话列表
-- 会话搜索
-- 会话固定/取消固定
-- 新建、重命名、删除
-- Markdown 导出
-- 消息删除及从某条回复重新生成
-
-### 文件和图片
-
-上传文本/代码文件时，后端会：
-
-1. 保存原文件到 `uploads/`
-2. 读取 UTF-8 文本内容
-3. 将文件名、路径、内容写入 `messages.file_context`
-4. 后续对话会通过 `chat_utils.format_message_for_context()` 自动带上历史文件上下文
-
-上传图片时，后端会：
-
-1. 保存图片到 `uploads/`
-2. 在消息里保存图片预览路径
-3. 视觉请求中读取图片并转为 base64
-4. 调用 OpenAI/Anthropic 兼容视觉接口
-
-### API 接入商
-
-前端可以保存多个 API 接入商：
-
-- 名称
-- API URL
-- API Key
-- 模型 ID
-- 默认接入商
-
-数据库表：`api_profiles`
-
-注意：API Key 保存在本地 SQLite 中，不要上传 `chat.db`。
+如果没有配置 `TAVILY_API_KEY`，项目仍可工作，但网页提取稳定性会下降。
 
 ### 管理后台
 
@@ -342,6 +394,7 @@ chat.db
 - `conversations`
 - `messages`
 - `api_profiles`
+- `system_prompts`
 - `admin_request_logs`
 
 重要字段：
@@ -349,6 +402,7 @@ chat.db
 - `conversations.is_pinned`：会话固定状态
 - `messages.file_context`：历史上传文件内容
 - `messages.image_preview`：图片预览路径
+- `messages.sources`：联网搜索来源 JSON
 - `messages.model` / `provider_name` / `token_count`：回复元信息
 
 ## 安全注意事项
@@ -375,7 +429,8 @@ chat.db
 - 将 Termux 和浏览器加入电池优化白名单
 - 尽量保持屏幕唤醒
 - 使用 `./start-local.sh` 后台启动
-- 保留 `--workers 2`，避免长流式请求影响页面刷新
+- 默认使用 `./start-local.sh`
+- 保留单 worker，减少轻量设备上的内存压力
 
 如果主页面出现性能问题，可以临时使用：
 
