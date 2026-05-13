@@ -53,13 +53,12 @@ from schemas import (
     SystemPromptBody,
 )
 from services import (
-    build_sources_context_block,
     collect_search_sources,
-    collect_search_sources_autonomous,
     enhance_prompt_with_url_fetch,
     extract_urls_from_text,
     looks_like_search_request,
     load_uploaded_text_from_path,
+    run_search_tool_round,
     save_uploaded_file_dual_paths,
     stream_direct_and_save,
     stream_direct_api_text,
@@ -100,37 +99,48 @@ def emit_sources_marker(sources):
     return "\n[[SOURCES:" + json.dumps(sources, ensure_ascii=False) + "]]\n"
 
 
-def resolve_search_context(
+def resolve_search_tool_context(
     user_prompt: str,
     history,
-    web_search: bool,
+    force: bool,
     api_base_url: str,
     api_auth_token: str,
     api_model: str,
 ):
-    if not web_search:
-        return "", [], {}
-    sources, plan = collect_search_sources_autonomous(
+    return run_search_tool_round(
         user_prompt,
         context_messages=history,
         api_base_url=api_base_url,
         api_auth_token=api_auth_token,
         api_model=api_model,
+        force=force,
+        max_results=4,
     )
-    return build_sources_context_block(
-        sources,
-        search_meta={
-            "searched": True,
-            "queries": plan.get("search_queries", []),
-            "parse_links": plan.get("parse_links", []),
-        },
-    ), sources, plan
 
 
 def should_autonomous_search(prompt: str, force: bool = False) -> bool:
     if force:
         return True
     return bool(looks_like_search_request(prompt or ""))
+
+
+def should_autonomous_search_with_context(prompt: str, history=None, force: bool = False) -> bool:
+    if should_autonomous_search(prompt, force=force):
+        return True
+    value = (prompt or "").strip().lower()
+    if not value or not history:
+        return False
+    reference_words = (
+        "这个", "这个事", "这件事", "这家公司", "这个公司", "这款", "这个模型",
+        "他", "她", "它", "他们", "它们", "其", "该", "上述", "前面", "刚才", "你说的",
+        "this", "that", "it", "they", "them", "above",
+    )
+    recency_words = (
+        "最新", "最近", "新闻", "消息", "动态", "进展", "现在", "目前",
+        "latest", "recent", "news", "update", "updates", "current",
+    )
+    return any(w in value for w in reference_words) and any(w in value for w in recency_words)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -548,34 +558,44 @@ def chat_stream(body: ChatBody):
     db_update_title_if_needed(cid, body.prompt)
 
     def gen():
-        should_search = should_autonomous_search(body.prompt, force=body.web_search)
-
-        if should_search or extract_urls_from_text(body.prompt):
+        has_urls = bool(extract_urls_from_text(body.prompt))
+        search_intent = body.web_search or has_urls
+        yield "\n[[STATUS:thinking]]\n"
+        if body.web_search or has_urls:
             yield "\n[[STATUS:parsing]]\n"
-        if should_search:
+        if search_intent:
             yield "\n[[STATUS:planning_search]]\n"
+            yield "\n[[STATUS:searching]]\n"
 
         effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
         sources = []
         plan = {}
 
-        if should_search:
-            yield "\n[[STATUS:searching]]\n"
-            source_context, sources, plan = resolve_search_context(
+        if search_intent:
+            observation, sources, plan = resolve_search_tool_context(
                 body.prompt,
                 history,
-                should_search,
+                body.web_search,
                 body.api_base_url,
                 body.api_auth_token,
                 body.api_model or DEFAULT_MODEL,
             )
-            if source_context:
-                if plan.get("parse_links"):
-                    yield "\n[[STATUS:reading_sources]]\n"
+            should_search = bool(plan.get("should_search") or plan.get("parse_links"))
+        else:
+            observation = ""
+            should_search = False
+
+        if should_search:
+            if plan.get("parse_links"):
+                yield "\n[[STATUS:reading_sources]]\n"
+            if observation:
                 marker = emit_sources_marker(sources)
                 if marker:
                     yield marker
-                effective_prompt = source_context + "\n\n用户原始问题：\n" + body.prompt
+                effective_prompt = (
+                    observation
+                    + "\n\n现在基于上述工具调用结果和最近聊天上下文，直接回答用户。"
+                )
 
         final_prompt = with_system_prompt(
             build_chat_prompt(history, effective_prompt),
@@ -633,20 +653,24 @@ def _build_regenerate_prompt_with_search(
     api_model=DEFAULT_MODEL,
 ):
     sources = []
-    search_context = ""
-    if web_search:
-        search_context, sources, _plan = resolve_search_context(
+    observation = ""
+    search_intent = web_search or bool(extract_urls_from_text(last_user_prompt))
+    if search_intent:
+        observation, sources, _plan = resolve_search_tool_context(
             last_user_prompt,
             context_messages,
-            True,
+            web_search,
             api_base_url,
             api_auth_token,
             api_model,
         )
 
     final_user_prompt = last_user_prompt
-    if search_context:
-        final_user_prompt = search_context + "\n\n用户原始问题：\n" + last_user_prompt
+    if observation:
+        final_user_prompt = (
+            observation
+            + "\n\n现在基于上述工具调用结果和最近聊天上下文，直接回答用户。"
+        )
 
     final_prompt = build_chat_prompt(
         messages=context_messages,
@@ -1006,17 +1030,19 @@ async def chat_upload_stream(
     db_update_title_if_needed(cid, prompt or file_names_str or "新对话")
 
     sources = []
-    search_context = ""
-    should_search = should_autonomous_search(user_prompt, force=web_search)
-    if should_search:
-        search_context, sources, _plan = resolve_search_context(
+    search_observation = ""
+    search_intent = web_search or bool(extract_urls_from_text(user_prompt))
+    should_search = False
+    if search_intent:
+        search_observation, sources, _plan = resolve_search_tool_context(
             user_prompt,
             history,
-            True,
+            web_search,
             api_base_url,
             api_auth_token,
             api_model or DEFAULT_MODEL,
         )
+        should_search = bool(_plan.get("should_search") or _plan.get("parse_links"))
 
     # 有图片时，强制走 base64 视觉 API
     if image_files:
@@ -1034,8 +1060,9 @@ async def chat_upload_stream(
         vision_prompt_parts.append("如果你没有看到图片内容，请明确回复：我没有读取到图片内容。")
         vision_prompt_parts.append("")
 
-        if search_context:
-            vision_prompt_parts.append(search_context)
+        if search_observation:
+            vision_prompt_parts.append(search_observation)
+            vision_prompt_parts.append("搜索工具结果只作为参考；回答图片问题时仍必须优先读取当前图片内容。")
             vision_prompt_parts.append("")
 
         for idx, item in enumerate(image_files, 1):
@@ -1137,8 +1164,12 @@ async def chat_upload_stream(
     else:
         final_user_prompt = user_prompt
 
-    if search_context:
-        final_user_prompt = search_context + "\n\n用户原始问题：\n" + final_user_prompt
+    if search_observation:
+        final_user_prompt = (
+            search_observation
+            + "\n\n现在基于上述工具调用结果、附件内容和最近聊天上下文，直接回答用户。\n"
+            + final_user_prompt
+        )
 
     final_prompt = with_system_prompt(
         build_chat_prompt(

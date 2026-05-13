@@ -517,9 +517,20 @@ SEARCH_COMMAND_PATTERNS = [
 def _strip_search_command_words(text: str) -> str:
     value = (text or "").strip()
     value = re.sub(r"^(你)?(帮我|给我|请)?", "", value).strip()
+    value = re.sub(r"^(看一下|看看|了解一下|研究一下)\s*", "", value).strip()
     value = re.sub(r"^(联网)?(搜索|搜一下|搜一搜|查一下|查一查|查找|检索|搜)\s*", "", value).strip()
     value = re.sub(r"^(search|look up|browse|web search)\s+", "", value, flags=re.I).strip()
     value = re.sub(r"(一下|看看|查查|搜搜|相关信息|最新消息|最新新闻)[。.!！\s]*$", "", value).strip()
+    return value
+
+
+def _strip_leading_search_command_words(text: str) -> str:
+    value = (text or "").strip()
+    value = re.sub(r"^(你)?(帮我|给我|请)?", "", value).strip()
+    value = re.sub(r"^(看一下|看看|了解一下|研究一下)\s*", "", value).strip()
+    value = re.sub(r"^(联网)?(搜索|搜一下|搜一搜|查一下|查一查|查找|检索|搜)\s*", "", value).strip()
+    value = re.sub(r"^(search|look up|browse|web search)\s+", "", value, flags=re.I).strip()
+    value = re.sub(r"\s+", " ", value).strip(" ，,。.!！?？")
     return value
 
 
@@ -537,12 +548,184 @@ def _clean_context_for_search(text: str) -> str:
     return value.strip()
 
 
+CONTEXTUAL_REFERENCE_PATTERNS = [
+    "这个", "这个事", "这件事", "这家公司", "这个公司", "这款", "这个模型", "该模型",
+    "他", "她", "它", "他们", "它们", "其", "该", "上述", "前面", "刚才", "你说的",
+    "this", "that", "it", "they", "them", "the company", "the model", "above",
+]
+
+
+GENERIC_SEARCH_WORDS = {
+    "这个", "这个事", "这件事", "这家公司", "这个公司", "这款", "这个模型", "该模型",
+    "他", "她", "它", "他们", "它们", "其", "该", "上述", "前面", "刚才", "你说的",
+    "最新", "最近", "新闻", "消息", "动态", "进展", "变化", "现在", "目前", "什么", "有什么",
+    "this", "that", "it", "they", "them", "above", "latest", "recent", "news", "updates", "current",
+}
+
+
+def _strip_context_reference_words(text: str) -> str:
+    value = (text or "").strip()
+    for word in sorted(GENERIC_SEARCH_WORDS, key=len, reverse=True):
+        value = re.sub(rf"\b{re.escape(word)}\b", " ", value, flags=re.I)
+        value = value.replace(word, " ")
+    value = re.sub(r"\s+", " ", value).strip(" ，,。.!！?？")
+    return value
+
+
+def _finalize_search_query(query: str) -> str:
+    value = re.sub(r"\s+", " ", (query or "")).strip()
+    if not value:
+        return ""
+    value = _strip_leading_search_command_words(value)
+    value = rewrite_search_query(value)
+    value = re.sub(r"\s+", " ", value).strip(" ，,。.!！?？")
+    return value
+
+
+def _looks_like_time_request(text: str) -> bool:
+    value = (text or "").strip().lower()
+    if not value:
+        return False
+    return any(token in value for token in (
+        "几点", "几点了", "现在时间", "当前时间", "北京时间", "日期", "今天几号",
+        "what time", "current time", "time in", "date in", "current date",
+    ))
+
+
+def _query_intent_from_prompt(prompt: str) -> str:
+    value = (prompt or "").strip()
+    lowered = value.lower()
+    if not value:
+        return ""
+    if "gpt-5.5" in lowered or ("openai" in lowered and "gpt" in lowered):
+        if any(word in value for word in ("发布日期", "发布时间", "什么时候发布", "何时发布", "release date", "released")):
+            return "OpenAI GPT-5.5 release date official"
+        if any(word in value for word in ("最新", "最新情况", "最新消息", "最近更新", "recent", "latest", "news", "update", "updates")):
+            return "OpenAI GPT-5.5 latest news official"
+        return "OpenAI GPT-5.5 official"
+    if any(token in lowered for token in ("claude code", "anthropic", "claude")):
+        if any(word in value for word in ("发布日期", "发布时间", "什么时候发布", "何时发布", "release date", "released")):
+            return "Claude Code release date Anthropic official"
+        if any(word in value for word in ("最新", "最新情况", "最新消息", "最近更新", "recent", "latest", "news", "update", "updates")):
+            return "Claude Code latest update Anthropic official"
+        return "Claude Code Anthropic official"
+    if any(token in lowered for token in ("python",)) and re.search(r"3\.\d+", lowered):
+        version = re.search(r"3\.\d+", lowered).group(0)
+        if any(word in value for word in ("发布日期", "发布时间", "什么时候发布", "何时发布", "release date", "released")):
+            return f"Python {version} release date official site:python.org"
+        if any(word in value for word in ("最新", "最新消息", "最近更新", "recent", "latest", "news", "update", "updates")):
+            return f"Python {version} latest update official site:python.org"
+        return f"Python {version} official site:python.org"
+    if any(token in lowered for token in ("apple", "m4", "iphone", "ipad", "mac")):
+        if any(word in value for word in ("最新", "最新消息", "最近更新", "recent", "latest", "news", "update", "updates")):
+            return "Apple latest news official site:apple.com"
+    if any(token in lowered for token in ("github", "github.com")) and any(word in value for word in ("最新", "最新消息", "最近更新", "recent", "latest", "news", "update", "updates")):
+        return "GitHub latest update official"
+    if _looks_like_time_request(value):
+        if "北京" in value or "beijing" in lowered:
+            return "current Beijing time"
+        if "纽约" in value or "new york" in lowered or "eastern" in lowered:
+            return "current New York time"
+        if "东京" in value or "tokyo" in lowered or "japan" in lowered:
+            return "current Tokyo time"
+        if "伦敦" in value or "london" in lowered or "uk" in lowered:
+            return "current London time"
+        return "current time"
+    return value
+
+
+def _has_specific_search_entity(text: str) -> bool:
+    value = (text or "").strip()
+    if re.search(r"[A-Za-z][A-Za-z0-9.\-]{1,}", value):
+        return True
+    terms = [t for t in extract_query_terms(value) if t not in GENERIC_SEARCH_WORDS]
+    return len(terms) >= 2
+
+
+def _looks_context_dependent_search(prompt: str) -> bool:
+    value = (prompt or "").strip().lower()
+    if not value:
+        return False
+    if _is_bare_search_command(value):
+        return True
+    if _has_specific_search_entity(value):
+        return False
+    if any(token in value for token in CONTEXTUAL_REFERENCE_PATTERNS):
+        return True
+    return bool(looks_like_search_request(value) and len(extract_query_terms(value)) <= 3)
+
+
+def _latest_user_context(context_messages=None, max_chars: int = 220) -> str:
+    for msg in reversed(context_messages or []):
+        if getattr(msg, "role", "") != "user":
+            continue
+        content = _clean_context_for_search(getattr(msg, "content", "") or "")
+        if content and not _is_bare_search_command(content):
+            return _strip_search_command_words(content)[-max_chars:]
+    return ""
+
+
+def _latest_assistant_context(context_messages=None, max_chars: int = 260) -> str:
+    for msg in reversed(context_messages or []):
+        if getattr(msg, "role", "") != "assistant":
+            continue
+        content = _clean_context_for_search(getattr(msg, "content", "") or "")
+        if content:
+            return content[-max_chars:]
+    return ""
+
+
+def _context_specific_queries(context_messages=None, limit: int = 3) -> list[str]:
+    queries = []
+    for msg in reversed(context_messages or []):
+        if getattr(msg, "role", "") != "user":
+            continue
+        content = _clean_context_for_search(getattr(msg, "content", "") or "")
+        if not content or _is_bare_search_command(content):
+            continue
+        candidate = _finalize_search_query(content)
+        if _is_bad_search_query(candidate):
+            continue
+        if _has_specific_search_entity(candidate) and candidate not in queries:
+            queries.append(candidate[:140])
+        if len(queries) >= limit:
+            break
+    return queries
+
+
 def build_contextual_search_query(user_prompt: str, context_messages=None, max_chars: int = 120) -> str:
     prompt = (user_prompt or "").strip()
     cleaned_prompt = _strip_search_command_words(prompt)
+    bare_command = _is_bare_search_command(prompt)
+    context_candidates = _context_specific_queries(context_messages=context_messages, limit=3)
 
-    if cleaned_prompt and not _is_bare_search_command(prompt):
-        return cleaned_prompt[:max_chars]
+    if _has_specific_search_entity(prompt) and not _is_bare_search_command(prompt):
+        specific_prompt = _strip_leading_search_command_words(prompt)
+        if specific_prompt:
+            return _finalize_search_query(specific_prompt)[:max_chars]
+
+    if cleaned_prompt and not _looks_context_dependent_search(prompt):
+        return _finalize_search_query(cleaned_prompt)[:max_chars]
+
+    last_user = _latest_user_context(context_messages)
+    last_assistant = _latest_assistant_context(context_messages)
+    context_basis = last_user or last_assistant
+
+    if bare_command:
+        if not context_candidates:
+            return ""
+        if len(context_candidates) == 1:
+            return context_candidates[0][:max_chars]
+        return ""
+
+    if cleaned_prompt and context_basis:
+        cleaned_reference = _strip_context_reference_words(cleaned_prompt)
+        if not cleaned_reference and len(context_candidates) > 1:
+            return ""
+        if not cleaned_reference and not context_candidates:
+            return ""
+        query = f"{context_basis} {cleaned_reference}".strip() if cleaned_reference else context_basis
+        return _finalize_search_query(query)[:max_chars]
 
     candidates = []
     for msg in reversed(context_messages or []):
@@ -562,10 +745,95 @@ def build_contextual_search_query(user_prompt: str, context_messages=None, max_c
                 continue
             content = _clean_context_for_search(getattr(msg, "content", "") or "")
             if content and not _is_bare_search_command(content):
-                return _strip_search_command_words(content)[:max_chars]
-        return candidates[0][:max_chars]
+                return _finalize_search_query(_strip_search_command_words(content))[:max_chars]
+        return _finalize_search_query(candidates[0])[:max_chars]
 
-    return cleaned_prompt[:max_chars] if cleaned_prompt else prompt[:max_chars]
+    return _finalize_search_query(cleaned_prompt if cleaned_prompt else prompt)[:max_chars]
+
+
+def build_search_planner_prompt(user_prompt: str, context_messages=None) -> str:
+    context = _recent_context_digest(context_messages=context_messages, max_messages=8, max_chars=1800)
+    heuristic_query = build_contextual_search_query(user_prompt, context_messages=context_messages, max_chars=140)
+    return (
+        "你是联网搜索规划器。你的任务不是回答用户，而是先理解用户真实想查什么，再提交准确的搜索关键词。\n"
+        "要求：\n"
+        "1. 先在内部判断用户最新问题的真实对象、限制条件和搜索目的。不要输出思考过程。\n"
+        "2. 搜索词必须和用户需求一致，不能改问另一个问题，不能扩大成泛泛的行业新闻。\n"
+        "3. 如果用户说“这个/他/它/上述/刚才/查一下/最新消息”等指代，必须从上下文补全真实主体；无法确定主体时 should_search=false 且 search_queries=[]。\n"
+        "4. 搜索词要像真实搜索引擎查询：短、具体、可检索；保留专名、产品名、公司名、人名、版本号、地点、时间范围、用户指定的比较对象。\n"
+        "5. 禁止只输出“最新消息”“相关信息”“这个”“搜索一下”“查一下”等空泛词，也禁止只复述命令词。\n"
+        "6. 用户只是普通聊天、写作、解释代码、数学推导、翻译、总结已给内容时，不需要联网，should_search=false。\n"
+        "7. 最多给 2 个搜索词；优先 1 个高质量搜索词。\n"
+        "8. 只输出 JSON，不要解释。\n"
+        'JSON 格式：{"should_search":true,"search_queries":["准确关键词"],"parse_links":[]}\n\n'
+        f"后端基于上下文得到的候选关键词，仅供校验，不要盲从：\n{heuristic_query or '（无）'}\n\n"
+        f"最近对话上下文：\n{context or '（无）'}\n\n"
+        f"用户最新问题：\n{user_prompt or ''}"
+    )
+
+
+def _is_bad_search_query(query: str) -> bool:
+    q = re.sub(r"\s+", " ", (query or "")).strip().lower()
+    if not q:
+        return True
+    if len(q) <= 2:
+        return True
+    bad_exact = {
+        "搜索", "查一下", "搜一下", "搜一搜", "联网搜索", "最新", "最近", "消息", "新闻",
+        "最新消息", "最新新闻", "相关信息", "这个", "这个事", "这件事", "上述", "前面",
+        "search", "look up", "browse", "latest", "news", "updates", "recent updates",
+    }
+    if q in bad_exact:
+        return True
+    stripped = _strip_context_reference_words(_strip_search_command_words(q))
+    if not stripped or stripped in bad_exact:
+        return True
+    meaningful_terms = [t for t in extract_query_terms(stripped) if t not in GENERIC_SEARCH_WORDS]
+    return not meaningful_terms
+
+
+def normalize_search_plan(raw_plan: dict | None, fallback: dict, user_prompt: str = "", context_messages=None) -> dict:
+    if not isinstance(raw_plan, dict):
+        return fallback
+
+    queries = []
+    for item in raw_plan.get("search_queries") or []:
+        q = _finalize_search_query(str(item or ""))
+        if _is_bad_search_query(q):
+            continue
+        if q and q not in queries:
+            queries.append(q[:140])
+        if len(queries) >= 2:
+            break
+
+    links = []
+    for item in raw_plan.get("parse_links") or []:
+        url = normalize_source_url(str(item or ""))
+        if url and url not in links:
+            links.append(url)
+        if len(links) >= 2:
+            break
+
+    should_search = bool(raw_plan.get("should_search")) or bool(queries) or bool(links)
+    if not queries and fallback.get("search_queries"):
+        fallback_queries = []
+        for item in fallback.get("search_queries") or []:
+            q = _finalize_search_query(str(item or ""))
+            if q and not _is_bad_search_query(q) and q not in fallback_queries:
+                fallback_queries.append(q[:140])
+        queries = fallback_queries[:1]
+    if should_search and not queries and not links:
+        fallback_query = build_contextual_search_query(user_prompt, context_messages=context_messages)
+        if fallback_query and not _is_bad_search_query(fallback_query):
+            queries = [fallback_query[:140]]
+    if should_search and not queries and not links:
+        should_search = False
+
+    return {
+        "should_search": should_search,
+        "search_queries": queries,
+        "parse_links": links or fallback.get("parse_links", [])[:2],
+    }
 
 
 BAD_SOURCE_PATTERNS = [
@@ -619,10 +887,35 @@ def extract_query_terms(text: str) -> list[str]:
 def rewrite_search_query(query: str) -> str:
     q = (query or "").strip()
     lowered = q.lower()
+    if ("北京时间" in q or "北京" in q or "beijing" in lowered) and any(word in q for word in ("几点", "时间", "现在", "当前", "日期", "几号")):
+        if "日期" in q or "几号" in q:
+            return "current date in Beijing China"
+        return "current Beijing time"
     if "gpt-5.5" in lowered:
-        return "OpenAI GPT-5.5 latest news"
-    if "openai" in lowered and ("最新" in q or "latest" in lowered or "news" in lowered):
-        return "OpenAI latest news"
+        if any(word in q for word in ("发布日期", "发布时间", "什么时候发布", "何时发布", "release date", "released")):
+            return "OpenAI GPT-5.5 release date official"
+        if any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
+            return "OpenAI GPT-5.5 latest news official"
+        return "OpenAI GPT-5.5 official"
+    if "claude code" in lowered:
+        if any(word in q for word in ("发布日期", "发布时间", "什么时候发布", "何时发布", "release date", "released")):
+            return "Claude Code release date Anthropic official"
+        if any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
+            return "Claude Code latest update Anthropic official"
+        return "Claude Code Anthropic official"
+    if "openai" in lowered and any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
+        return "OpenAI latest news official"
+    if "python" in lowered and re.search(r"3\.\d+", lowered):
+        version = re.search(r"3\.\d+", lowered).group(0)
+        if any(word in q for word in ("发布日期", "发布时间", "什么时候发布", "何时发布", "release date", "released")):
+            return f"Python {version} release date official site:python.org"
+        if any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
+            return f"Python {version} latest update official site:python.org"
+        return f"Python {version} official site:python.org"
+    if any(token in lowered for token in ("apple", "m4", "iphone", "ipad", "mac")) and any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
+        return "Apple latest news official site:apple.com"
+    if any(token in lowered for token in ("github", "github.com")) and any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
+        return "GitHub latest update official"
     return q
 
 
@@ -1127,7 +1420,249 @@ def plan_search_actions(
     }
     if heuristic["parse_links"]:
         heuristic["should_search"] = True
+
+    if api_base_url and api_auth_token:
+        try:
+            planner_text = call_direct_text_api(
+                build_search_planner_prompt(prompt, context_messages=context_messages),
+                api_base_url,
+                api_auth_token,
+                api_model=api_model or DEFAULT_MODEL,
+                max_tokens=260,
+                temperature=0,
+            )
+            planned = normalize_search_plan(
+                _extract_json_object(planner_text),
+                heuristic,
+                user_prompt=prompt,
+                context_messages=context_messages,
+            )
+            if heuristic.get("parse_links"):
+                planned["should_search"] = True
+                planned["parse_links"] = planned.get("parse_links") or heuristic.get("parse_links", [])
+            return _cache_set(PLANNER_CACHE, cache_key, planned, ttl_seconds=300)
+        except Exception:
+            pass
+
     return _cache_set(PLANNER_CACHE, cache_key, heuristic, ttl_seconds=300)
+
+
+def build_search_tool_call_prompt(user_prompt: str, context_messages=None, force: bool = False) -> str:
+    context = _recent_context_digest(context_messages=context_messages, max_messages=10, max_chars=2400)
+    candidate_query = build_contextual_search_query(user_prompt, context_messages=context_messages, max_chars=140)
+    force_rule = "本轮用户已经明确按下联网搜索按钮；除非没有任何可搜索对象，否则必须调用 web_search。" if force else "只有确实需要外部实时信息、事实核验、网页读取或用户明确要求搜索时，才调用 web_search。"
+    return (
+        "你现在处在工具调用决策阶段。你不能回答用户，只能决定是否调用搜索工具。\n"
+        "可用工具：\n"
+        "web_search({\"query\":\"搜索关键词\", \"read_urls\":[\"可选URL\"]})\n\n"
+        "决策规则：\n"
+        f"1. {force_rule}\n"
+        "2. 先理解用户真实需求，再构造 query；query 必须和用户问题一致，不能把问题改成另一个方向。\n"
+        "3. 如果用户使用“这个/它/他/上述/刚才/最新消息/查一下”等指代，必须从最近对话中补全真实主体。\n"
+        "4. 如果上下文不足以确定要搜索什么，输出 tool=none，不要猜。\n"
+        "5. query 要短、具体、可检索，保留专名、产品名、公司名、人名、版本号、地点、时间范围、比较对象。\n"
+        "6. 禁止输出“最新消息”“相关信息”“这个”“查一下”“搜索一下”等空泛 query。\n"
+        "7. 普通写作、翻译、数学、代码解释、总结用户已给内容，不调用搜索。\n"
+        "8. 只输出 JSON，不要解释。\n\n"
+        "输出格式二选一：\n"
+        "{\"tool\":\"web_search\",\"query\":\"准确搜索关键词\",\"read_urls\":[]}\n"
+        "{\"tool\":\"none\",\"query\":\"\",\"read_urls\":[]}\n\n"
+        f"后端候选 query，仅供校验，不要盲从：\n{candidate_query or '（无）'}\n\n"
+        f"最近对话：\n{context or '（无）'}\n\n"
+        f"用户最新问题：\n{user_prompt or ''}"
+    )
+
+
+def normalize_search_tool_call(raw_call: dict | None, fallback: dict, user_prompt: str = "", context_messages=None, force: bool = False) -> dict:
+    if not isinstance(raw_call, dict):
+        raw_call = {}
+
+    tool = str(raw_call.get("tool") or "").strip().lower()
+    raw_query = str(raw_call.get("query") or "").strip()
+    read_urls = raw_call.get("read_urls") or raw_call.get("urls") or []
+    parse_links = []
+    for item in read_urls:
+        url = normalize_source_url(str(item or ""))
+        if url and url not in parse_links:
+            parse_links.append(url)
+        if len(parse_links) >= 2:
+            break
+
+    query = _finalize_search_query(raw_query)
+    if _is_bad_search_query(query):
+        query = ""
+
+    should_search = tool == "web_search" or force or bool(parse_links)
+    if should_search and not query and fallback.get("search_queries"):
+        for item in fallback.get("search_queries") or []:
+            candidate = _finalize_search_query(str(item or ""))
+            if candidate and not _is_bad_search_query(candidate):
+                query = candidate[:140]
+                break
+    if should_search and not query and not parse_links:
+        candidate = build_contextual_search_query(user_prompt, context_messages=context_messages)
+        if candidate and not _is_bad_search_query(candidate):
+            query = candidate[:140]
+    if should_search and not query and not parse_links:
+        should_search = False
+
+    return {
+        "should_search": should_search,
+        "search_queries": [query] if query else [],
+        "parse_links": parse_links or fallback.get("parse_links", [])[:2],
+        "tool": "web_search" if should_search else "none",
+    }
+
+
+def build_source_selection_prompt(user_prompt: str, context_messages, sources: list[dict], plan: dict) -> str:
+    context = _recent_context_digest(context_messages=context_messages, max_messages=8, max_chars=1600)
+    compact_sources = []
+    for item in sources[:8]:
+        compact_sources.append({
+            "index": item.get("index"),
+            "title": item.get("title", ""),
+            "url": item.get("url", ""),
+            "excerpt": _trim_excerpt(item.get("excerpt", ""), 700),
+            "provider": item.get("provider", ""),
+            "query": item.get("query", ""),
+        })
+    return (
+        "你现在处在搜索结果筛选阶段。不要回答用户，只选择哪些来源值得给最终回答使用。\n"
+        "规则：\n"
+        "1. 只选择与用户真实问题直接相关的来源。\n"
+        "2. 优先官方、原始发布页、权威媒体、项目文档；降低论坛、搬运、商店页、SEO 页面权重。\n"
+        "3. 如果结果都不相关，selected_indices=[]。\n"
+        "4. 最多选择 4 个来源。\n"
+        "5. 只输出 JSON，不要解释。\n\n"
+        "输出格式：{\"selected_indices\":[1,2],\"reason\":\"一句很短的筛选依据\"}\n\n"
+        f"最近对话：\n{context or '（无）'}\n\n"
+        f"用户最新问题：\n{user_prompt or ''}\n\n"
+        f"本轮工具调用：{json.dumps({'tool': plan.get('tool', 'web_search'), 'queries': plan.get('search_queries', []), 'parse_links': plan.get('parse_links', [])}, ensure_ascii=False)}\n\n"
+        f"候选来源 JSON：\n{json.dumps(compact_sources, ensure_ascii=False)}"
+    )
+
+
+def select_sources_via_ai(user_prompt: str, context_messages, sources: list[dict], plan: dict, api_base_url: str, api_auth_token: str, api_model: str) -> list[dict]:
+    if not sources or not api_base_url or not api_auth_token:
+        return sources[:4]
+    try:
+        selector_text = call_direct_text_api(
+            build_source_selection_prompt(user_prompt, context_messages, sources, plan),
+            api_base_url,
+            api_auth_token,
+            api_model=api_model or DEFAULT_MODEL,
+            max_tokens=260,
+            temperature=0,
+        )
+        obj = _extract_json_object(selector_text) or {}
+        selected_indices = []
+        for item in obj.get("selected_indices") or []:
+            try:
+                idx = int(item)
+            except Exception:
+                continue
+            if idx not in selected_indices:
+                selected_indices.append(idx)
+        if not selected_indices:
+            return []
+        selected = [item for item in sources if int(item.get("index") or 0) in selected_indices]
+        return selected[:4] if selected else sources[:4]
+    except Exception:
+        return sources[:4]
+
+
+def build_search_tool_observation(user_prompt: str, sources: list[dict], plan: dict) -> str:
+    tool_call = {
+        "tool": "web_search",
+        "query": (plan.get("search_queries") or [""])[0],
+        "read_urls": plan.get("parse_links", []),
+    }
+    compact_sources = []
+    for item in sources:
+        compact_sources.append({
+            "index": item.get("index"),
+            "title": item.get("title", ""),
+            "url": item.get("url", ""),
+            "excerpt": _trim_excerpt(item.get("excerpt", ""), 1800),
+            "provider": item.get("provider", ""),
+            "query": item.get("query", ""),
+        })
+    return (
+        "以下是本轮 AI 自主调用搜索工具后的工具记录。最终回答必须由你自行筛选这些工具结果，不要机械复述。\n"
+        "如果工具结果不足以回答，就明确说搜索结果不足，不要编造。\n"
+        "引用来源时使用 [1]、[2] 这样的编号；不要引用没有使用的来源编号。\n\n"
+        f"assistant to=web_search:\n{json.dumps(tool_call, ensure_ascii=False)}\n\n"
+        f"tool web_search result:\n{json.dumps(compact_sources, ensure_ascii=False)}\n\n"
+        f"用户当前问题：\n{user_prompt or ''}"
+    )
+
+
+def run_search_tool_round(
+    user_prompt: str,
+    context_messages=None,
+    api_base_url: str = "",
+    api_auth_token: str = "",
+    api_model: str = DEFAULT_MODEL,
+    force: bool = False,
+    max_results: int = 4,
+) -> tuple[str, list[dict], dict]:
+    prompt = (user_prompt or "").strip()
+    urls = extract_urls_from_text(prompt, max_urls=4)
+    fallback_query = build_contextual_search_query(prompt, context_messages=context_messages)
+    fallback = {
+        "should_search": bool(force or looks_like_search_request(prompt) or urls),
+        "search_queries": [fallback_query] if fallback_query else [],
+        "parse_links": urls[:2],
+    }
+
+    raw_call = None
+    if api_base_url and api_auth_token:
+        try:
+            tool_text = call_direct_text_api(
+                build_search_tool_call_prompt(prompt, context_messages=context_messages, force=force),
+                api_base_url,
+                api_auth_token,
+                api_model=api_model or DEFAULT_MODEL,
+                max_tokens=260,
+                temperature=0,
+            )
+            raw_call = _extract_json_object(tool_text)
+        except Exception:
+            raw_call = None
+
+    plan = normalize_search_tool_call(raw_call, fallback, user_prompt=prompt, context_messages=context_messages, force=force)
+    if not plan.get("should_search") and not plan.get("parse_links"):
+        return "", [], plan
+
+    queries = [q for q in plan.get("search_queries", []) if q][:1]
+    sources = compile_search_sources_from_queries(
+        prompt,
+        queries,
+        parse_links=plan.get("parse_links", []),
+        max_results=max(6, max_results + 2),
+    )
+    sources = enrich_sources_with_page_content(
+        sources,
+        parse_links=plan.get("parse_links", []),
+        max_pages=2,
+        max_chars=2000,
+    )
+    for idx, item in enumerate(sources, 1):
+        item["index"] = idx
+
+    selected = select_sources_via_ai(
+        prompt,
+        context_messages,
+        sources,
+        plan,
+        api_base_url,
+        api_auth_token,
+        api_model,
+    )
+    for idx, item in enumerate(selected, 1):
+        item["index"] = idx
+    observation = build_search_tool_observation(prompt, selected, plan) if selected else build_search_tool_observation(prompt, [], plan)
+    return observation, selected, plan
 
 
 def compile_search_sources_from_queries(
@@ -1220,14 +1755,18 @@ def collect_search_sources_autonomous(
     api_auth_token: str = "",
     api_model: str = DEFAULT_MODEL,
     max_results: int = 4,
+    plan: dict | None = None,
 ) -> tuple[list[dict], dict]:
-    plan = plan_search_actions(
-        user_prompt,
-        context_messages=context_messages,
-        api_base_url=api_base_url,
-        api_auth_token=api_auth_token,
-        api_model=api_model,
-    )
+    if plan is None:
+        plan = plan_search_actions(
+            user_prompt,
+            context_messages=context_messages,
+            api_base_url=api_base_url,
+            api_auth_token=api_auth_token,
+            api_model=api_model,
+        )
+    if not plan.get("should_search") and not plan.get("parse_links"):
+        return [], plan
     queries = [q for q in plan.get("search_queries", []) if q][:1]
     if not queries and plan.get("should_search"):
         fallback_query = build_contextual_search_query(user_prompt, context_messages=context_messages)

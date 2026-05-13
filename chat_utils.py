@@ -165,10 +165,14 @@ def build_chat_prompt(
     messages = trim_context_messages(messages)
 
     parts = [
-        "基于下面最近的聊天上下文继续回答。",
+        "你正在同一个连续对话中回答用户。必须结合下面按时间顺序给出的最近聊天上下文，而不是只看最后一句。",
+        "如果用户当前问题包含“这个、那个、他、她、它、他们、上述、刚才、前面、你说的”等指代，先从聊天上下文中确定真实主体，再回答。",
+        "如果当前问题是在追问、比较、补充、让你继续、让你联网查某个上下文里的对象，你必须沿用上下文主题。",
+        "如果上下文不足以确定指代对象，请先简短说明不确定点，再给出你能确定的回答。",
         "请直接回答，不要重复角色标签。",
         r"如果涉及数学公式，请使用标准 LaTeX。独立公式必须用 $$...$$ 包裹，行内公式用 $...$。分式必须使用 \frac{分子}{分母}，不要使用 a/b 这种斜杠分式；平方根必须使用 \sqrt{}；推导公式尽量使用 align 环境。",
         "",
+        "最近聊天上下文：",
     ]
 
     for msg in messages:
@@ -193,7 +197,8 @@ def build_chat_prompt(
         parts.append("")
 
     if prompt.strip():
-        parts.append(f"用户: {prompt.strip()}")
+        parts.append("当前用户问题：")
+        parts.append(prompt.strip())
         parts.append("")
         parts.append("助手:")
 
