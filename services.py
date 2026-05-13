@@ -262,6 +262,11 @@ def resilient_urlopen(req, timeout=300):
     host = parsed.hostname or ""
     ips = resolve_hostname_resilient(host)
     last_exc = None
+    retryable_http_statuses = {
+        408, 425, 429,
+        500, 502, 503, 504,
+        520, 521, 522, 524, 525, 526,
+    }
 
     for attempt in range(3):
         try:
@@ -269,6 +274,25 @@ def resilient_urlopen(req, timeout=300):
                 with patched_getaddrinfo_for_host(host, ips):
                     return urllib.request.urlopen(req, timeout=timeout)
             return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            code = int(getattr(exc, "code", 0) or 0)
+            if code not in retryable_http_statuses or attempt >= 2:
+                raise
+            retry_after = 0
+            try:
+                header_value = exc.headers.get("Retry-After") if getattr(exc, "headers", None) else None
+                if header_value:
+                    retry_after = int(str(header_value).strip())
+            except Exception:
+                retry_after = 0
+            if retry_after <= 0:
+                if code in (520, 524):
+                    retry_after = 5 * (attempt + 1) * (attempt + 1)
+                else:
+                    retry_after = 1 + attempt * 2
+            time.sleep(max(1, min(retry_after, 30)))
+            continue
         except Exception as exc:
             last_exc = exc
             if not _is_dns_resolution_error(exc) or attempt >= 2:
@@ -1826,6 +1850,11 @@ def stream_direct_api_text(
     base_url = api_base_url.strip().rstrip("/")
     token = api_auth_token.strip()
     model = (api_model or DEFAULT_MODEL).strip()
+    retryable_http_statuses = {
+        408, 425, 429,
+        500, 502, 503, 504,
+        520, 521, 522, 524, 525, 526,
+    }
 
     if not base_url:
         yield "直连模式缺少 API URL"
@@ -1888,6 +1917,16 @@ def stream_direct_api_text(
 
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="ignore")
+            code = int(getattr(e, "code", 0) or 0)
+            if code in retryable_http_statuses:
+                yield (
+                    "\n[直连OpenAI流式接口失败]\n"
+                    f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
+                    f"请求地址: {url}\n"
+                    "上游返回临时错误，已建议稍后重试。\n"
+                    + (err or str(e))
+                )
+                return
             yield (
                 "\n[直连OpenAI流式接口失败]\n"
                 f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
@@ -1974,6 +2013,16 @@ def stream_direct_api_text(
 
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="ignore")
+        code = int(getattr(e, "code", 0) or 0)
+        if code in retryable_http_statuses:
+            yield (
+                "\n[直连Claude流式接口失败]\n"
+                f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
+                f"请求地址: {url}\n"
+                "上游返回临时错误，已建议稍后重试。\n"
+                + (err or str(e))
+            )
+            return
         yield (
             "\n[直连Claude流式接口失败]\n"
             f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
