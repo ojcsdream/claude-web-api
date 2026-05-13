@@ -337,14 +337,15 @@ logs/ngrok.log
 
 当前做法有两条线：
 
-- 先让模型判断是否需要搜索，并输出结构化 JSON
-- 再由后端对 query 做清洗、补全和改写
+- 先让模型判断是否需要搜索，并自由输出 1-4 个结构化搜索词
+- 后端只做轻量清洗和兜底，不强行把模型规划压成单一实体
 
 后端会做这些处理：
 
 - 去掉“查一下 / 搜一下 / 最新消息”这类空泛命令词
 - 把“这个 / 它 / 上述 / 刚才”之类的指代补成上下文主体
-- 对明显的实体问题做 query 模板化
+- 在模型没有给出可用 query 时，才对明显实体问题做兜底 query
+- 对比、评测、全方面比较类问题允许多个 query 覆盖双方和综合比较
 - 对过短、过泛、没有有效实体的 query 直接判定为无效
 
 例如：
@@ -353,6 +354,7 @@ logs/ngrok.log
 - `Python 3.13 什么时候发布` -> `Python 3.13 release date official site:python.org`
 - `Claude Code 最近更新` -> `Claude Code latest update Anthropic official`
 - `OpenAI GPT-5.5 的最新消息` -> `OpenAI GPT-5.5 latest news official`
+- `GPT-5.5 和 Claude Opus 4.7 全方面对比` -> 综合比较 query + 双方官方信息 query
 
 如果用户只说“帮我查一下”这种纯命令，但没有上下文主体，系统会宁可不搜，也不会乱猜。
 

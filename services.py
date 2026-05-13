@@ -674,6 +674,65 @@ def _query_intent_from_prompt(prompt: str) -> str:
     return value
 
 
+def _is_comparison_request(text: str) -> bool:
+    value = (text or "").lower()
+    return any(token in value for token in (
+        "对比", "比较", "相比", "区别", "差异", "优劣", "哪个更", "全方面", "全面",
+        "vs", " versus ", "compare", "comparison", "differences", "better",
+    ))
+
+
+def _contains_gpt55(text: str) -> bool:
+    return bool(re.search(r"gpt[-\s]?5\.5", (text or "").lower()))
+
+
+def _contains_claude_opus47(text: str) -> bool:
+    value = (text or "").lower()
+    return (
+        "opus4.7" in value
+        or "opus 4.7" in value
+        or "claude opus4.7" in value
+        or "claude opus 4.7" in value
+        or ("claude" in value and "opus" in value and "4.7" in value)
+    )
+
+
+def _comparison_search_queries(text: str) -> list[str]:
+    if not _is_comparison_request(text):
+        return []
+    queries = []
+    if _contains_gpt55(text) and _contains_claude_opus47(text):
+        queries.extend([
+            "GPT-5.5 Claude Opus 4.7 comprehensive comparison official specs",
+            "OpenAI GPT-5.5 official model details",
+            "Anthropic Claude Opus 4.7 official model details",
+        ])
+    return queries
+
+
+def _dedupe_queries(items, limit: int = 4) -> list[str]:
+    queries = []
+    for item in items or []:
+        q = _strip_leading_search_command_words(str(item or ""))
+        q = re.sub(r"\s+", " ", q).strip(" ，,。.!！?？")
+        if q and not _is_bad_search_query(q) and q not in queries:
+            queries.append(q[:180])
+        if len(queries) >= limit:
+            break
+    return queries
+
+
+def build_fallback_search_queries(user_prompt: str, context_messages=None, max_queries: int = 3) -> list[str]:
+    queries = []
+    for query in _comparison_search_queries(user_prompt):
+        if query and query not in queries:
+            queries.append(query)
+    contextual = build_contextual_search_query(user_prompt, context_messages=context_messages, max_chars=160)
+    if contextual and contextual not in queries:
+        queries.append(contextual)
+    return queries[:max(1, min(int(max_queries or 3), 4))]
+
+
 def _has_specific_search_entity(text: str) -> bool:
     value = (text or "").strip()
     if re.search(r"[A-Za-z][A-Za-z0-9.\-]{1,}", value):
@@ -735,6 +794,9 @@ def _context_specific_queries(context_messages=None, limit: int = 3) -> list[str
 
 def build_contextual_search_query(user_prompt: str, context_messages=None, max_chars: int = 120) -> str:
     prompt = (user_prompt or "").strip()
+    comparison_queries = _comparison_search_queries(prompt)
+    if comparison_queries:
+        return comparison_queries[0][:max_chars]
     cleaned_prompt = _strip_search_command_words(prompt)
     bare_command = _is_bare_search_command(prompt)
     context_candidates = _context_specific_queries(context_messages=context_messages, limit=3)
@@ -804,7 +866,7 @@ def build_search_planner_prompt(user_prompt: str, context_messages=None) -> str:
         "4. 搜索词要像真实搜索引擎查询：短、具体、可检索；保留专名、产品名、公司名、人名、版本号、地点、时间范围、用户指定的比较对象。\n"
         "5. 禁止只输出“最新消息”“相关信息”“这个”“搜索一下”“查一下”等空泛词，也禁止只复述命令词。\n"
         "6. 用户只是普通聊天、写作、解释代码、数学推导、翻译、总结已给内容时，不需要联网，should_search=false。\n"
-        "7. 最多给 2 个搜索词；优先 1 个高质量搜索词。\n"
+        "7. 可以给 1-4 个搜索词。比较、评测、全方面对比类问题，不要只搜其中一方，优先让 queries 覆盖双方和综合比较。\n"
         "8. 只输出 JSON，不要解释。\n"
         'JSON 格式：{"should_search":true,"search_queries":["准确关键词"],"parse_links":[]}\n\n'
         f"后端基于上下文得到的候选关键词，仅供校验，不要盲从：\n{heuristic_query or '（无）'}\n\n"
@@ -839,12 +901,13 @@ def normalize_search_plan(raw_plan: dict | None, fallback: dict, user_prompt: st
 
     queries = []
     for item in raw_plan.get("search_queries") or []:
-        q = _finalize_search_query(str(item or ""))
+        q = _strip_leading_search_command_words(str(item or ""))
+        q = re.sub(r"\s+", " ", q).strip(" ，,。.!！?？")
         if _is_bad_search_query(q):
             continue
         if q and q not in queries:
-            queries.append(q[:140])
-        if len(queries) >= 2:
+            queries.append(q[:180])
+        if len(queries) >= 4:
             break
 
     links = []
@@ -857,16 +920,12 @@ def normalize_search_plan(raw_plan: dict | None, fallback: dict, user_prompt: st
 
     should_search = bool(raw_plan.get("should_search")) or bool(queries) or bool(links)
     if not queries and fallback.get("search_queries"):
-        fallback_queries = []
-        for item in fallback.get("search_queries") or []:
-            q = _finalize_search_query(str(item or ""))
-            if q and not _is_bad_search_query(q) and q not in fallback_queries:
-                fallback_queries.append(q[:140])
-        queries = fallback_queries[:1]
+        queries = _dedupe_queries(fallback.get("search_queries") or [], limit=3)
     if should_search and not queries and not links:
-        fallback_query = build_contextual_search_query(user_prompt, context_messages=context_messages)
-        if fallback_query and not _is_bad_search_query(fallback_query):
-            queries = [fallback_query[:140]]
+        queries = _dedupe_queries(
+            build_fallback_search_queries(user_prompt, context_messages=context_messages, max_queries=3),
+            limit=3,
+        )
     if should_search and not queries and not links:
         should_search = False
 
@@ -1017,6 +1076,8 @@ def extract_query_terms(text: str) -> list[str]:
 def rewrite_search_query(query: str) -> str:
     q = (query or "").strip()
     lowered = q.lower()
+    if _is_comparison_request(q) or (_contains_gpt55(q) and _contains_claude_opus47(q)):
+        return re.sub(r"\bgpt\s?5\.5\b", "GPT-5.5", q, flags=re.I)
     if ("北京时间" in q or "北京" in q or "beijing" in lowered) and any(word in q for word in ("几点", "时间", "现在", "当前", "日期", "几号")):
         if "日期" in q or "几号" in q:
             return "current date in Beijing China"
@@ -1625,10 +1686,10 @@ def plan_search_actions(
         return cached
 
     urls = extract_urls_from_text(prompt, max_urls=4)
-    query = build_contextual_search_query(prompt, context_messages=context_messages)
+    fallback_queries = build_fallback_search_queries(prompt, context_messages=context_messages, max_queries=3)
     heuristic = {
         "should_search": bool(looks_like_search_request(prompt)),
-        "search_queries": [query] if query else [],
+        "search_queries": fallback_queries,
         "parse_links": urls[:2],
     }
     if heuristic["parse_links"]:
@@ -1662,25 +1723,27 @@ def plan_search_actions(
 
 def build_search_tool_call_prompt(user_prompt: str, context_messages=None, force: bool = False) -> str:
     context = _recent_context_digest(context_messages=context_messages, max_messages=10, max_chars=2400)
-    candidate_query = build_contextual_search_query(user_prompt, context_messages=context_messages, max_chars=140)
+    fallback_queries = build_fallback_search_queries(user_prompt, context_messages=context_messages, max_queries=3)
+    candidate_query = "\n".join(fallback_queries)
     force_rule = "本轮用户已经明确按下联网搜索按钮；除非没有任何可搜索对象，否则必须调用 web_search。" if force else "只有确实需要外部实时信息、事实核验、网页读取或用户明确要求搜索时，才调用 web_search。"
     return (
         "你现在处在工具调用决策阶段。你不能回答用户，只能决定是否调用搜索工具。\n"
         "可用工具：\n"
-        "web_search({\"query\":\"搜索关键词\", \"read_urls\":[\"可选URL\"]})\n\n"
+        "web_search({\"queries\":[\"搜索关键词1\",\"搜索关键词2\"], \"read_urls\":[\"可选URL\"]})\n\n"
         "决策规则：\n"
         f"1. {force_rule}\n"
         "2. 先理解用户真实需求，再构造 query；query 必须和用户问题一致，不能把问题改成另一个方向。\n"
         "3. 如果用户使用“这个/它/他/上述/刚才/最新消息/查一下”等指代，必须从最近对话中补全真实主体。\n"
         "4. 如果上下文不足以确定要搜索什么，输出 tool=none，不要猜。\n"
-        "5. query 要短、具体、可检索，保留专名、产品名、公司名、人名、版本号、地点、时间范围、比较对象。\n"
-        "6. 禁止输出“最新消息”“相关信息”“这个”“查一下”“搜索一下”等空泛 query。\n"
-        "7. 普通写作、翻译、数学、代码解释、总结用户已给内容，不调用搜索。\n"
-        "8. 只输出 JSON，不要解释。\n\n"
+        "5. queries 要短、具体、可检索，保留专名、产品名、公司名、人名、版本号、地点、时间范围、比较对象。\n"
+        "6. 对比/评测/全方面比较类问题，不要只搜索其中一方；你可以自由给 2-4 个 query 覆盖双方官方信息和综合比较。\n"
+        "7. 禁止输出“最新消息”“相关信息”“这个”“查一下”“搜索一下”等空泛 query。\n"
+        "8. 普通写作、翻译、数学、代码解释、总结用户已给内容，不调用搜索。\n"
+        "9. 只输出 JSON，不要解释。\n\n"
         "输出格式二选一：\n"
-        "{\"tool\":\"web_search\",\"query\":\"准确搜索关键词\",\"read_urls\":[]}\n"
+        "{\"tool\":\"web_search\",\"queries\":[\"准确搜索关键词\"],\"read_urls\":[]}\n"
         "{\"tool\":\"none\",\"query\":\"\",\"read_urls\":[]}\n\n"
-        f"后端候选 query，仅供校验，不要盲从：\n{candidate_query or '（无）'}\n\n"
+        f"后端候选 query，仅供兜底，不要被它限制：\n{candidate_query or '（无）'}\n\n"
         f"最近对话：\n{context or '（无）'}\n\n"
         f"用户最新问题：\n{user_prompt or ''}"
     )
@@ -1692,6 +1755,7 @@ def normalize_search_tool_call(raw_call: dict | None, fallback: dict, user_promp
 
     tool = str(raw_call.get("tool") or "").strip().lower()
     raw_query = str(raw_call.get("query") or "").strip()
+    raw_queries = raw_call.get("queries") or raw_call.get("search_queries") or []
     read_urls = raw_call.get("read_urls") or raw_call.get("urls") or []
     parse_links = []
     for item in read_urls:
@@ -1701,29 +1765,25 @@ def normalize_search_tool_call(raw_call: dict | None, fallback: dict, user_promp
         if len(parse_links) >= 2:
             break
 
-    query = _finalize_search_query(raw_query)
-    if _is_bad_search_query(query):
-        query = ""
+    queries = []
+    queries = _dedupe_queries(list(raw_queries or []) + ([raw_query] if raw_query else []), limit=4)
 
     should_search = tool == "web_search" or force or bool(parse_links)
     if not should_search and fallback.get("should_search") and fallback.get("search_queries"):
         should_search = True
-    if should_search and not query and fallback.get("search_queries"):
-        for item in fallback.get("search_queries") or []:
-            candidate = _finalize_search_query(str(item or ""))
-            if candidate and not _is_bad_search_query(candidate):
-                query = candidate[:140]
-                break
-    if should_search and not query and not parse_links:
-        candidate = build_contextual_search_query(user_prompt, context_messages=context_messages)
-        if candidate and not _is_bad_search_query(candidate):
-            query = candidate[:140]
-    if should_search and not query and not parse_links:
+    if should_search and not queries and fallback.get("search_queries"):
+        queries = _dedupe_queries(fallback.get("search_queries") or [], limit=3)
+    if should_search and not queries and not parse_links:
+        queries = _dedupe_queries(
+            build_fallback_search_queries(user_prompt, context_messages=context_messages, max_queries=3),
+            limit=3,
+        )
+    if should_search and not queries and not parse_links:
         should_search = False
 
     return {
         "should_search": should_search,
-        "search_queries": [query] if query else [],
+        "search_queries": queries[:4],
         "parse_links": parse_links or fallback.get("parse_links", [])[:2],
         "tool": "web_search" if should_search else "none",
     }
@@ -1791,7 +1851,7 @@ def select_sources_via_ai(user_prompt: str, context_messages, sources: list[dict
 def build_search_tool_observation(user_prompt: str, sources: list[dict], plan: dict) -> str:
     tool_call = {
         "tool": "web_search",
-        "query": (plan.get("search_queries") or [""])[0],
+        "queries": plan.get("search_queries") or [],
         "read_urls": plan.get("parse_links", []),
     }
     compact_sources = []
@@ -1827,10 +1887,10 @@ def run_search_tool_round(
 ) -> tuple[str, list[dict], dict]:
     prompt = (user_prompt or "").strip()
     urls = extract_urls_from_text(prompt, max_urls=4)
-    fallback_query = build_contextual_search_query(prompt, context_messages=context_messages)
+    fallback_queries = build_fallback_search_queries(prompt, context_messages=context_messages, max_queries=3)
     fallback = {
         "should_search": bool(force or looks_like_search_request(prompt) or urls),
-        "search_queries": [fallback_query] if fallback_query else [],
+        "search_queries": fallback_queries,
         "parse_links": urls[:2],
     }
 
@@ -1853,7 +1913,7 @@ def run_search_tool_round(
     if not plan.get("should_search") and not plan.get("parse_links"):
         return "", [], plan
 
-    queries = [q for q in plan.get("search_queries", []) if q][:1]
+    queries = [q for q in plan.get("search_queries", []) if q][:3]
     sources = compile_search_sources_from_queries(
         prompt,
         queries,
@@ -1894,7 +1954,8 @@ def compile_search_sources_from_queries(
     seen = set()
     links = parse_links or []
 
-    for query in search_queries[:1]:
+    per_query_limit = max(3, int(max_results or 4))
+    for query in search_queries[:3]:
         search_results = fetch_search_results(query, max_results=max(4, max_results))
         for item in search_results:
             href = normalize_source_url(item.get("url", ""))
@@ -1912,6 +1973,8 @@ def compile_search_sources_from_queries(
                 "quality": item.get("quality") or classify_source_quality(href, item.get("title", "")),
                 "query": query,
             })
+            if len([r for r in results if r.get("query") == query]) >= per_query_limit:
+                break
 
     for url in links[:2]:
         href = normalize_source_url(url)
