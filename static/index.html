@@ -2843,6 +2843,19 @@
     animation: welcomeComposerCardIn 0.68s 0.18s cubic-bezier(.2, .8, .2, 1) both;
   }
 
+  body.welcome-mode.has-files .composer {
+    top: calc(var(--welcome-hero-top) + var(--welcome-composer-offset) - 18px);
+  }
+
+  body.welcome-mode.has-files .composer-inner {
+    height: auto;
+    min-height: 190px;
+    max-height: min(360px, calc(100vh - var(--welcome-hero-top) - 42px));
+    overflow: visible;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
   body.welcome-mode .composer-inner:focus-within,
   body.welcome-mode .composer-inner:hover {
     border-color: rgba(255, 255, 255, 0.13);
@@ -2877,6 +2890,37 @@
     padding-left: 0;
   }
 
+  body.welcome-mode .file-info {
+    width: 100%;
+    max-height: 38px;
+    overflow-y: auto;
+    color: rgba(177, 196, 236, 0.92);
+    line-height: 1.35;
+    word-break: break-word;
+    padding-right: 4px;
+  }
+
+  body.welcome-mode .preview {
+    width: 100%;
+    max-height: 74px;
+    overflow-y: auto;
+    padding: 0;
+    flex: 0 0 auto;
+  }
+
+  body.welcome-mode .preview img {
+    width: 46px !important;
+    height: 46px !important;
+    max-width: 46px !important;
+    max-height: 46px !important;
+  }
+
+  body.welcome-mode .clear-files-btn {
+    align-self: flex-start;
+    margin: 0;
+    flex: 0 0 auto;
+  }
+
   body.welcome-mode .toolbar {
     position: relative;
     display: grid;
@@ -2886,6 +2930,7 @@
     padding: 0;
     gap: 8px;
     width: 100%;
+    flex: 0 0 auto;
   }
 
   body.welcome-mode .plus-btn {
@@ -3022,6 +3067,12 @@
       padding-right: 18px;
     }
 
+    body.welcome-mode.has-files .composer-inner {
+      min-height: 188px;
+      max-height: min(330px, calc(100vh - var(--welcome-hero-top) - 30px));
+      gap: 7px;
+    }
+
     body.welcome-mode .toolbar {
       grid-template-columns: 38px minmax(0, 1fr) 32px 32px;
       gap: 7px;
@@ -3149,6 +3200,24 @@
       max-height: 190px;
       padding: 26px 28px 20px;
       border-radius: 26px;
+    }
+
+    body.welcome-mode.has-files .composer-inner {
+      height: auto;
+      min-height: 230px;
+      max-height: min(430px, calc(100vh - var(--welcome-hero-top) - 60px));
+      gap: 10px;
+    }
+
+    body.welcome-mode .preview {
+      max-height: 96px;
+    }
+
+    body.welcome-mode .preview img {
+      width: 58px !important;
+      height: 58px !important;
+      max-width: 58px !important;
+      max-height: 58px !important;
     }
 
     body.welcome-mode textarea {
@@ -6322,6 +6391,7 @@
       fileInfo.textContent = "";
       preview.innerHTML = "";
       clearFilesBtn.style.display = "none";
+      document.body.classList.remove("has-files");
     }
 
     $("plusBtn").onkeydown = e => {
@@ -6339,6 +6409,7 @@
         return;
       }
 
+      document.body.classList.add("has-files");
       clearFilesBtn.style.display = "inline-block";
 
       fileInfo.textContent = "已选择 " + files.length + " 个文件：" + Array.from(files).map(f => f.name).join(", ");
