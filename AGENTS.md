@@ -43,6 +43,14 @@ https://kindling-shaft-creamer.ngrok-free.dev
 
 Do not use Cloudflare Tunnel as the default public entry unless the user explicitly asks for Cloudflare.
 
+Every default startup should also auto-enable the Termux monitor jobs by running:
+
+```bash
+./start-monitors.sh
+```
+
+This should register the keepalive job and the local/public health-check jobs if `termux-job-scheduler` is available.
+
 ## Runtime Monitoring And Termux Keepalive
 
 This project is intended to run on Termux/Android and can be killed by Android power management. Always check the runtime system before assuming the app code is broken.

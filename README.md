@@ -75,6 +75,7 @@ claude-web/
 ├── config.py           # 默认模型、路径、限制配置
 ├── requirements.txt    # Python 运行依赖
 ├── install.sh          # 一键安装脚本
+├── deploy.sh           # 一键安装、启动、健康检查和冒烟测试
 ├── start-local.sh      # 启动本地服务，并默认尝试打开公网入口
 ├── start-public.sh     # 公网入口启动脚本
 ├── static/
@@ -119,6 +120,18 @@ chmod +x install.sh start-local.sh
 - 尝试安装 `ngrok` 到 `~/.local/bin/ngrok`
 
 它不会替你写入 API Key，也不会复制历史数据库。
+
+### 一键部署与验证
+
+正式部署或升级后可以直接运行：
+
+```bash
+cd /home/ai/claude-web
+chmod +x deploy.sh
+./deploy.sh
+```
+
+`deploy.sh` 会安装依赖、做语法编译检查、启动本地服务和默认 ngrok 公网入口、启用 Termux 监控任务，并运行 `scripts/smoke_test.py` 验证健康检查、会话列表、全局关键词搜索、单会话关键词搜索和 Markdown 导出。
 
 ### 2. 配置联网搜索与网页提取
 
@@ -429,7 +442,10 @@ logs/ngrok.log
 
 ### 5. 会话与版本
 
-- 会话搜索
+- 会话标题搜索
+- 全局对话内容关键词搜索
+- 当前对话内关键词搜索
+- 搜索结果可直接跳转到命中消息并高亮关键词
 - 会话固定 / 取消固定
 - 新建、重命名、删除
 - Markdown 导出
@@ -571,6 +587,19 @@ http://127.0.0.1:8000/lite
 ```bash
 curl http://127.0.0.1:8000/api/health
 curl http://127.0.0.1:8000/api/conversations
+curl 'http://127.0.0.1:8000/api/search?q=Claude&limit=5'
+```
+
+发布前冒烟测试：
+
+```bash
+.venv/bin/python scripts/smoke_test.py http://127.0.0.1:8000
+```
+
+一键部署加验证：
+
+```bash
+./deploy.sh
 ```
 
 Git 提交前确认：

@@ -597,7 +597,9 @@ GENERIC_SEARCH_WORDS = {
     "这个", "这个事", "这件事", "这家公司", "这个公司", "这款", "这个模型", "该模型",
     "他", "她", "它", "他们", "它们", "其", "该", "上述", "前面", "刚才", "你说的",
     "最新", "最近", "新闻", "消息", "动态", "进展", "变化", "现在", "目前", "什么", "有什么",
+    "官方", "来源", "查证", "核验", "联网", "优先", "更新",
     "this", "that", "it", "they", "them", "above", "latest", "recent", "news", "updates", "current",
+    "official", "source", "sources", "verify",
 }
 
 
@@ -686,10 +688,10 @@ def _looks_context_dependent_search(prompt: str) -> bool:
         return False
     if _is_bare_search_command(value):
         return True
-    if _has_specific_search_entity(value):
-        return False
     if any(token in value for token in CONTEXTUAL_REFERENCE_PATTERNS):
         return True
+    if _has_specific_search_entity(value):
+        return False
     return bool(looks_like_search_request(value) and len(extract_query_terms(value)) <= 3)
 
 
@@ -736,13 +738,14 @@ def build_contextual_search_query(user_prompt: str, context_messages=None, max_c
     cleaned_prompt = _strip_search_command_words(prompt)
     bare_command = _is_bare_search_command(prompt)
     context_candidates = _context_specific_queries(context_messages=context_messages, limit=3)
+    context_dependent = _looks_context_dependent_search(prompt)
 
-    if _has_specific_search_entity(prompt) and not _is_bare_search_command(prompt):
+    if _has_specific_search_entity(prompt) and not context_dependent and not _is_bare_search_command(prompt):
         specific_prompt = _strip_leading_search_command_words(prompt)
         if specific_prompt:
             return _finalize_search_query(specific_prompt)[:max_chars]
 
-    if cleaned_prompt and not _looks_context_dependent_search(prompt):
+    if cleaned_prompt and not context_dependent:
         return _finalize_search_query(cleaned_prompt)[:max_chars]
 
     last_user = _latest_user_context(context_messages)
@@ -876,23 +879,54 @@ def normalize_search_plan(raw_plan: dict | None, fallback: dict, user_prompt: st
 
 BAD_SOURCE_PATTERNS = [
     "zhihu.com",
+    "quora.com",
+    "reddit.com",
+    "stackoverflow.com/questions",
+    "medium.com",
+    "dev.to",
+    "csdn.net",
+    "jianshu.com",
+    "cnblogs.com",
     "baidu.com/jingyan",
     "baijiahao.baidu.com",
     "tieba.baidu.com",
+    "weixin.qq.com",
+    "mp.weixin.qq.com",
     "microsoft.com/store",
     "apps.microsoft.com",
+    "softonic.com",
+    "alternativeto.net",
     "tomato",
     "fanqie",
     "小说",
     "smapply.org",
     "open-openai.com",
+    "claudelog.com",
+    "pressreader.com",
+    "newsbreak.com",
+    "benzinga.com/pressreleases",
 ]
 
 PREFERRED_SOURCE_PATTERNS = [
     "openai.com",
     "help.openai.com",
     "platform.openai.com",
+    "anthropic.com",
+    "docs.anthropic.com",
+    "python.org",
+    "docs.python.org",
+    "developer.apple.com",
+    "apple.com/newsroom",
+    "microsoft.com/en-us/research",
+    "learn.microsoft.com",
+    "developers.google.com",
+    "cloud.google.com/docs",
+    "aws.amazon.com/blogs",
+    "docs.aws.amazon.com",
     "github.com/openai",
+    "github.com/anthropics",
+    "github.com/python",
+    "github.com/",
     "techcrunch.com",
     "theverge.com",
     "reuters.com",
@@ -904,6 +938,64 @@ PREFERRED_SOURCE_PATTERNS = [
     "wired.com",
     "arstechnica.com",
 ]
+
+OFFICIAL_DOC_PATTERNS = [
+    "/docs",
+    "docs.",
+    "documentation",
+    "developer.",
+    "developers.",
+    "learn.",
+    "help.",
+    "support.",
+]
+
+ORIGINAL_RELEASE_PATTERNS = [
+    "/blog/",
+    "/news/",
+    "/newsroom/",
+    "/press/",
+    "/releases/",
+    "/release",
+    "/changelog",
+    "/announcements/",
+]
+
+AUTHORITY_MEDIA_DOMAINS = [
+    "reuters.com",
+    "apnews.com",
+    "bloomberg.com",
+    "wsj.com",
+    "ft.com",
+    "theverge.com",
+    "techcrunch.com",
+    "arstechnica.com",
+    "wired.com",
+    "cnbc.com",
+]
+
+
+def _source_url_parts(url: str) -> tuple[str, str]:
+    parsed = urlparse(url or "")
+    return (parsed.netloc.lower().replace("www.", ""), parsed.path.lower())
+
+
+def classify_source_quality(url: str, title: str = "") -> str:
+    host, path = _source_url_parts(url)
+    haystack = f"{host}{path} {(title or '').lower()}"
+    if "github.com/" in haystack and len([p for p in path.split("/") if p]) >= 2:
+        return "project_repo"
+    if host.endswith(("openai.com", "anthropic.com")) and path.startswith("/index/"):
+        return "original_release"
+    if any(pattern in haystack for pattern in OFFICIAL_DOC_PATTERNS):
+        return "official_docs"
+    if any(pattern in haystack for pattern in ORIGINAL_RELEASE_PATTERNS):
+        return "original_release"
+    if any(host.endswith(domain) for domain in AUTHORITY_MEDIA_DOMAINS):
+        return "authority_media"
+    if any(pattern in haystack for pattern in BAD_SOURCE_PATTERNS):
+        return "low_quality"
+    return "general"
 
 
 def extract_query_terms(text: str) -> list[str]:
@@ -960,11 +1052,23 @@ def rewrite_search_query(query: str) -> str:
 def source_relevance_score(query: str, title: str, url: str, excerpt: str = "") -> int:
     haystack = " ".join([title or "", url or "", excerpt or ""]).lower()
     score = 0
+    rewritten_query = rewrite_search_query(query)
+    lowered_query = rewritten_query.lower()
     query_terms = extract_query_terms(rewrite_search_query(query))
 
     for term in query_terms:
       if term in haystack:
           score += 6
+
+    important_phrases = [
+        "claude code",
+        "gpt-5.5",
+        "openai gpt-5.5",
+        "python 3.",
+    ]
+    for phrase in important_phrases:
+        if phrase in lowered_query and phrase not in haystack:
+            score -= 35
 
     for pattern in PREFERRED_SOURCE_PATTERNS:
         if pattern in (url or "").lower():
@@ -973,6 +1077,18 @@ def source_relevance_score(query: str, title: str, url: str, excerpt: str = "") 
     for pattern in BAD_SOURCE_PATTERNS:
         if pattern in (url or "").lower() or pattern in (title or "").lower():
             score -= 18
+
+    quality = classify_source_quality(url, title)
+    if quality == "official_docs":
+        score += 28
+    elif quality == "original_release":
+        score += 24
+    elif quality == "project_repo":
+        score += 22
+    elif quality == "authority_media":
+        score += 16
+    elif quality == "low_quality":
+        score -= 24
 
     if "openai" in haystack:
         score += 5
@@ -1058,6 +1174,7 @@ def fetch_tavily_search_results(query: str, max_results: int = 5) -> list[dict]:
             "description": excerpt,
             "score": score,
             "provider": "tavily",
+            "quality": classify_source_quality(href, title),
         })
     cleaned.sort(key=lambda x: x.get("score", 0), reverse=True)
     return cleaned[:max_results]
@@ -1104,6 +1221,7 @@ def fetch_serpapi_search_results(query: str, max_results: int = 5) -> list[dict]
             "description": excerpt,
             "score": source_relevance_score(q, title, href, excerpt) + 14,
             "provider": "serpapi",
+            "quality": classify_source_quality(href, title),
         })
         if len(cleaned) >= max_results:
             break
@@ -1144,6 +1262,7 @@ def select_balanced_sources(results: list[dict], max_results: int) -> list[dict]
         key=lambda x: x.get("score", source_relevance_score("", x.get("title", ""), x.get("url", ""), x.get("excerpt", ""))),
         reverse=True,
     )
+    best_score = sorted_results[0].get("score", 0)
 
     selected = []
     selected_urls = set()
@@ -1154,6 +1273,8 @@ def select_balanced_sources(results: list[dict], max_results: int) -> list[dict]
         for item in sorted_results:
             url = item.get("url", "")
             if not url or url in selected_urls:
+                continue
+            if item.get("score", 0) < max(1, best_score - 28):
                 continue
             if predicate(item):
                 selected.append(item)
@@ -1302,6 +1423,7 @@ def collect_search_sources(user_prompt: str, max_results: int = 4, context_messa
             "excerpt": excerpt,
             "score": score,
             "provider": item.get("provider", ""),
+            "quality": item.get("quality") or classify_source_quality(item.get("url", ""), item.get("title", "")),
             "query": search_query,
         })
 
@@ -1314,6 +1436,7 @@ def collect_search_sources(user_prompt: str, max_results: int = 4, context_messa
             "url": item.get("url", ""),
             "excerpt": item.get("excerpt", ""),
             "provider": item.get("provider", ""),
+            "quality": item.get("quality") or classify_source_quality(item.get("url", ""), item.get("title", "")),
             "query": item.get("query", ""),
         })
     return final
@@ -1342,11 +1465,21 @@ def _extract_json_object(text: str) -> dict | None:
     return None
 
 
+def _split_system_prompt(system_prompt: str) -> str:
+    value = (system_prompt or "").strip()
+    if not value:
+        return ""
+    value = re.sub(r"^\s*系统提示词：\s*\n?", "", value)
+    value = re.sub(r"\n\s*请在整个回复中遵守上面的系统提示词。\s*$", "", value)
+    return value.strip()
+
+
 def call_direct_text_api(
     prompt: str,
     api_base_url: str,
     api_auth_token: str,
     api_model: str = DEFAULT_MODEL,
+    system_prompt: str = "",
     max_tokens: int = 900,
     temperature: float = 0.1,
 ) -> str:
@@ -1365,46 +1498,27 @@ def call_direct_text_api(
     lower_model = model.lower()
 
     if lower_model.startswith("gpt") or "gpt-" in lower_model:
-        url = build_api_url(base_url, "/v1/chat/completions")
-        body = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False,
-        }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": "Bearer " + token,
-                "User-Agent": "Mozilla/5.0 Claude-Web/1.0",
-            },
-            method="POST",
+        return call_direct_chat_completions_text(
+            prompt,
+            base_url,
+            token,
+            api_model=model,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
-        try:
-            with resilient_urlopen(req, timeout=120) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            if isinstance(content, list):
-                parts = []
-                for item in content:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        parts.append(item.get("text", ""))
-                return "\n".join(parts).strip()
-            return str(content or "").strip()
-        except urllib.error.HTTPError as e:
-            err = e.read().decode("utf-8", errors="ignore")
-            raise RuntimeError("OpenAI接口失败: " + (err or str(e)))
 
     url = build_api_url(base_url, "/v1/messages")
+    messages = []
+    system_text = _split_system_prompt(system_prompt)
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
+    messages.append({"role": "user", "content": prompt})
     body = {
         "model": model,
         "max_tokens": max_tokens,
         "temperature": temperature,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "stream": False,
     }
     req = urllib.request.Request(
@@ -1431,6 +1545,67 @@ def call_direct_text_api(
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="ignore")
         raise RuntimeError("Anthropic接口失败: " + (err or str(e)))
+
+
+def call_direct_chat_completions_text(
+    prompt: str,
+    api_base_url: str,
+    api_auth_token: str,
+    api_model: str = DEFAULT_MODEL,
+    system_prompt: str = "",
+    max_tokens: int = 900,
+    temperature: float = 0.1,
+) -> str:
+    import urllib.request
+    import urllib.error
+
+    base_url = (api_base_url or "").strip().rstrip("/")
+    token = (api_auth_token or "").strip()
+    model = (api_model or DEFAULT_MODEL).strip()
+
+    if not base_url:
+        raise RuntimeError("缺少 API URL")
+    if not token:
+        raise RuntimeError("缺少 API Key")
+
+    url = build_api_url(base_url, "/v1/chat/completions")
+    messages = []
+    system_text = _split_system_prompt(system_prompt)
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
+    messages.append({"role": "user", "content": prompt})
+    body = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": "Bearer " + token,
+            "User-Agent": "Mozilla/5.0 Claude-Web/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with resilient_urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(item.get("text", ""))
+            return "\n".join(parts).strip()
+        return str(content or "").strip()
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="ignore")
+        raise RuntimeError("OpenAI接口失败: " + (err or str(e)))
 
 
 def plan_search_actions(
@@ -1531,6 +1706,8 @@ def normalize_search_tool_call(raw_call: dict | None, fallback: dict, user_promp
         query = ""
 
     should_search = tool == "web_search" or force or bool(parse_links)
+    if not should_search and fallback.get("should_search") and fallback.get("search_queries"):
+        should_search = True
     if should_search and not query and fallback.get("search_queries"):
         for item in fallback.get("search_queries") or []:
             candidate = _finalize_search_query(str(item or ""))
@@ -1562,16 +1739,18 @@ def build_source_selection_prompt(user_prompt: str, context_messages, sources: l
             "url": item.get("url", ""),
             "excerpt": _trim_excerpt(item.get("excerpt", ""), 700),
             "provider": item.get("provider", ""),
+            "quality": item.get("quality") or classify_source_quality(item.get("url", ""), item.get("title", "")),
             "query": item.get("query", ""),
         })
     return (
         "你现在处在搜索结果筛选阶段。不要回答用户，只选择哪些来源值得给最终回答使用。\n"
         "规则：\n"
         "1. 只选择与用户真实问题直接相关的来源。\n"
-        "2. 优先官方、原始发布页、权威媒体、项目文档；降低论坛、搬运、商店页、SEO 页面权重。\n"
-        "3. 如果结果都不相关，selected_indices=[]。\n"
-        "4. 最多选择 4 个来源。\n"
-        "5. 只输出 JSON，不要解释。\n\n"
+        "2. 来源优先级：官方文档 > 原始发布页 > 项目仓库 > 权威媒体 > 普通网页。\n"
+        "3. 明显论坛搬运、SEO 冗余页、二次转载、内容农场、应用商店聚合页要降权；除非没有更好来源，否则不要选。\n"
+        "4. 如果结果都不相关，selected_indices=[]。\n"
+        "5. 最多选择 4 个来源。\n"
+        "6. 只输出 JSON，不要解释。\n\n"
         "输出格式：{\"selected_indices\":[1,2],\"reason\":\"一句很短的筛选依据\"}\n\n"
         f"最近对话：\n{context or '（无）'}\n\n"
         f"用户最新问题：\n{user_prompt or ''}\n\n"
@@ -1623,11 +1802,13 @@ def build_search_tool_observation(user_prompt: str, sources: list[dict], plan: d
             "url": item.get("url", ""),
             "excerpt": _trim_excerpt(item.get("excerpt", ""), 1800),
             "provider": item.get("provider", ""),
+            "quality": item.get("quality") or classify_source_quality(item.get("url", ""), item.get("title", "")),
             "query": item.get("query", ""),
         })
     return (
         "以下是本轮 AI 自主调用搜索工具后的工具记录。最终回答必须由你自行筛选这些工具结果，不要机械复述。\n"
-        "如果工具结果不足以回答，就明确说搜索结果不足，不要编造。\n"
+        "如果工具结果不足以回答，就明确说本次后端联网搜索没有找到足够可靠的来源，不要编造。\n"
+        "回答时不得说“我不能联网”“我无法实时搜索”“截至我可用信息范围”等模板话；后端已经完成了本轮工具决策/检索流程。\n"
         "引用来源时使用 [1]、[2] 这样的编号；不要引用没有使用的来源编号。\n\n"
         f"assistant to=web_search:\n{json.dumps(tool_call, ensure_ascii=False)}\n\n"
         f"tool web_search result:\n{json.dumps(compact_sources, ensure_ascii=False)}\n\n"
@@ -1728,6 +1909,7 @@ def compile_search_sources_from_queries(
                 "excerpt": excerpt,
                 "score": score,
                 "provider": item.get("provider", ""),
+                "quality": item.get("quality") or classify_source_quality(href, item.get("title", "")),
                 "query": query,
             })
 
@@ -1742,6 +1924,7 @@ def compile_search_sources_from_queries(
             "excerpt": "",
             "score": source_relevance_score(user_prompt, "", href, "") + 16,
             "provider": "direct-link",
+            "quality": classify_source_quality(href, ""),
             "query": "",
         })
 
@@ -1754,6 +1937,7 @@ def compile_search_sources_from_queries(
             "url": item.get("url", ""),
             "excerpt": _trim_excerpt(item.get("excerpt", ""), 2200),
             "provider": item.get("provider", ""),
+            "quality": item.get("quality") or classify_source_quality(item.get("url", ""), item.get("title", "")),
             "query": item.get("query", ""),
         })
     return final
@@ -1851,6 +2035,7 @@ def stream_direct_api_text(
     api_base_url: str,
     api_auth_token: str,
     api_model: str = DEFAULT_MODEL,
+    system_prompt: str = "",
 ):
     """
     第三方 API 直连真流式。
@@ -1877,11 +2062,14 @@ def stream_direct_api_text(
     # OpenAI-compatible / GPT-compatible
     if lower_model.startswith("gpt") or "gpt-" in lower_model:
         url = build_api_url(base_url, "/v1/chat/completions")
+        system_text = _split_system_prompt(system_prompt)
+        messages = []
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
+        messages.append({"role": "user", "content": prompt})
         body = {
             "model": model,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
+            "messages": messages,
             "temperature": MODEL_TEMPERATURE,
             "stream": True,
         }
@@ -1940,6 +2128,7 @@ def stream_direct_api_text(
                         api_base_url,
                         api_auth_token,
                         api_model=api_model,
+                        system_prompt=system_prompt,
                         max_tokens=4096,
                         temperature=MODEL_TEMPERATURE,
                     )
@@ -1961,18 +2150,20 @@ def stream_direct_api_text(
                 + str(e)
                 + hint
             )
-
         return
 
     # Anthropic-compatible / Claude-compatible
     url = build_api_url(base_url, "/v1/messages")
+    messages = []
+    system_text = _split_system_prompt(system_prompt)
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
+    messages.append({"role": "user", "content": prompt})
     body = {
         "model": model,
         "max_tokens": 4096,
         "temperature": MODEL_TEMPERATURE,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
+        "messages": messages,
         "stream": True,
     }
     headers = {
@@ -2041,6 +2232,7 @@ def stream_direct_api_text(
                     api_base_url,
                     api_auth_token,
                     api_model=api_model,
+                    system_prompt=system_prompt,
                     max_tokens=4096,
                     temperature=MODEL_TEMPERATURE,
                 )
@@ -2071,6 +2263,7 @@ def stream_direct_and_save(
     api_auth_token: str,
     api_model: str,
     provider_name: str = "",
+    system_prompt: str = "",
     sources: str = "",
 ):
     full = ""
@@ -2079,6 +2272,7 @@ def stream_direct_and_save(
         api_base_url,
         api_auth_token,
         api_model,
+        system_prompt,
     ):
         full += chunk
         yield chunk
@@ -2104,6 +2298,7 @@ def stream_direct_vision_and_save(
     api_auth_token: str,
     api_model: str,
     provider_name: str = "",
+    system_prompt: str = "",
 ):
     """
     流式视觉 API 调用：先调用同步视觉 API，然后分块 yield 输出，模拟流式效果
@@ -2115,6 +2310,7 @@ def stream_direct_vision_and_save(
             api_base_url,
             api_auth_token,
             api_model,
+            system_prompt=system_prompt,
         )
 
         # 分块输出，模拟流式效果
@@ -2197,6 +2393,7 @@ def stream_direct_vision_api_text(
     api_base_url: str,
     api_auth_token: str,
     api_model: str,
+    system_prompt: str = "",
 ):
     import urllib.request
     import urllib.error
@@ -2213,18 +2410,18 @@ def stream_direct_vision_api_text(
         return
 
     openai_content, anthropic_content = build_vision_payload_parts(prompt, image_local_paths)
+    system_text = _split_system_prompt(system_prompt)
     lower_model = model.lower()
 
     if lower_model.startswith("gpt") or "gpt-" in lower_model:
         url = build_api_url(base_url, "/v1/chat/completions")
+        messages = []
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
+        messages.append({"role": "user", "content": openai_content})
         body = {
             "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": openai_content,
-                }
-            ],
+            "messages": messages,
             "temperature": MODEL_TEMPERATURE,
             "stream": True,
         }
@@ -2263,16 +2460,15 @@ def stream_direct_vision_api_text(
         return
 
     url = build_api_url(base_url, "/v1/messages")
+    messages = []
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
+    messages.append({"role": "user", "content": anthropic_content})
     body = {
         "model": model,
         "max_tokens": 4096,
         "temperature": MODEL_TEMPERATURE,
-        "messages": [
-            {
-                "role": "user",
-                "content": anthropic_content,
-            }
-        ],
+        "messages": messages,
         "stream": True,
     }
     req = urllib.request.Request(
@@ -2341,6 +2537,7 @@ def call_direct_vision_api(
     api_base_url: str,
     api_auth_token: str,
     api_model: str,
+    system_prompt: str = "",
 ) -> str:
     """
     真正把图片作为 base64 视觉输入发给 API。
@@ -2360,19 +2557,19 @@ def call_direct_vision_api(
     if not token:
         raise RuntimeError("缺少 API Key")
     openai_content, anthropic_content = build_vision_payload_parts(prompt, image_local_paths)
+    system_text = _split_system_prompt(system_prompt)
 
     lower_model = model.lower()
 
     # GPT / OpenAI compatible
     if lower_model.startswith("gpt") or "gpt-" in lower_model:
+        messages = []
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
+        messages.append({"role": "user", "content": openai_content})
         body = {
             "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": openai_content
-                }
-            ],
+            "messages": messages,
             "temperature": MODEL_TEMPERATURE
         }
 
@@ -2404,16 +2601,15 @@ def call_direct_vision_api(
             raise RuntimeError("OpenAI视觉接口失败: " + (err or str(e)))
 
     # Anthropic compatible
+    messages = []
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
+    messages.append({"role": "user", "content": anthropic_content})
     body = {
         "model": model,
         "max_tokens": 4096,
         "temperature": MODEL_TEMPERATURE,
-        "messages": [
-            {
-                "role": "user",
-                "content": anthropic_content,
-            }
-        ]
+        "messages": messages
     }
 
     url = base_url + "/v1/messages"

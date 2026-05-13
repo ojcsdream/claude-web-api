@@ -156,6 +156,145 @@
       display: none;
     }
 
+    .top-search-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.018)),
+        rgba(255,255,255,0.035);
+      color: #e9e2d6;
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .top-search-btn.active {
+      background: rgba(232, 220, 200, 0.16);
+      border-color: rgba(232, 220, 200, 0.30);
+      color: #fff4df;
+    }
+
+    .conversation-search-panel {
+      position: fixed;
+      top: 76px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 24;
+      width: min(760px, calc(100vw - 28px));
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.09);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.025)),
+        rgba(29, 28, 25, 0.88);
+      -webkit-backdrop-filter: blur(18px) saturate(1.06);
+      backdrop-filter: blur(18px) saturate(1.06);
+      box-shadow: 0 18px 46px rgba(0,0,0,0.34);
+      padding: 10px;
+    }
+
+    .conversation-search-panel[hidden] {
+      display: none;
+    }
+
+    .conversation-search-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .conversation-search-input,
+    .content-search-input {
+      width: 100%;
+      height: 38px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(0,0,0,0.18);
+      color: #f0ece3;
+      padding: 0 11px;
+      outline: none;
+      font-size: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .conversation-search-close {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      color: #d8d3c8;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .search-results {
+      margin-top: 9px;
+      max-height: min(48vh, 420px);
+      overflow-y: auto;
+    }
+
+    .content-search-results {
+      max-height: 260px;
+      overflow-y: auto;
+      margin-top: 8px;
+    }
+
+    .search-result-item {
+      width: 100%;
+      border: 1px solid rgba(255,255,255,0.065);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.03);
+      color: #eee8dc;
+      text-align: left;
+      padding: 9px 10px;
+      margin-bottom: 7px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .search-result-item:hover {
+      background: rgba(255,255,255,0.055);
+      border-color: rgba(255,255,255,0.11);
+    }
+
+    .search-result-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: #fff5e6;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .search-result-meta {
+      flex: 0 0 auto;
+      color: #9d9588;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .search-result-snippet {
+      margin-top: 5px;
+      color: #cfc7b9;
+      font-size: 13px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+
+    .search-result-snippet mark,
+    .search-hit-mark {
+      border-radius: 4px;
+      background: rgba(238, 211, 147, 0.28);
+      color: #fff0c8;
+      padding: 0 2px;
+    }
+
+    .msg-wrap.search-jump-highlight .bubble {
+      outline: 2px solid rgba(238, 211, 147, 0.55);
+      box-shadow: 0 0 0 6px rgba(238, 211, 147, 0.08);
+    }
+
     .wrap {
       max-width: 820px;
       margin: 0 auto;
@@ -1483,6 +1622,12 @@
 
     .session-search:focus {
       border-color: rgba(238, 221, 190, 0.38);
+    }
+
+    .content-search-box {
+      display: grid;
+      gap: 7px;
+      margin: 10px 0 9px;
     }
 
     .session-row {
@@ -3061,6 +3206,7 @@
       </svg>
     </button>
     <div id="topTitle" class="title">Claude Web</div>
+    <button id="conversationSearchToggle" class="top-search-btn" type="button" aria-label="搜索当前对话" title="搜索当前对话">⌕</button>
     <button id="shareBtn" class="share-btn" aria-label="导出对话">
       <span class="share-label">Share</span>
       <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
@@ -3072,6 +3218,14 @@
   </div>
 
   <div id="drawerOverlay" class="drawer-overlay"></div>
+
+  <div id="conversationSearchPanel" class="conversation-search-panel" hidden>
+    <div class="conversation-search-row">
+      <input id="conversationSearchInput" class="conversation-search-input" placeholder="搜索当前对话内容" />
+      <button id="conversationSearchClose" class="conversation-search-close" type="button" aria-label="关闭搜索">×</button>
+    </div>
+    <div id="conversationSearchResults" class="search-results"></div>
+  </div>
 
   <aside id="drawer" class="drawer">
     <div class="drawer-head">
@@ -3087,6 +3241,10 @@
       <div class="session-tools">
         <input id="sessionSearch" class="session-search" placeholder="搜索对话" />
         <button id="newConvBtn" class="drawer-btn new-conv-icon" title="新对话">+</button>
+      </div>
+      <div class="content-search-box">
+        <input id="globalContentSearch" class="content-search-input" placeholder="全局搜索对话内容" />
+        <div id="globalContentSearchResults" class="content-search-results"></div>
       </div>
       <div id="sessionList" class="session-list"></div>
     </div>
@@ -3220,12 +3378,19 @@
 
     const chatList = $("chatList");
     const topTitle = $("topTitle");
+    const conversationSearchToggle = $("conversationSearchToggle");
+    const conversationSearchPanel = $("conversationSearchPanel");
+    const conversationSearchInput = $("conversationSearchInput");
+    const conversationSearchClose = $("conversationSearchClose");
+    const conversationSearchResults = $("conversationSearchResults");
 
     const drawer = $("drawer");
     const overlay = $("drawerOverlay");
 
     const sessionList = $("sessionList");
     const sessionSearch = $("sessionSearch");
+    const globalContentSearch = $("globalContentSearch");
+    const globalContentSearchResults = $("globalContentSearchResults");
     const profileSelect = $("profileSelect");
 
     const profileName = $("profileName");
@@ -3281,6 +3446,8 @@
     let lastRenderedMsgKey = "";
     let webSearchEnabled = false;
     let activeStreamController = null;
+    let pendingJumpMessageId = "";
+    let pendingSearchKeyword = "";
     const collapsedMessageKeys = new Set();
     const longMessageKeys = new Set();
     let activeCodePreview = null;
@@ -3359,6 +3526,45 @@
       const d = document.createElement("div");
       d.textContent = t || "";
       return d.innerHTML;
+    }
+
+    function escapeRegExp(text) {
+      return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function highlightKeywordHtml(text, keyword) {
+      const safe = escapeHtml(text || "");
+      const kw = (keyword || "").trim();
+      if (!kw) return safe;
+      try {
+        return safe.replace(new RegExp("(" + escapeRegExp(kw) + ")", "ig"), '<mark>$1</mark>');
+      } catch (_) {
+        return safe;
+      }
+    }
+
+    function roleLabel(role) {
+      if (role === "assistant") return "助手";
+      if (role === "user") return "用户";
+      return role || "消息";
+    }
+
+    function fieldLabel(field) {
+      const map = {
+        content: "正文",
+        title: "标题",
+        file_name: "附件",
+        file_context: "文件内容"
+      };
+      return map[field] || "正文";
+    }
+
+    function debounceSearch(fn, delay = 260) {
+      let timer = null;
+      return (...args) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
+      };
     }
 
     async function api(method, url, body, form = false) {
@@ -4140,6 +4346,40 @@
       return restoreMarkdownMath(escapeHtml(protectedMath.text).replace(/\n/g, "<br>"), protectedMath.blocks);
     }
 
+    function markSearchHits(root, keyword) {
+      const kw = (keyword || "").trim();
+      if (!root || !kw) return;
+      const pattern = new RegExp(escapeRegExp(kw), "ig");
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+          if (!parent || /^(SCRIPT|STYLE|TEXTAREA|INPUT|CODE|PRE|MARK)$/i.test(parent.tagName)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return pattern.test(node.nodeValue || "") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+        }
+      });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(node => {
+        const text = node.nodeValue || "";
+        pattern.lastIndex = 0;
+        const frag = document.createDocumentFragment();
+        let last = 0;
+        let match;
+        while ((match = pattern.exec(text))) {
+          if (match.index > last) frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+          const mark = document.createElement("mark");
+          mark.className = "search-hit-mark";
+          mark.textContent = match[0];
+          frag.appendChild(mark);
+          last = match.index + match[0].length;
+        }
+        if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      });
+    }
+
     function parseMessageSources(value) {
       if (!value) return [];
       if (Array.isArray(value)) return value;
@@ -4710,6 +4950,10 @@
         }
 
         bubble.innerHTML = html || " ";
+      }
+
+      if (pendingSearchKeyword && getMessageId(msg) === String(pendingJumpMessageId || "")) {
+        markSearchHits(bubble, pendingSearchKeyword);
       }
 
       row.appendChild(bubble);
@@ -5285,6 +5529,115 @@
       } catch (e) {
         showLoadError(e.message || String(e));
       }
+    }
+
+    function renderSearchResults(container, results, keyword, mode) {
+      if (!container) return;
+      const query = (keyword || "").trim();
+      if (!query) {
+        container.innerHTML = "";
+        return;
+      }
+      if (!results || !results.length) {
+        container.innerHTML = '<div class="session-empty">没有匹配内容</div>';
+        return;
+      }
+      container.innerHTML = "";
+      results.forEach(item => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "search-result-item";
+        btn.dataset.conversationId = item.conversation_id || "";
+        btn.dataset.messageId = item.message_id || "";
+        btn.dataset.keyword = query;
+        const title = item.conversation_title || "新对话";
+        const meta = roleLabel(item.role) + " · " + fieldLabel(item.matched_field);
+        btn.innerHTML =
+          '<div class="search-result-title">' +
+            '<span>' + escapeHtml(mode === "global" ? title : meta) + '</span>' +
+            '<span class="search-result-meta">' + escapeHtml(mode === "global" ? meta : ("#" + (item.message_id || ""))) + '</span>' +
+          '</div>' +
+          '<div class="search-result-snippet">' + highlightKeywordHtml(item.snippet || "", query) + '</div>';
+        btn.onclick = () => jumpToSearchResult(item, query, mode);
+        container.appendChild(btn);
+      });
+    }
+
+    async function runSearch(mode) {
+      const isGlobal = mode === "global";
+      const input = isGlobal ? globalContentSearch : conversationSearchInput;
+      const container = isGlobal ? globalContentSearchResults : conversationSearchResults;
+      const keyword = (input && input.value || "").trim();
+      if (!keyword) {
+        renderSearchResults(container, [], "", mode);
+        return;
+      }
+      if (container) container.innerHTML = '<div class="session-empty">搜索中...</div>';
+      try {
+        const params = new URLSearchParams({ q: keyword, limit: "80" });
+        if (!isGlobal && activeConversationId) {
+          params.set("scope", "conversation");
+          params.set("conversation_id", activeConversationId);
+        }
+        const data = await api("GET", "/api/search?" + params.toString());
+        renderSearchResults(container, data.results || [], keyword, mode);
+      } catch (e) {
+        if (container) container.innerHTML = '<div class="session-empty">搜索失败：' + escapeHtml(e.message || String(e)) + '</div>';
+      }
+    }
+
+    const runGlobalSearchDebounced = debounceSearch(() => runSearch("global"));
+    const runConversationSearchDebounced = debounceSearch(() => runSearch("conversation"));
+
+    function openConversationSearch() {
+      if (!conversationSearchPanel) return;
+      conversationSearchPanel.hidden = false;
+      if (conversationSearchToggle) conversationSearchToggle.classList.add("active");
+      setTimeout(() => {
+        if (conversationSearchInput) conversationSearchInput.focus();
+      }, 0);
+    }
+
+    function closeConversationSearch() {
+      if (!conversationSearchPanel) return;
+      conversationSearchPanel.hidden = true;
+      if (conversationSearchToggle) conversationSearchToggle.classList.remove("active");
+    }
+
+    function focusMessageElement(messageId, keyword = "") {
+      pendingJumpMessageId = String(messageId || "");
+      pendingSearchKeyword = keyword || "";
+      lastRenderedMsgKey = "";
+      renderMessages(false);
+      requestAnimationFrame(() => {
+        const safeId = window.CSS && CSS.escape
+          ? CSS.escape(String(messageId || ""))
+          : String(messageId || "").replace(/"/g, '\\"');
+        const selector = `.msg-wrap[data-msg-id="${safeId}"]`;
+        const target = chatList.querySelector(selector);
+        if (!target) return;
+        target.classList.add("search-jump-highlight");
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(() => target.classList.remove("search-jump-highlight"), 2200);
+      });
+    }
+
+    async function jumpToSearchResult(item, keyword, mode) {
+      if (!item || !item.conversation_id || !item.message_id) return;
+      const targetConversation = conversations.find(c => c.id === item.conversation_id) || {
+        id: item.conversation_id,
+        title: item.conversation_title || "搜索结果"
+      };
+      if (targetConversation.id !== activeConversationId) {
+        activeConversationId = targetConversation.id;
+        localStorage.setItem("active_conversation", activeConversationId);
+        topTitle.textContent = targetConversation.title || "Claude Web";
+        await loadMessages();
+        renderAll();
+      }
+      closeDrawer();
+      if (mode === "global") closeConversationSearch();
+      focusMessageElement(item.message_id, keyword);
     }
 
     function renderSessions() {
@@ -6045,10 +6398,44 @@
         closeSystemPromptEditor();
         return;
       }
-      if (e.key === "Escape" && codePreviewBackdrop.classList.contains("open")) {
+      if (e.key === "Escape" && codePreviewBackdrop && codePreviewBackdrop.classList.contains("open")) {
         closeCodePreview();
+        return;
+      }
+      if (e.key === "Escape" && conversationSearchPanel && !conversationSearchPanel.hidden) {
+        closeConversationSearch();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        openConversationSearch();
       }
     });
+
+    if (conversationSearchToggle) {
+      conversationSearchToggle.onclick = () => {
+        if (conversationSearchPanel && !conversationSearchPanel.hidden) closeConversationSearch();
+        else openConversationSearch();
+      };
+    }
+
+    if (conversationSearchClose) {
+      conversationSearchClose.onclick = closeConversationSearch;
+    }
+
+    if (conversationSearchInput) {
+      conversationSearchInput.addEventListener("input", runConversationSearchDebounced);
+      conversationSearchInput.addEventListener("keydown", e => {
+        if (e.key === "Enter") runSearch("conversation");
+      });
+    }
+
+    if (globalContentSearch) {
+      globalContentSearch.addEventListener("input", runGlobalSearchDebounced);
+      globalContentSearch.addEventListener("keydown", e => {
+        if (e.key === "Enter") runSearch("global");
+      });
+    }
 
     function findMsgIdxById(msgId) {
       for (let i = 0; i < messages.length; i++) {

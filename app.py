@@ -71,19 +71,6 @@ init_db()
 app = FastAPI(title="Claude Web")
 
 
-def with_system_prompt(final_prompt: str, system_prompt: str = "") -> str:
-    text = (system_prompt or "").strip()
-    if not text:
-        return final_prompt
-    return (
-        "系统提示词：\n"
-        + text
-        + "\n\n请在整个回复中遵守上面的系统提示词。"
-        + "\n\n"
-        + (final_prompt or "").strip()
-    ).strip()
-
-
 def iter_search_status_lines(enabled: bool, sources=None):
     if not enabled:
         return
@@ -371,41 +358,70 @@ def delete_system_prompt(prompt_id: str):
 
 
 @app.get("/api/search")
-def search_messages(q: str = ""):
+def search_messages(q: str = "", conversation_id: str = "", scope: str = "all", limit: int = 50):
     keyword = (q or "").strip()
 
     if not keyword:
-        return {"ok": True, "results": []}
+        return {"ok": True, "results": [], "query": "", "scope": scope}
 
     like = f"%{keyword}%"
+    max_limit = max(1, min(int(limit or 50), 100))
+    search_single_conversation = (scope or "").strip().lower() == "conversation" and bool(conversation_id)
+
+    where_parts = [
+        "(messages.content LIKE ? OR conversations.title LIKE ? OR messages.file_name LIKE ? OR messages.file_context LIKE ?)"
+    ]
+    params = [like, like, like, like]
+
+    if search_single_conversation:
+        where_parts.append("messages.conversation_id=?")
+        params.append(conversation_id)
+
+    params.append(max_limit)
 
     conn = get_conn()
     rows = conn.execute(
-        """
+        f"""
         SELECT
             messages.id AS message_id,
             messages.conversation_id AS conversation_id,
             messages.role AS role,
             messages.content AS content,
+            messages.file_name AS file_name,
+            messages.file_context AS file_context,
             messages.created_at AS created_at,
             conversations.title AS conversation_title
         FROM messages
         JOIN conversations ON conversations.id = messages.conversation_id
-        WHERE messages.content LIKE ?
-           OR conversations.title LIKE ?
-           OR messages.file_name LIKE ?
+        WHERE {" AND ".join(where_parts)}
         ORDER BY messages.created_at DESC
-        LIMIT 50
+        LIMIT ?
         """,
-        (like, like, like),
+        params,
     ).fetchall()
     conn.close()
 
     results = []
 
     for row in rows:
+        fields = [
+            ("content", row["content"] or ""),
+            ("title", row["conversation_title"] or ""),
+            ("file_name", row["file_name"] or ""),
+            ("file_context", row["file_context"] or ""),
+        ]
+        matched_field = "content"
         content = row["content"] or ""
         idx = content.lower().find(keyword.lower())
+
+        if idx < 0:
+            for field_name, field_text in fields[1:]:
+                field_idx = field_text.lower().find(keyword.lower())
+                if field_idx >= 0:
+                    matched_field = field_name
+                    content = field_text
+                    idx = field_idx
+                    break
 
         if idx >= 0:
             start = max(0, idx - 40)
@@ -420,12 +436,16 @@ def search_messages(q: str = ""):
             "conversation_title": row["conversation_title"],
             "role": row["role"],
             "snippet": snippet,
+            "matched_field": matched_field,
+            "file_name": row["file_name"],
             "created_at": row["created_at"],
         })
 
     return {
         "ok": True,
         "results": results,
+        "query": keyword,
+        "scope": "conversation" if search_single_conversation else "all",
     }
 
 
@@ -529,10 +549,7 @@ def echo(body: ChatBody):
     try:
         cid = db_ensure_conversation(body.conversation_id)
         history = db_get_messages(cid)
-        final_prompt = with_system_prompt(
-            build_chat_prompt(history, body.prompt),
-            body.system_prompt,
-        )
+        final_prompt = build_chat_prompt(history, body.prompt)
 
         db_add_message(cid, "user", body.prompt)
         db_update_title_if_needed(cid, body.prompt)
@@ -542,6 +559,7 @@ def echo(body: ChatBody):
             body.api_base_url,
             body.api_auth_token,
             body.api_model or DEFAULT_MODEL,
+            body.system_prompt,
         )).strip()
         db_add_message(cid, "assistant", reply, model=body.api_model or DEFAULT_MODEL, provider_name=body.api_profile_name or "")
 
@@ -559,9 +577,9 @@ def chat_stream(body: ChatBody):
 
     def gen():
         has_urls = bool(extract_urls_from_text(body.prompt))
-        search_intent = body.web_search or has_urls
+        search_intent = should_autonomous_search_with_context(body.prompt, history, force=body.web_search) or has_urls
         yield "\n[[STATUS:thinking]]\n"
-        if body.web_search or has_urls:
+        if search_intent:
             yield "\n[[STATUS:parsing]]\n"
         if search_intent:
             yield "\n[[STATUS:planning_search]]\n"
@@ -597,10 +615,7 @@ def chat_stream(body: ChatBody):
                     + "\n\n现在基于上述工具调用结果和最近聊天上下文，直接回答用户。"
                 )
 
-        final_prompt = with_system_prompt(
-            build_chat_prompt(history, effective_prompt),
-            body.system_prompt,
-        )
+        final_prompt = build_chat_prompt(history, effective_prompt)
 
         yield from stream_direct_and_save(
             cid,
@@ -609,6 +624,7 @@ def chat_stream(body: ChatBody):
             body.api_auth_token,
             body.api_model or DEFAULT_MODEL,
             body.api_profile_name or "",
+            system_prompt=body.system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
         )
 
@@ -654,9 +670,14 @@ def _build_regenerate_prompt_with_search(
 ):
     sources = []
     observation = ""
-    search_intent = web_search or bool(extract_urls_from_text(last_user_prompt))
+    plan = {}
+    search_intent = should_autonomous_search_with_context(
+        last_user_prompt,
+        context_messages,
+        force=web_search,
+    ) or bool(extract_urls_from_text(last_user_prompt))
     if search_intent:
-        observation, sources, _plan = resolve_search_tool_context(
+        observation, sources, plan = resolve_search_tool_context(
             last_user_prompt,
             context_messages,
             web_search,
@@ -676,7 +697,7 @@ def _build_regenerate_prompt_with_search(
         messages=context_messages,
         prompt=final_user_prompt,
     )
-    return with_system_prompt(final_prompt, system_prompt), sources
+    return final_prompt, sources, plan
 
 
 @app.post("/api/chat/regenerate_from_stream")
@@ -745,7 +766,7 @@ def regenerate_from_stream(body: ChatBody):
             vision_prompt_parts.append("如果你没有看到图片内容，请明确回复：我没有读取到图片内容。")
             vision_prompt_parts.append("")
             vision_prompt_parts.append("用户问题：" + (last_user_prompt.strip() or "请分析我上传的图片。"))
-            vision_prompt = with_system_prompt("\n".join(vision_prompt_parts), body.system_prompt)
+            vision_prompt = "\n".join(vision_prompt_parts)
 
             _api_base_url = body.api_base_url
             _api_auth_token = body.api_auth_token
@@ -769,11 +790,12 @@ def regenerate_from_stream(body: ChatBody):
                     _api_auth_token,
                     _api_model,
                     _api_profile_name,
+                    system_prompt=body.system_prompt,
                 )
 
             return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
-    final_prompt, sources = _build_regenerate_prompt_with_search(
+    final_prompt, sources, plan = _build_regenerate_prompt_with_search(
         context_messages,
         last_user_prompt,
         body.web_search,
@@ -788,7 +810,7 @@ def regenerate_from_stream(body: ChatBody):
 
     if keep_old:
         def gen_direct():
-            yield from iter_search_status_lines(body.web_search, sources)
+            yield from iter_search_status_lines(bool(plan.get("should_search") or plan.get("parse_links")), sources)
             inner = stream_direct_api_text(
                 final_prompt,
                 body.api_base_url,
@@ -803,7 +825,7 @@ def regenerate_from_stream(body: ChatBody):
         return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
     def gen_stream():
-        yield from iter_search_status_lines(body.web_search, sources)
+        yield from iter_search_status_lines(bool(plan.get("should_search") or plan.get("parse_links")), sources)
         yield from stream_direct_and_save(
                 cid,
                 final_prompt,
@@ -811,6 +833,7 @@ def regenerate_from_stream(body: ChatBody):
                 body.api_auth_token,
                 _api_model,
                 _api_profile_name,
+                system_prompt=body.system_prompt,
                 sources=json.dumps(sources, ensure_ascii=False) if sources else "",
             )
 
@@ -866,8 +889,6 @@ def regenerate_stream(body: ChatBody):
         if vision_prompt:
             vision_prompt += "\n\n"
         vision_prompt += "用户问题：" + (last_user_prompt.strip() or "请分析我上传的图片。")
-        vision_prompt = with_system_prompt(vision_prompt, body.system_prompt)
-
         _api_base_url = body.api_base_url
         _api_auth_token = body.api_auth_token
         _api_model = body.api_model or DEFAULT_MODEL
@@ -890,11 +911,12 @@ def regenerate_stream(body: ChatBody):
                 _api_auth_token,
                 _api_model,
                 _api_profile_name,
+                system_prompt=body.system_prompt,
             )
 
         return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
-    final_prompt, sources = _build_regenerate_prompt_with_search(
+    final_prompt, sources, plan = _build_regenerate_prompt_with_search(
         context_messages,
         last_user_prompt,
         body.web_search,
@@ -909,12 +931,13 @@ def regenerate_stream(body: ChatBody):
 
     if keep_old and old_assistant_id:
         def gen_direct():
-            yield from iter_search_status_lines(body.web_search, sources)
+            yield from iter_search_status_lines(bool(plan.get("should_search") or plan.get("parse_links")), sources)
             inner = stream_direct_api_text(
                 final_prompt,
                 body.api_base_url,
                 body.api_auth_token,
                 _api_model,
+                body.system_prompt,
             )
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
@@ -924,16 +947,17 @@ def regenerate_stream(body: ChatBody):
         return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
     def gen_regen():
-        yield from iter_search_status_lines(body.web_search, sources)
+        yield from iter_search_status_lines(bool(plan.get("should_search") or plan.get("parse_links")), sources)
         yield from stream_direct_and_save(
-            cid,
-            final_prompt,
-            body.api_base_url,
-            body.api_auth_token,
-            _api_model,
-            _api_profile_name,
-            sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-        )
+                cid,
+                final_prompt,
+                body.api_base_url,
+                body.api_auth_token,
+                _api_model,
+                _api_profile_name,
+                system_prompt=body.system_prompt,
+                sources=json.dumps(sources, ensure_ascii=False) if sources else "",
+            )
 
     return StreamingResponse(gen_regen(), media_type="text/plain; charset=utf-8")
 
@@ -1031,7 +1055,11 @@ async def chat_upload_stream(
 
     sources = []
     search_observation = ""
-    search_intent = web_search or bool(extract_urls_from_text(user_prompt))
+    search_intent = should_autonomous_search_with_context(
+        user_prompt,
+        history,
+        force=web_search,
+    ) or bool(extract_urls_from_text(user_prompt))
     should_search = False
     if search_intent:
         search_observation, sources, _plan = resolve_search_tool_context(
@@ -1079,7 +1107,7 @@ async def chat_upload_stream(
                 vision_prompt_parts.append(item["text"])
                 vision_prompt_parts.append("")
 
-        vision_prompt = with_system_prompt("\n".join(vision_prompt_parts), system_prompt)
+        vision_prompt = "\n".join(vision_prompt_parts)
 
         def gen():
             prefix = f"正在分析 {len(local_image_paths)} 张图片...\n\n"
@@ -1093,6 +1121,7 @@ async def chat_upload_stream(
                     api_base_url,
                     api_auth_token,
                     api_model or DEFAULT_MODEL,
+                    system_prompt=system_prompt,
                 ):
                     full += chunk
                     yield chunk
@@ -1171,12 +1200,9 @@ async def chat_upload_stream(
             + final_user_prompt
         )
 
-    final_prompt = with_system_prompt(
-        build_chat_prompt(
-            messages=history,
-            prompt=final_user_prompt,
-        ),
-        system_prompt,
+    final_prompt = build_chat_prompt(
+        messages=history,
+        prompt=final_user_prompt,
     )
 
     def gen_text_upload():
@@ -1190,6 +1216,7 @@ async def chat_upload_stream(
             api_auth_token,
             api_model or DEFAULT_MODEL,
             api_profile_name or "",
+            system_prompt=system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
         )
 
