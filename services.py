@@ -111,6 +111,20 @@ def _is_dns_resolution_error(exc) -> bool:
     )
 
 
+def _is_transient_connection_error(exc) -> bool:
+    text = str(exc).lower()
+    return (
+        "connection reset by peer" in text
+        or "connection aborted" in text
+        or "connection refused" in text
+        or "connection timed out" in text
+        or "timed out" in text
+        or "broken pipe" in text
+        or "remote end closed connection" in text
+        or "ssl" in text and "wrong version number" in text
+    )
+
+
 def _decode_dns_name(data: bytes, offset: int) -> tuple[str, int]:
     labels = []
     jumped = False
@@ -1850,11 +1864,6 @@ def stream_direct_api_text(
     base_url = api_base_url.strip().rstrip("/")
     token = api_auth_token.strip()
     model = (api_model or DEFAULT_MODEL).strip()
-    retryable_http_statuses = {
-        408, 425, 429,
-        500, 502, 503, 504,
-        520, 521, 522, 524, 525, 526,
-    }
 
     if not base_url:
         yield "直连模式缺少 API URL"
@@ -1917,16 +1926,6 @@ def stream_direct_api_text(
 
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="ignore")
-            code = int(getattr(e, "code", 0) or 0)
-            if code in retryable_http_statuses:
-                yield (
-                    "\n[直连OpenAI流式接口失败]\n"
-                    f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
-                    f"请求地址: {url}\n"
-                    "上游返回临时错误，已建议稍后重试。\n"
-                    + (err or str(e))
-                )
-                return
             yield (
                 "\n[直连OpenAI流式接口失败]\n"
                 f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
@@ -1934,6 +1933,21 @@ def stream_direct_api_text(
                 + (err or str(e))
             )
         except Exception as e:
+            if _is_transient_connection_error(e):
+                try:
+                    fallback = call_direct_text_api(
+                        prompt,
+                        api_base_url,
+                        api_auth_token,
+                        api_model=api_model,
+                        max_tokens=4096,
+                        temperature=MODEL_TEMPERATURE,
+                    )
+                    if fallback:
+                        yield fallback
+                        return
+                except Exception as fallback_exc:
+                    e = fallback_exc
             hint = ""
             if _is_dns_resolution_error(e):
                 parsed = urlparse(url)
@@ -2013,16 +2027,6 @@ def stream_direct_api_text(
 
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="ignore")
-        code = int(getattr(e, "code", 0) or 0)
-        if code in retryable_http_statuses:
-            yield (
-                "\n[直连Claude流式接口失败]\n"
-                f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
-                f"请求地址: {url}\n"
-                "上游返回临时错误，已建议稍后重试。\n"
-                + (err or str(e))
-            )
-            return
         yield (
             "\n[直连Claude流式接口失败]\n"
             f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
@@ -2030,6 +2034,21 @@ def stream_direct_api_text(
             + (err or str(e))
         )
     except Exception as e:
+        if _is_transient_connection_error(e):
+            try:
+                fallback = call_direct_text_api(
+                    prompt,
+                    api_base_url,
+                    api_auth_token,
+                    api_model=api_model,
+                    max_tokens=4096,
+                    temperature=MODEL_TEMPERATURE,
+                )
+                if fallback:
+                    yield fallback
+                    return
+            except Exception as fallback_exc:
+                e = fallback_exc
         hint = ""
         if _is_dns_resolution_error(e):
             parsed = urlparse(url)
