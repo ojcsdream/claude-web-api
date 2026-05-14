@@ -594,6 +594,39 @@
       line-height: 1.62;
     }
 
+    .assistant .bubble .streaming-math-pending {
+      display: inline-block;
+      max-width: 100%;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font: inherit;
+      color: #cfc6b8;
+      background: rgba(255,255,255,0.045);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 6px;
+      padding: 0.02em 0.28em;
+    }
+
+    .assistant .bubble .math-source-pending {
+      opacity: 0;
+      color: transparent;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .assistant .bubble .math-source-display.math-source-pending {
+      display: block;
+      min-height: 3.8em;
+      margin: 0.9em 0;
+    }
+
+    .assistant .bubble .math-source-inline.math-source-pending {
+      display: inline-block;
+      min-width: 2.6em;
+      min-height: 1.2em;
+      vertical-align: -0.12em;
+    }
+
     .assistant .bubble h1,
     .assistant .bubble h2,
     .assistant .bubble h3,
@@ -4009,15 +4042,170 @@
       return { text: protectedText, blocks };
     }
 
-    function restoreMarkdownMath(html, blocks) {
+    function findLastUnclosedFence(text) {
+      const src = String(text || "");
+      let idx = 0;
+      let lastOpen = -1;
+
+      while (idx < src.length) {
+        const fence = src.indexOf("```", idx);
+        if (fence === -1) break;
+        if (fence === 0 || src[fence - 1] === "\n") {
+          lastOpen = lastOpen === -1 ? fence : -1;
+        }
+        idx = fence + 3;
+      }
+
+      return lastOpen;
+    }
+
+    function getClosedFenceRanges(text, scanEnd) {
+      const src = String(text || "");
+      const ranges = [];
+      let idx = 0;
+      let start = -1;
+      const endLimit = Number.isFinite(scanEnd) ? scanEnd : src.length;
+
+      while (idx < endLimit) {
+        const fence = src.indexOf("```", idx);
+        if (fence === -1 || fence >= endLimit) break;
+        if (fence === 0 || src[fence - 1] === "\n") {
+          if (start === -1) {
+            start = fence;
+          } else {
+            ranges.push([start, fence + 3]);
+            start = -1;
+          }
+        }
+        idx = fence + 3;
+      }
+
+      return ranges;
+    }
+
+    function isInsideRanges(index, ranges) {
+      return ranges.some(([start, end]) => index >= start && index < end);
+    }
+
+    function findLastUnclosedMathDelimiter(text) {
+      const src = String(text || "");
+      const fenceStart = findLastUnclosedFence(src);
+      const scanEnd = fenceStart === -1 ? src.length : fenceStart;
+      const codeRanges = getClosedFenceRanges(src, scanEnd);
+      let inlineParen = -1;
+      let displayBracket = -1;
+      let dollar = -1;
+      let displayDollar = -1;
+      const envStack = [];
+      const envRe = /\\(begin|end)\{(equation|align|aligned|gather|multline|cases|matrix|pmatrix|bmatrix|vmatrix)\*?\}/g;
+      let envMatch;
+
+      envRe.lastIndex = 0;
+      while ((envMatch = envRe.exec(src)) && envMatch.index < scanEnd) {
+        if (isInsideRanges(envMatch.index, codeRanges)) continue;
+        if (envMatch[1] === "begin") {
+          envStack.push({ name: envMatch[2], index: envMatch.index });
+        } else {
+          for (let i = envStack.length - 1; i >= 0; i -= 1) {
+            if (envStack[i].name === envMatch[2]) {
+              envStack.splice(i, 1);
+              break;
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < scanEnd; i += 1) {
+        if (isInsideRanges(i, codeRanges)) continue;
+
+        const prev = i > 0 ? src[i - 1] : "";
+        if (prev === "\\") continue;
+
+        if (src.startsWith("\\(", i)) {
+          inlineParen = inlineParen === -1 ? i : -1;
+          i += 1;
+          continue;
+        }
+
+        if (src.startsWith("\\)", i) && inlineParen !== -1) {
+          inlineParen = -1;
+          i += 1;
+          continue;
+        }
+
+        if (src.startsWith("\\[", i)) {
+          displayBracket = displayBracket === -1 ? i : -1;
+          i += 1;
+          continue;
+        }
+
+        if (src.startsWith("\\]", i) && displayBracket !== -1) {
+          displayBracket = -1;
+          i += 1;
+          continue;
+        }
+
+        if (src.startsWith("$$", i)) {
+          displayDollar = displayDollar === -1 ? i : -1;
+          i += 1;
+          continue;
+        }
+
+        if (src[i] === "$") {
+          const next = src[i + 1] || "";
+          if (next === "$") continue;
+          if (dollar === -1 && (/\s/.test(next) || /\d/.test(next))) continue;
+          dollar = dollar === -1 ? i : -1;
+        }
+      }
+
+      const envStart = envStack.length ? envStack[0].index : -1;
+      const candidates = [fenceStart, inlineParen, displayBracket, dollar, displayDollar, envStart]
+        .filter(pos => pos >= 0);
+      return candidates.length ? Math.min(...candidates) : -1;
+    }
+
+    function splitStableStreamingMarkdown(text) {
+      const src = String(text || "");
+      const splitAt = findLastUnclosedMathDelimiter(src);
+      if (splitAt === -1) {
+        return { stable: src, pending: "" };
+      }
+      return {
+        stable: src.slice(0, splitAt),
+        pending: src.slice(splitAt)
+      };
+    }
+
+    function renderStreamingMarkdown(text) {
+      const parts = splitStableStreamingMarkdown(text);
+      let html = renderMarkdown(parts.stable);
+
+      if (parts.pending) {
+        html += `<code class="streaming-math-pending">${escapeHtml(parts.pending)}</code>`;
+      }
+
+      return html;
+    }
+
+    function renderMarkdownForDeferredMath(text) {
+      return renderMarkdown(text, { hideUntilTypeset: true });
+    }
+
+    function restoreMarkdownMath(html, blocks, options = {}) {
       const container = document.createElement("template");
       container.innerHTML = html || "";
+      const hideUntilTypeset = !!options.hideUntilTypeset;
 
       container.content.querySelectorAll(".math-source").forEach(el => {
         const idx = Number(el.dataset.mathId);
         const item = blocks[idx];
         if (!item) return;
         el.textContent = item.raw;
+        if (hideUntilTypeset) {
+          el.classList.add("math-source-pending");
+          el.setAttribute("aria-hidden", "true");
+        }
       });
 
       return container.innerHTML;
@@ -4345,7 +4533,155 @@
       });
     }
 
-    function renderMath(root) {
+    let mathRenderPromise = Promise.resolve();
+    let mathRenderSeq = 0;
+    const RENDERABLE_MATH_RE = /\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\\begin\{(?:equation|align|aligned|gather|multline|cases|matrix|pmatrix|bmatrix|vmatrix)\*?\}[\s\S]+?\\end\{(?:equation|align|aligned|gather|multline|cases|matrix|pmatrix|bmatrix|vmatrix)\*?\}|\$[^\s$][\s\S]*?(?:[\\^_{}=+\-*/]|\\[a-zA-Z]+)[\s\S]*?[^\s\\]\$/;
+
+    function shouldSkipMathTextNode(node) {
+      const parent = node && node.parentElement;
+      if (!parent) return true;
+      return !!parent.closest("script, noscript, style, textarea, pre, code, mjx-container, .streaming-math-pending");
+    }
+
+    function findMathTextNodes(root) {
+      if (!root) return [];
+
+      const nodes = [];
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          if (shouldSkipMathTextNode(node)) return NodeFilter.FILTER_REJECT;
+          return RENDERABLE_MATH_RE.test(node.nodeValue || "")
+            ? NodeFilter.FILTER_ACCEPT
+            : NodeFilter.FILTER_REJECT;
+        }
+      });
+
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      return nodes;
+    }
+
+    function hasRenderableMath(root) {
+      return findMathTextNodes(root).length > 0;
+    }
+
+    function hasRenderableMathInHtml(html) {
+      const template = document.createElement("template");
+      template.innerHTML = html || "";
+      return hasRenderableMath(template.content);
+    }
+
+    function renderMathFallback(root) {
+      const nodes = findMathTextNodes(root);
+      nodes.forEach(node => {
+        const text = node.nodeValue || "";
+        const pattern = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(\$[^\s$][\s\S]*?(?:[\\^_{}=+\-*/]|\\[a-zA-Z]+)[\s\S]*?[^\s\\]\$)/g;
+        const fragment = document.createDocumentFragment();
+        let last = 0;
+        let match;
+
+        while ((match = pattern.exec(text))) {
+          if (match.index > last) {
+            fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
+          }
+
+          const span = document.createElement("span");
+          const isDisplay = Boolean(match[1] || match[2]);
+          span.className = isDisplay ? "math-display-fallback" : "math-inline-fallback";
+          span.textContent = (match[1] || match[2] || match[3] || match[4] || "").replace(/^\$|\$$/g, "").trim();
+          fragment.appendChild(span);
+          last = pattern.lastIndex;
+        }
+
+        if (last < text.length) {
+          fragment.appendChild(document.createTextNode(text.slice(last)));
+        }
+
+        node.parentNode.replaceChild(fragment, node);
+      });
+    }
+
+    function revealPendingMathSources(root) {
+      if (!root) return;
+      root.querySelectorAll(".math-source-pending").forEach(el => {
+        el.classList.remove("math-source-pending");
+        el.removeAttribute("aria-hidden");
+      });
+    }
+
+    function typesetMathNow(root, isCurrent = () => true) {
+      if (!root || !hasRenderableMath(root)) return Promise.resolve();
+
+      if (window.MathJax && MathJax.typesetPromise) {
+        mathRenderPromise = mathRenderPromise
+          .catch(() => {})
+          .then(() => {
+            if (!isCurrent() || !root.isConnected) return Promise.resolve();
+            if (MathJax.typesetClear) {
+              MathJax.typesetClear([root]);
+            }
+            return MathJax.typesetPromise([root]).then(() => {
+              revealPendingMathSources(root);
+            }).catch(() => {
+              revealPendingMathSources(root);
+            });
+          });
+        return mathRenderPromise;
+      }
+
+      renderMathFallback(root);
+      revealPendingMathSources(root);
+      return Promise.resolve();
+    }
+
+    function queueMathTypeset(root, options = {}) {
+      if (!root || !window.MathJax || !MathJax.typesetPromise) return;
+
+      const seq = ++mathRenderSeq;
+      const preserveScroll = options.preserveScroll !== false;
+      const run = () => {
+        if (!root.isConnected || (options.latestOnly && seq !== mathRenderSeq)) return Promise.resolve();
+
+        const scrollBefore = getScrollTop();
+        const heightBefore = getPageHeight();
+
+        if (MathJax.typesetClear) {
+          MathJax.typesetClear([root]);
+        }
+
+        return MathJax.typesetPromise([root]).then(() => {
+          revealPendingMathSources(root);
+          if (!preserveScroll || !root.isConnected) return;
+          const heightAfter = getPageHeight();
+          const heightDiff = heightAfter - heightBefore;
+
+          if (heightDiff > 0 && !isNearBottom(AUTO_SCROLL_THRESHOLD + 50)) {
+            window.scrollTo({
+              top: scrollBefore + heightDiff,
+              behavior: 'auto'
+            });
+          }
+        }).catch(() => {
+          revealPendingMathSources(root);
+        });
+      };
+
+      mathRenderPromise = mathRenderPromise
+        .catch(() => {})
+        .then(() => new Promise(resolve => {
+          const execute = () => run().catch(() => {}).then(resolve);
+          if (options.immediate) {
+            requestAnimationFrame(execute);
+          } else if (window.requestIdleCallback) {
+            requestIdleCallback(execute, { timeout: options.timeout || 900 });
+          } else {
+            setTimeout(execute, options.delay || 0);
+          }
+        }));
+    }
+
+    function renderMath(root, options = {}) {
+      if (!hasRenderableMath(root)) return;
+
       if (window.MathJax && MathJax.typesetPromise) {
         // 先标记数学公式容器，避免渲染后高度突变导致页面跳动
         const mathElements = root.querySelectorAll('mjx-container');
@@ -4354,34 +4690,10 @@
             el.style.minHeight = el.offsetHeight ? el.offsetHeight + 'px' : '1.5em';
           }
         });
-
-        const run = () => {
-          const scrollBefore = getScrollTop();
-          const heightBefore = getPageHeight();
-
-          MathJax.typesetPromise([root]).then(() => {
-            // 渲染完成后，如果用户不在底部，保持滚动位置
-            const heightAfter = getPageHeight();
-            const heightDiff = heightAfter - heightBefore;
-
-            if (heightDiff > 0 && !isNearBottom(AUTO_SCROLL_THRESHOLD + 50)) {
-              window.scrollTo({
-                top: scrollBefore + heightDiff,
-                behavior: 'auto'
-              });
-            }
-          }).catch(() => {});
-        };
-
-        if (window.requestIdleCallback) {
-          requestIdleCallback(run, { timeout: 1200 });
-        } else {
-          setTimeout(run, 0);
-        }
+        queueMathTypeset(root, options);
       } else {
-        root.innerHTML = root.innerHTML
-          .replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => `<span class="math-display-fallback">${escapeHtml(inner.trim())}</span>`)
-          .replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => `<span class="math-inline-fallback">${escapeHtml(inner.trim())}</span>`);
+        renderMathFallback(root);
+        revealPendingMathSources(root);
       }
     }
 
@@ -4406,14 +4718,14 @@
       marked._claudeWebConfigured = true;
     }
 
-    function renderMarkdown(text) {
+    function renderMarkdown(text, options = {}) {
       const normalized = normalizeMathDelimiters(text || "");
       const protectedMath = protectMathForMarkdown(normalized);
       if (window.marked && marked.parse) {
         configureMarked();
-        return restoreMarkdownMath(marked.parse(protectedMath.text), protectedMath.blocks);
+        return restoreMarkdownMath(marked.parse(protectedMath.text), protectedMath.blocks, options);
       }
-      return restoreMarkdownMath(escapeHtml(protectedMath.text).replace(/\n/g, "<br>"), protectedMath.blocks);
+      return restoreMarkdownMath(escapeHtml(protectedMath.text).replace(/\n/g, "<br>"), protectedMath.blocks, options);
     }
 
     function markSearchHits(root, keyword) {
@@ -4996,7 +5308,7 @@
         } else {
           const sources = parseMessageSources(msg.sources);
           const cleanContent = stripStreamingStatusMarkers(msg.content || "");
-          bubble.innerHTML = renderToolStatusesHtml() + renderMarkdown(cleanContent);
+          bubble.innerHTML = renderToolStatusesHtml() + (lightweight ? renderMarkdownForDeferredMath(cleanContent) : renderMarkdown(cleanContent));
           injectCitationMarkers(bubble, sources);
           bubble.insertAdjacentHTML("beforeend", renderSourcesStrip(sources));
 
@@ -5105,7 +5417,7 @@
 
           const altBubble = document.createElement("div");
           altBubble.className = "bubble";
-          altBubble.innerHTML = renderMarkdown(alt.content || "");
+          altBubble.innerHTML = renderMarkdownForDeferredMath(alt.content || "");
           enhanceRichText(altBubble);
           altWrap.appendChild(altBubble);
 
@@ -5271,6 +5583,8 @@
     let streamingScheduleSeq = 0;
     let isAssistantTyping = false;
     let thinkingMotionTimer = null;
+    let streamingBubbleRenderSeq = 0;
+    let streamingLastCommittedHtml = "";
     function getLastAssistantBubble() {
       const assistantWraps = chatList.querySelectorAll(".msg-wrap.assistant");
       if (!assistantWraps.length) return null;
@@ -5288,6 +5602,70 @@
 
     function renderStreamingPlainText(text) {
       return `<div class="streaming-plain-text">${escapeHtml(text || "")}</div>`;
+    }
+
+    function buildAssistantBubbleHtml(text, sources, finalRender, showCaret) {
+      const contentHtml = finalRender
+        ? renderMarkdown(text)
+        : renderStreamingMarkdown(text);
+      let html = (finalRender ? "" : renderThinkingHtml()) + renderToolStatusesHtml() + contentHtml;
+      html += renderSourcesStrip(sources);
+      if (showCaret && text.trim() && text.trim() !== "思考中...") {
+        html += '<span class="stream-caret"></span>';
+      }
+      return html;
+    }
+
+    function prepareAssistantBubbleDom(bubble, sources, finalRender) {
+      if (!finalRender) bindThinkingPanels(bubble);
+      injectCitationMarkers(bubble, sources);
+      enhanceRichText(bubble);
+
+      if (finalRender) {
+        enhanceCodeBlocks(bubble);
+        applyMessageCollapse(bubble.closest(".msg-wrap"), true);
+      }
+    }
+
+    function commitAssistantBubbleHtml(bubble, html, sources, finalRender) {
+      if (!bubble || bubble.innerHTML === html) return;
+      bubble.innerHTML = html;
+      streamingLastCommittedHtml = html;
+      prepareAssistantBubbleDom(bubble, sources, finalRender);
+    }
+
+    function renderAssistantBubbleBuffered(bubble, text, sources, finalRender, showCaret) {
+      const html = buildAssistantBubbleHtml(text, sources, finalRender, showCaret);
+      const renderSeq = ++streamingBubbleRenderSeq;
+      const staging = document.createElement("div");
+      staging.className = bubble.className;
+      staging.style.cssText = "position:absolute;left:-10000px;top:0;width:" + Math.max(1, bubble.clientWidth || 680) + "px;visibility:hidden;pointer-events:none;";
+      staging.innerHTML = html;
+      document.body.appendChild(staging);
+      prepareAssistantBubbleDom(staging, sources, finalRender);
+
+      return typesetMathNow(staging, () => renderSeq === streamingBubbleRenderSeq).then(() => {
+        if (renderSeq !== streamingBubbleRenderSeq || !bubble.isConnected) return false;
+        const renderedHtml = staging.innerHTML;
+        const scrollBefore = getScrollTop();
+        const heightBefore = getPageHeight();
+        const wasNearBottom = isNearBottom(AUTO_SCROLL_THRESHOLD);
+
+        commitAssistantBubbleHtml(bubble, renderedHtml, sources, finalRender);
+
+        const heightAfter = getPageHeight();
+        const heightDiff = heightAfter - heightBefore;
+        if (!wasNearBottom && Math.abs(heightDiff) > 5) {
+          window.scrollTo({
+            top: scrollBefore + heightDiff,
+            behavior: "auto"
+          });
+        }
+        followBottomDuringStreaming();
+        return true;
+      }).finally(() => {
+        staging.remove();
+      });
     }
 
     function renderAssistantContentIntoBubble(bubble, content, finalRender = false, showCaret = false) {
@@ -5310,32 +5688,23 @@
       const scrollBefore = getScrollTop();
       const heightBefore = getPageHeight();
       const wasNearBottom = isNearBottom(AUTO_SCROLL_THRESHOLD);
-      const contentHtml = finalRender
-        ? renderMarkdown(text)
-        : renderStreamingPlainText(text);
-      bubble.innerHTML = (finalRender ? "" : renderThinkingHtml()) + renderToolStatusesHtml() + contentHtml;
-      if (!finalRender) bindThinkingPanels(bubble);
-      injectCitationMarkers(bubble, sources);
-      bubble.insertAdjacentHTML("beforeend", renderSourcesStrip(sources));
 
-      if (showCaret && text.trim() && text.trim() !== "思考中...") {
-        const caret = document.createElement("span");
-        caret.className = "stream-caret";
-        bubble.appendChild(caret);
-      }
+      const html = buildAssistantBubbleHtml(text, sources, finalRender, showCaret);
+      const needsBufferedMath = hasRenderableMathInHtml(html);
+      let committedNow = false;
 
-      if (finalRender) {
-        enhanceRichText(bubble);
-        enhanceCodeBlocks(bubble);
-        renderMath(bubble);
-        applyMessageCollapse(bubble.closest(".msg-wrap"), true);
+      if (needsBufferedMath) {
+        renderAssistantBubbleBuffered(bubble, text, sources, finalRender, showCaret);
+      } else {
+        commitAssistantBubbleHtml(bubble, html, sources, finalRender);
+        committedNow = true;
       }
 
       // 渲染后，如果用户不在底部且内容高度变化了，保持滚动位置
       const heightAfter = getPageHeight();
       const heightDiff = heightAfter - heightBefore;
 
-      if (!wasNearBottom && heightDiff > 0 && Math.abs(heightDiff) > 5) {
+      if (committedNow && !wasNearBottom && heightDiff > 0 && Math.abs(heightDiff) > 5) {
         requestAnimationFrame(() => {
           window.scrollTo({
             top: scrollBefore,
