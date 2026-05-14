@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_DIR"
 mkdir -p logs
+
+BOOTSTRAP_AUTO_SYSTEM="${BOOTSTRAP_AUTO_SYSTEM:-1}"
+
+# shellcheck disable=SC1091
+. "${PROJECT_DIR}/scripts/bootstrap-runtime.sh"
 
 if [ -f .env ]; then
   set -a
@@ -13,6 +19,8 @@ fi
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 START_PUBLIC="${START_PUBLIC:-1}"
+
+ensure_runtime_ready
 
 start_public_if_enabled() {
   if [ "$START_PUBLIC" != "1" ] || [ ! -x ./start-public.sh ]; then
@@ -33,7 +41,7 @@ if pgrep -f "uvicorn app:app .*--port ${PORT}" >/dev/null 2>&1; then
   sleep 1
 fi
 
-setsid .venv/bin/python -m uvicorn app:app \
+setsid "${VENV_PYTHON}" -m uvicorn app:app \
   --host "$HOST" \
   --port "$PORT" \
   --workers 1 \

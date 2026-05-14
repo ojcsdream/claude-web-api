@@ -95,26 +95,22 @@ claude-web/
 
 运行环境：
 
-- Linux
-- Python 3.10+
-- `python3-venv`
-- `pip`
-- `curl`
-- `tar`
+- Linux / Termux
+- Python 3.10+（如果系统里还没装，脚本会尽量自动补齐；补不动时会给出对应安装命令）
 
 从 GitHub 克隆后执行：
 
 ```bash
 git clone git@github.com:ojcsdream/api-.git claude-web
 cd claude-web
-chmod +x install.sh start-local.sh
 ./install.sh
 ```
 
 安装脚本会：
 
 - 创建 `.venv`
-- 安装 Python 依赖
+- 自动修复缺失或损坏的 `.venv`
+- 安装 / 更新 Python 依赖
 - 初始化 `uploads/`、`logs/`
 - 做基础 Python 语法检查
 - 尝试安装 `ngrok` 到 `~/.local/bin/ngrok`
@@ -131,7 +127,7 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-`deploy.sh` 会安装依赖、做语法编译检查、启动本地服务和默认 ngrok 公网入口、启用 Termux 监控任务，并运行 `scripts/smoke_test.py` 验证健康检查、会话列表、全局关键词搜索、单会话关键词搜索和 Markdown 导出。
+`deploy.sh` 会自动准备 Python 环境、安装依赖、做语法编译检查、启动本地服务和默认 ngrok 公网入口、启用 Termux 监控任务，并运行 `scripts/smoke_test.py` 验证健康检查、会话列表、全局关键词搜索、单会话关键词搜索和 Markdown 导出。
 
 ### 2. 配置联网搜索与网页提取
 
@@ -155,6 +151,8 @@ SERPAPI_API_KEY="你的 SerpAPI key"
 cd /ai/claude-web
 ./start-local.sh
 ```
+
+`start-local.sh` 现在也会先自检运行环境；如果 `.venv` 不存在、损坏，或依赖还没装好，会先自动补齐再启动。
 
 默认访问地址：
 

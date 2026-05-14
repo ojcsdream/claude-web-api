@@ -19,7 +19,7 @@
         load: ["[tex]/mhchem"]
       },
       tex: {
-        inlineMath: [["\\(", "\\)"]],
+        inlineMath: [["\\(", "\\)"], ["$", "$"]],
         displayMath: [["$$", "$$"], ["\\[", "\\]"]],
         processEscapes: true,
         processEnvironments: true,
@@ -588,6 +588,12 @@
       margin: 0.54em 0;
     }
 
+    .assistant .bubble .streaming-plain-text {
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.62;
+    }
+
     .assistant .bubble h1,
     .assistant .bubble h2,
     .assistant .bubble h3,
@@ -1032,7 +1038,8 @@
         radial-gradient(circle at 38% 34%, rgba(255, 255, 255, 0.96), rgba(234, 230, 222, 0.74) 42%, rgba(174, 168, 158, 0.34) 70%);
       box-shadow: 0 0 0 0 rgba(232, 226, 216, 0.16), 0 0 18px rgba(232, 226, 216, 0.18);
       flex: 0 0 auto;
-      animation: thinkingDotBreath 3.4s ease-in-out infinite;
+      animation: thinkingDotBreath 4.2s cubic-bezier(.45, 0, .25, 1) infinite;
+      will-change: transform, opacity;
     }
 
     .thinking-meta {
@@ -1135,8 +1142,8 @@
       font-style: italic;
       font-weight: 520;
       letter-spacing: 0.015em;
-      animation: thinkingWordGlow 4.2s ease-in-out infinite;
-      will-change: opacity, filter, color;
+      animation: thinkingWordGlow 4.8s cubic-bezier(.45, 0, .25, 1) infinite;
+      will-change: opacity;
     }
 
     .thinking-toggle {
@@ -1169,33 +1176,27 @@
     @keyframes thinkingDotBreath {
       0%, 100% {
         transform: scale(0.76);
-        opacity: 0.42;
-        filter: brightness(0.88);
-        box-shadow: 0 0 0 0 rgba(232, 226, 216, 0.10), 0 0 12px rgba(232, 226, 216, 0.10);
+        opacity: 0.46;
       }
-      45% {
-        transform: scale(1.12);
-        opacity: 0.96;
-        filter: brightness(1.22);
-        box-shadow: 0 0 0 7px rgba(232, 226, 216, 0.055), 0 0 24px rgba(232, 226, 216, 0.22);
+      42% {
+        transform: scale(1.08);
+        opacity: 0.9;
       }
       68% {
-        transform: scale(0.98);
-        opacity: 0.68;
-        filter: brightness(1.04);
-        box-shadow: 0 0 0 3px rgba(232, 226, 216, 0.035), 0 0 16px rgba(232, 226, 216, 0.15);
+        transform: scale(0.94);
+        opacity: 0.62;
       }
     }
 
     @keyframes thinkingWordGlow {
-      0%, 100% { opacity: 0.44; filter: brightness(0.86); color: #999188; }
-      45% { opacity: 0.96; filter: brightness(1.22); color: #dfd7ca; }
-      70% { opacity: 0.64; filter: brightness(1.02); color: #bbb2a6; }
+      0%, 100% { opacity: 0.5; color: #999188; }
+      44% { opacity: 0.9; color: #d4ccbf; }
+      72% { opacity: 0.66; color: #b7aea3; }
     }
 
     @keyframes thinkingTextBreath {
-      0%, 100% { opacity: 0.72; filter: brightness(0.96); }
-      48% { opacity: 0.96; filter: brightness(1.08); }
+      0%, 100% { opacity: 0.72; }
+      48% { opacity: 0.94; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -4524,7 +4525,21 @@
 
     function renderToolStatusesHtml() {
       if (!activeToolStatuses.length) return "";
-      return activeToolStatuses.map(key => {
+      const visibleStatuses = activeToolStatuses.filter(key => key !== "thinking");
+      const searchStatuses = ["parsing", "planning_search", "searching", "reading_sources"];
+      let searchStatus = "";
+      for (let i = searchStatuses.length - 1; i >= 0; i--) {
+        if (visibleStatuses.includes(searchStatuses[i])) {
+          searchStatus = searchStatuses[i];
+          break;
+        }
+      }
+      const compactStatuses = searchStatus
+        ? [searchStatus]
+        : visibleStatuses;
+
+      if (!compactStatuses.length) return "";
+      return compactStatuses.map(key => {
         const label = STATUS_LABELS[key] || key;
         return (
           `<div class="tool-status" data-tool-status="${escapeAttr(key)}">` +
@@ -4548,7 +4563,7 @@
     function inferThinkingMode() {
       const sourceText = thinkingContext.prompt || lastUserPromptForThinking || "";
       const text = sourceText.trim().toLowerCase();
-      if (activeToolStatuses.includes("parsing")) return "web";
+      if (activeToolStatuses.some(key => ["parsing", "planning_search", "searching", "reading_sources"].includes(key))) return "web";
       if (thinkingContext.imageCount > 0) return "vision";
       if (thinkingContext.fileCount > 0 && !text) return "file";
       if (/[+\-*/=√∑∫π]|方程|几何|证明|导数|积分|数学/.test(sourceText)) return "math";
@@ -4690,9 +4705,8 @@
 
       if (mode === "web") {
         return [
-          makeThinkingStep("解析网页内容", "抓取正文、标题和可用来源，过滤无关导航文本"),
-          makeThinkingStep("对齐用户问题", "把网页事实映射到当前问题，区分直接证据和推断"),
-          makeThinkingStep("组织可核查回答", "优先给结论，再补关键依据和必要限制")
+          makeThinkingStep("检索可靠来源", "保留和问题最相关的外部信息"),
+          makeThinkingStep("组织可核查回答", "用少量关键依据支撑结论")
         ];
       }
       if (mode === "math") {
@@ -5250,13 +5264,15 @@
     let streamingRenderQueued = false;
     let pendingStreamingContent = "";
     let lastStreamingRenderTime = 0;
-    const STREAMING_RENDER_THROTTLE = 33; // 限制到约 30fps，避免移动端 Markdown 重绘卡顿
+    const STREAMING_RENDER_THROTTLE = 16; // 接近 60fps，优先更快把新内容画出来
     let streamingDisplayContent = "";
     let streamingTargetContent = "";
     let streamingTypewriterTimer = null;
     let streamingScheduleSeq = 0;
     let isAssistantTyping = false;
     let thinkingMotionTimer = null;
+    let lastStreamingMathRenderTime = 0;
+    const STREAMING_MATH_RENDER_THROTTLE = 140;
 
     function getLastAssistantBubble() {
       const assistantWraps = chatList.querySelectorAll(".msg-wrap.assistant");
@@ -5271,6 +5287,25 @@
         if (messages[i] && messages[i].role === "assistant") return messages[i];
       }
       return null;
+    }
+
+    function renderStreamingPlainText(text) {
+      return `<div class="streaming-plain-text">${escapeHtml(text || "")}</div>`;
+    }
+
+    function hasRenderableInlineDollarMath(text) {
+      return /(^|[^\$\\])\$[^$\n][\s\S]*?[^$\n]\$(?!\$)/.test(text || "");
+    }
+
+    function hasRenderableMath(text) {
+      const source = String(text || "");
+      return (
+        source.includes("\\(") ||
+        source.includes("$$") ||
+        source.includes("\\[") ||
+        source.includes("\\begin{") ||
+        hasRenderableInlineDollarMath(source)
+      );
     }
 
     function renderAssistantContentIntoBubble(bubble, content, finalRender = false, showCaret = false) {
@@ -5294,9 +5329,13 @@
       const heightBefore = getPageHeight();
       const wasNearBottom = isNearBottom(AUTO_SCROLL_THRESHOLD);
 
-      // 流式过程中只做 Markdown 渲染，不做每帧代码高亮和 MathJax，避免手机卡顿。
-      // 最后一帧 finalRender=true 时再补做增强。
-      bubble.innerHTML = (finalRender ? "" : renderThinkingHtml()) + renderToolStatusesHtml() + renderMarkdown(text);
+      // 流式中间帧先走纯文本，优先降低每次增量渲染成本。
+      // 最后一帧再补完整 Markdown、代码高亮和 MathJax。
+      const canRenderStreamingMath = !finalRender && hasRenderableMath(text);
+      const contentHtml = (finalRender || canRenderStreamingMath)
+        ? renderMarkdown(text)
+        : renderStreamingPlainText(text);
+      bubble.innerHTML = (finalRender ? "" : renderThinkingHtml()) + renderToolStatusesHtml() + contentHtml;
       if (!finalRender) bindThinkingPanels(bubble);
       injectCitationMarkers(bubble, sources);
       bubble.insertAdjacentHTML("beforeend", renderSourcesStrip(sources));
@@ -5312,6 +5351,12 @@
         enhanceCodeBlocks(bubble);
         renderMath(bubble);
         applyMessageCollapse(bubble.closest(".msg-wrap"), true);
+      } else if (canRenderStreamingMath) {
+        const now = Date.now();
+        if (now - lastStreamingMathRenderTime >= STREAMING_MATH_RENDER_THROTTLE) {
+          lastStreamingMathRenderTime = now;
+          renderMath(bubble);
+        }
       }
 
       // 渲染后，如果用户不在底部且内容高度变化了，保持滚动位置
@@ -5424,6 +5469,14 @@
       return ch === "\n";
     }
 
+    function getTypewriterBurstSize(remaining) {
+      if (remaining > 900) return 28;
+      if (remaining > 480) return 18;
+      if (remaining > 220) return 12;
+      if (remaining > 80) return 7;
+      return 3;
+    }
+
     function getNextTypewriterSlice() {
       const start = streamingDisplayContent.length;
       const source = streamingTargetContent;
@@ -5433,30 +5486,52 @@
       }
 
       let end = start;
-      const first = source[end];
+      const burstSize = getTypewriterBurstSize(source.length - start);
+      let units = 0;
 
-      if (isLineBreak(first)) {
+      while (end < source.length && units < burstSize) {
+        const first = source[end];
+
+        if (isLineBreak(first)) {
+          end += 1;
+          units += 2;
+          break;
+        }
+
+        if (isWhitespace(first)) {
+          while (end < source.length && isWhitespace(source[end])) end += 1;
+          units += 1;
+          continue;
+        }
+
+        if (isCjkChar(first)) {
+          end += 1;
+          units += 1;
+          continue;
+        }
+
+        if (isAsciiWordChar(first)) {
+          while (end < source.length && isAsciiWordChar(source[end])) end += 1;
+          units += 2;
+          continue;
+        }
+
         end += 1;
-      } else if (isWhitespace(first)) {
-        while (end < source.length && isWhitespace(source[end])) end += 1;
-      } else if (isCjkChar(first)) {
-        end += 1;
-      } else if (isAsciiWordChar(first)) {
-        while (end < source.length && isAsciiWordChar(source[end])) end += 1;
-      } else {
-        end += 1;
+        units += 1;
+
+        if (isHardPunctuation(first)) break;
       }
 
       const chunk = source.slice(start, end);
       const last = chunk[chunk.length - 1] || "";
 
-      let delay = 6;
-      if (isLineBreak(last)) delay = 28;
-      else if (isWhitespace(last)) delay = 3;
-      else if (isCjkChar(last)) delay = 7;
-      else if (isAsciiWordChar(last)) delay = 8;
-      else if (isSoftPunctuation(last)) delay = 14;
-      else if (isHardPunctuation(last)) delay = 24;
+      let delay = 2;
+      if (isLineBreak(last)) delay = 12;
+      else if (isWhitespace(last)) delay = 1;
+      else if (isCjkChar(last)) delay = 3;
+      else if (isAsciiWordChar(last)) delay = 4;
+      else if (isSoftPunctuation(last)) delay = 6;
+      else if (isHardPunctuation(last)) delay = 10;
 
       return {
         nextText: source.slice(0, end),
@@ -5503,17 +5578,17 @@
       activeToolStatuses = [];
       activeStreamingSources = [];
       lastStreamingRenderTime = 0;
+      lastStreamingMathRenderTime = 0;
       ensureThinkingMotion();
     }
 
     function commitStreamingFrame(text) {
       pendingStreamingContent = "";
-      streamingDisplayContent = text;
       streamingTargetContent = text;
       if (messages.length && messages[messages.length - 1].role === "assistant") {
         messages[messages.length - 1].content = text;
       }
-      updateLastAssistantBubble(text, false, true);
+      ensureStreamingTypewriter();
     }
 
     function setThinkingContextFromInput(text, files, options = {}) {
