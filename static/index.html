@@ -594,6 +594,17 @@
       line-height: 1.62;
     }
 
+    .assistant .bubble .streaming-body {
+      display: block;
+    }
+
+    .assistant .bubble .streaming-stable:empty,
+    .assistant .bubble .streaming-pending-block:empty,
+    .assistant .bubble .streaming-sources-slot:empty,
+    .assistant .bubble .streaming-caret-slot:empty {
+      display: none;
+    }
+
     .assistant .bubble h1,
     .assistant .bubble h2,
     .assistant .bubble h3,
@@ -5293,6 +5304,42 @@
       return `<div class="streaming-plain-text">${escapeHtml(text || "")}</div>`;
     }
 
+    function ensureStreamingBubbleScaffold(bubble) {
+      let body = bubble.querySelector(".streaming-body");
+      if (!body) {
+        bubble.innerHTML = "";
+
+        body = document.createElement("div");
+        body.className = "streaming-body";
+
+        const stable = document.createElement("div");
+        stable.className = "streaming-stable";
+
+        const pending = document.createElement("div");
+        pending.className = "streaming-pending-block";
+
+        const sources = document.createElement("div");
+        sources.className = "streaming-sources-slot";
+
+        const caret = document.createElement("div");
+        caret.className = "streaming-caret-slot";
+
+        body.appendChild(stable);
+        body.appendChild(pending);
+        body.appendChild(sources);
+        body.appendChild(caret);
+        bubble.appendChild(body);
+      }
+
+      return {
+        body,
+        stable: body.querySelector(".streaming-stable"),
+        pending: body.querySelector(".streaming-pending-block"),
+        sources: body.querySelector(".streaming-sources-slot"),
+        caret: body.querySelector(".streaming-caret-slot")
+      };
+    }
+
     function isCodeFenceClosed(text) {
       const matches = String(text || "").match(/```/g) || [];
       return matches.length % 2 === 0;
@@ -5397,32 +5444,41 @@
       const pendingText = stripStreamingStatusMarkers(streamingDisplayContent || "");
       const hasStreamingBuffers = !finalRender && (stableText || pendingText);
 
-      let contentHtml = "";
       if (finalRender) {
-        contentHtml = renderMarkdown(text);
-      } else if (hasStreamingBuffers) {
-        contentHtml =
-          (stableText ? renderMarkdown(stableText) : "") +
-          (pendingText ? renderStreamingPlainText(pendingText) : "");
-      } else {
-        contentHtml = renderStreamingPlainText(text);
-      }
-      bubble.innerHTML = (finalRender ? "" : renderThinkingHtml()) + renderToolStatusesHtml() + contentHtml;
-      if (!finalRender) bindThinkingPanels(bubble);
-      injectCitationMarkers(bubble, sources);
-      bubble.insertAdjacentHTML("beforeend", renderSourcesStrip(sources));
-
-      if (showCaret && text.trim() && text.trim() !== "思考中...") {
-        const caret = document.createElement("span");
-        caret.className = "stream-caret";
-        bubble.appendChild(caret);
-      }
-
-      if (finalRender) {
+        bubble.innerHTML = renderToolStatusesHtml() + renderMarkdown(text);
+        injectCitationMarkers(bubble, sources);
+        bubble.insertAdjacentHTML("beforeend", renderSourcesStrip(sources));
         enhanceRichText(bubble);
         enhanceCodeBlocks(bubble);
         renderMath(bubble);
         applyMessageCollapse(bubble.closest(".msg-wrap"), true);
+      } else {
+        const parts = ensureStreamingBubbleScaffold(bubble);
+        if (!parts.stable || !parts.pending || !parts.sources || !parts.caret) return false;
+
+        bubble.insertAdjacentHTML("afterbegin", renderToolStatusesHtml());
+        const toolStatuses = bubble.querySelectorAll(":scope > .tool-status");
+        toolStatuses.forEach(node => {
+          if (node.nextElementSibling !== parts.body) {
+            bubble.insertBefore(node, parts.body);
+          }
+        });
+
+        if (hasStreamingBuffers) {
+          parts.stable.innerHTML = stableText ? renderMarkdown(stableText) : "";
+          parts.pending.innerHTML = pendingText ? renderStreamingPlainText(pendingText) : "";
+        } else {
+          parts.stable.innerHTML = "";
+          parts.pending.innerHTML = renderStreamingPlainText(text);
+        }
+
+        parts.sources.innerHTML = renderSourcesStrip(sources);
+        parts.caret.innerHTML = showCaret && text.trim() && text.trim() !== "思考中..."
+          ? '<span class="stream-caret"></span>'
+          : "";
+
+        bindThinkingPanels(bubble);
+        injectCitationMarkers(parts.stable, sources);
       }
 
       // 渲染后，如果用户不在底部且内容高度变化了，保持滚动位置
