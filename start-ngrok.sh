@@ -6,6 +6,7 @@ mkdir -p logs
 
 PORT="${1:-8000}"
 NGROK_BIN="${NGROK_BIN:-ngrok}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 NGROK_API="http://127.0.0.1:4040/api/tunnels"
 NGROK_CONFIG_FILE="${HOME}/.config/ngrok/ngrok.yml"
 NGROK_LOG="logs/ngrok.log"
@@ -23,6 +24,15 @@ if ! command -v "$NGROK_BIN" >/dev/null 2>&1; then
     NGROK_BIN="${HOME}/.local/bin/ngrok"
   else
     echo "ngrok command not found. Run ./install.sh or install ngrok first."
+    exit 1
+  fi
+fi
+
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  if command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  else
+    echo "python3 command not found. Install Python 3 first."
     exit 1
   fi
 fi
@@ -57,7 +67,7 @@ echo $! > "$NGROK_PID_FILE"
 PUBLIC_URL=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if curl -fsS "$NGROK_API" >/tmp/claude-web-ngrok-api.json 2>/dev/null; then
-    PUBLIC_URL="$(python - <<'PY'
+    PUBLIC_URL="$("$PYTHON_BIN" - <<'PY'
 import json
 from pathlib import Path
 path = Path('/tmp/claude-web-ngrok-api.json')

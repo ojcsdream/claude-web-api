@@ -91,6 +91,7 @@ def init_db():
     """)
 
     cur.execute("CREATE INDEX IF NOT EXISTS idx_system_prompts_updated_at ON system_prompts(updated_at)")
+
     conn.commit()
     conn.close()
 
@@ -435,3 +436,4 @@ def db_get_message_superseded_by(message_id: int):
     if row:
         return row["superseded_by"]
     return None
+

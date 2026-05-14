@@ -22,6 +22,7 @@ SEARCH_CACHE = {}
 PLANNER_CACHE = {}
 PAGE_CACHE = {}
 TAVILY_CLIENT = None
+GITHUB_SOURCE_CACHE = {}
 
 
 def _cache_get(cache: dict, key: str):
@@ -331,6 +332,499 @@ def extract_urls_from_text(text: str, max_urls: int = 3):
     return result[:max_urls]
 
 
+def _github_api_headers() -> dict:
+    headers = {
+        "User-Agent": "Claude-Web/1.0",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    token = os.environ.get("GITHUB_TOKEN", "").strip() or os.environ.get("GH_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    return headers
+
+
+def _github_api_json(url: str, timeout: int = 15):
+    import urllib.request
+
+    req = urllib.request.Request(url, headers=_github_api_headers(), method="GET")
+    with resilient_urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read(1024 * 1024 * 4).decode("utf-8", errors="ignore"))
+
+
+def _github_api_url(owner: str, repo: str, path: str = "", ref: str = "") -> str:
+    encoded_path = "/".join(quote(part, safe="") for part in (path or "").split("/") if part)
+    url = f"https://api.github.com/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/contents"
+    if encoded_path:
+        url += "/" + encoded_path
+    if ref:
+        url += "?ref=" + quote(ref, safe="")
+    return url
+
+
+def _github_repo_api_url(owner: str, repo: str) -> str:
+    return f"https://api.github.com/repos/{quote(owner, safe='')}/{quote(repo, safe='')}"
+
+
+def _github_tree_api_url(owner: str, repo: str, ref: str) -> str:
+    return (
+        f"https://api.github.com/repos/{quote(owner, safe='')}/{quote(repo, safe='')}"
+        f"/git/trees/{quote(ref, safe='')}?recursive=1"
+    )
+
+
+def _github_raw_url(owner: str, repo: str, ref: str, path: str) -> str:
+    encoded_path = "/".join(quote(part, safe="") for part in path.strip("/").split("/") if part)
+    return f"https://raw.githubusercontent.com/{quote(owner, safe='')}/{quote(repo, safe='')}/{quote(ref, safe='')}/{encoded_path}"
+
+
+def _is_github_url(url: str) -> bool:
+    parsed = urlparse(url or "")
+    host = (parsed.netloc or "").lower()
+    return host == "github.com" or host.endswith(".github.com")
+
+
+def extract_github_urls_from_text(text: str, max_urls: int = 4) -> list[str]:
+    urls = []
+    for url in extract_urls_from_text(text, max_urls=max_urls):
+        if _is_github_url(url) and url not in urls:
+            urls.append(url)
+    return urls[:max_urls]
+
+
+def _decode_github_file_content(item: dict, max_chars: int) -> str:
+    content = item.get("content") or ""
+    encoding = (item.get("encoding") or "").lower()
+    if encoding == "base64":
+        raw = base64.b64decode(content.encode("utf-8"), validate=False)
+        text = raw.decode("utf-8", errors="replace")
+    else:
+        text = str(content)
+    if len(text) > max_chars:
+        return text[:max_chars] + "\n\n[GitHub 源码内容过长，已截断]"
+    return text
+
+
+def _summarize_github_directory(items: list[dict], max_entries: int = 80) -> str:
+    rows = []
+    for item in sorted(items or [], key=lambda x: (x.get("type") != "dir", x.get("name", "").lower()))[:max_entries]:
+        item_type = item.get("type") or "file"
+        size = item.get("size")
+        path = item.get("path") or item.get("name") or ""
+        suffix = f" ({size} bytes)" if item_type == "file" and isinstance(size, int) else ""
+        rows.append(f"- {item_type}: {path}{suffix}")
+    if not rows:
+        return "[GitHub 目录为空或未返回内容]"
+    text = "GitHub 目录内容：\n" + "\n".join(rows)
+    if len(items or []) > max_entries:
+        text += f"\n[目录项过多，仅显示前 {max_entries} 项]"
+    return text
+
+
+def _parse_github_url(url: str) -> dict | None:
+    parsed = urlparse(url or "")
+    if not _is_github_url(url):
+        return None
+    parts = [unquote(p) for p in (parsed.path or "").strip("/").split("/") if p]
+    if len(parts) < 2:
+        return None
+    owner, repo = parts[0], parts[1]
+    repo = repo[:-4] if repo.endswith(".git") else repo
+    if not owner or not repo:
+        return None
+    mode = parts[2] if len(parts) >= 3 else ""
+    rest = parts[3:] if mode in ("blob", "tree") else parts[2:]
+    return {"owner": owner, "repo": repo, "mode": mode, "rest": rest}
+
+
+def _github_default_branch(owner: str, repo: str) -> str:
+    cache_key = f"github-default-branch:{owner}/{repo}"
+    cached = _cache_get(GITHUB_SOURCE_CACHE, cache_key)
+    if cached:
+        return cached
+    data = _github_api_json(_github_repo_api_url(owner, repo), timeout=15)
+    branch = (data.get("default_branch") or "main").strip() or "main"
+    return _cache_set(GITHUB_SOURCE_CACHE, cache_key, branch, ttl_seconds=1800)
+
+
+def _extract_requested_repo_paths(text: str) -> list[str]:
+    value = text or ""
+    candidates = []
+    patterns = [
+        r"(?<![\w./-])[\w.-]+(?:/[\w.@+-]+)+\.[A-Za-z0-9]{1,12}(?![\w/-])",
+        r"(?<![\w.-])[\w.-]+\.(?:py|js|ts|tsx|jsx|java|go|rs|cpp|c|h|hpp|cs|php|rb|swift|kt|kts|sh|bash|zsh|html|css|scss|vue|svelte|json|ya?ml|toml|ini|md|txt|sql)(?![\w.-])",
+    ]
+    for pattern in patterns:
+        for match in re.findall(pattern, value, flags=re.I):
+            item = str(match).strip().strip("`'\"，。；;:：!?！？()[]{}<>")
+            if item and item not in candidates:
+                candidates.append(item)
+    lowered = value.lower()
+    code_analysis_terms = (
+        "源码", "代码", "函数", "调用链", "逻辑", "入口", "路由", "接口", "实现", "分析",
+        "联网搜索", "搜索功能", "web_search", "search", "provider", "mcp",
+        "source", "code", "function", "implementation", "call chain", "route", "endpoint",
+    )
+    if any(term in lowered for term in code_analysis_terms):
+        for item in (
+            "app.py",
+            "services.py",
+            "service.py",
+            "chat_utils.py",
+            "config.py",
+            "README.md",
+        ):
+            if item not in candidates:
+                candidates.append(item)
+    return candidates[:8]
+
+
+def _default_repo_paths_for_prompt(user_prompt: str) -> list[str]:
+    paths = _extract_requested_repo_paths(user_prompt)
+    for item in (
+        "README.md",
+        "app.py",
+        "main.py",
+        "server.py",
+        "api.py",
+        "services.py",
+        "service.py",
+        "routes.py",
+        "config.py",
+        "settings.py",
+        "chat_utils.py",
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+    ):
+        if item not in paths:
+            paths.append(item)
+    return paths
+
+
+def _github_repo_files(owner: str, repo: str, ref: str = "") -> tuple[str, list[str]]:
+    branch = ref or _github_default_branch(owner, repo)
+    cache_key = f"github-tree:{owner}/{repo}:{branch}"
+    tree = _cache_get(GITHUB_SOURCE_CACHE, cache_key)
+    if tree is None:
+        data = _github_api_json(_github_tree_api_url(owner, repo, branch), timeout=20)
+        tree = data.get("tree") or []
+        _cache_set(GITHUB_SOURCE_CACHE, cache_key, tree, ttl_seconds=900)
+
+    files = [
+        item.get("path", "")
+        for item in tree
+        if item.get("type") == "blob" and item.get("path")
+    ]
+    return branch, files
+
+
+def _github_find_matching_paths(owner: str, repo: str, requested_paths: list[str], ref: str = "", limit: int = 4) -> list[str]:
+    if not requested_paths:
+        return []
+    _branch, files = _github_repo_files(owner, repo, ref=ref)
+    matched = []
+    lowered_files = [(path, path.lower()) for path in files]
+    for requested in requested_paths:
+        req = requested.strip("/").lower()
+        if not req:
+            continue
+        req_name = req.rsplit("/", 1)[-1]
+        req_names = [req_name]
+        if "." in req_name:
+            stem, ext = req_name.rsplit(".", 1)
+            if stem.endswith("s") and len(stem) > 1:
+                req_names.append(stem[:-1] + "." + ext)
+            else:
+                req_names.append(stem + "s." + ext)
+        exact = [path for path, low in lowered_files if low == req]
+        suffix = [path for path, low in lowered_files if low.endswith("/" + req)]
+        basename = [path for path, low in lowered_files if low.rsplit("/", 1)[-1] in req_names]
+        for path in exact + suffix + basename:
+            if path not in matched:
+                matched.append(path)
+            if len(matched) >= max(1, int(limit or 4)):
+                return matched
+    return matched
+
+
+def _github_prompt_terms(user_prompt: str) -> list[str]:
+    value = re.sub(r"https?://\\S+", " ", (user_prompt or "").lower())
+    raw_terms = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}|[\u4e00-\u9fff]{2,}", value)
+    stop = {
+        "https", "http", "github", "com", "www", "这个", "项目", "仓库", "源码", "代码",
+        "分析", "具体", "详细", "一下", "功能", "逻辑", "函数", "文件", "读取",
+        "source", "code", "repo", "repository", "project", "please", "function",
+    }
+    terms = []
+    for term in raw_terms:
+        if term in stop or len(term) > 40:
+            continue
+        if term not in terms:
+            terms.append(term)
+    return terms[:20]
+
+
+def _github_file_score(path: str, user_prompt: str, terms: list[str]) -> int:
+    low = path.lower()
+    name = low.rsplit("/", 1)[-1]
+    score = 0
+    if name in ("readme.md", "readme.rst", "readme.txt"):
+        score += 42
+    if name in ("app.py", "main.py", "server.py", "api.py", "services.py", "service.py", "routes.py", "views.py"):
+        score += 45
+    if name in ("package.json", "pyproject.toml", "requirements.txt", "config.py", "settings.py", "docker-compose.yml"):
+        score += 18
+    if low.startswith(("src/", "app/", "server/", "backend/", "api/")):
+        score += 12
+    if low.startswith(("test/", "tests/", "docs/", ".github/", "android/", "ios/")):
+        score -= 12
+    if any(part in low for part in ("node_modules/", "dist/", "build/", "vendor/", ".next/", "__pycache__/")):
+        score -= 80
+    if name.endswith((".lock", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".pdf", ".zip", ".gz")):
+        score -= 90
+
+    for term in terms:
+        if term in low:
+            score += 16
+
+    prompt = (user_prompt or "").lower()
+    intent_keywords = {
+        "search": ("search", "web_search", "tavily", "serpapi", "google", "bing", "duckduckgo", "browser", "mcp"),
+        "联网搜索": ("search", "web_search", "tavily", "serpapi", "google", "bing", "duckduckgo", "browser", "mcp"),
+        "路由": ("route", "routes", "app.py", "api", "server"),
+        "接口": ("route", "routes", "app.py", "api", "server"),
+        "前端": ("static/", "index.html", "src/", "components", "pages"),
+        "配置": ("config", "settings", ".env", "toml", "yaml", "yml"),
+    }
+    for key, needles in intent_keywords.items():
+        if key in prompt:
+            for needle in needles:
+                if needle in low:
+                    score += 22
+    return score
+
+
+def _candidate_branches(ref: str = "") -> list[str]:
+    branches = []
+    for item in (ref, "main", "master", "dev", "develop"):
+        item = (item or "").strip()
+        if item and item not in branches:
+            branches.append(item)
+    return branches
+
+
+def _github_select_relevant_paths(owner: str, repo: str, user_prompt: str, ref: str = "", limit: int = 4) -> list[str]:
+    _branch, files = _github_repo_files(owner, repo, ref=ref)
+    terms = _github_prompt_terms(user_prompt)
+    scored = []
+    for path in files:
+        score = _github_file_score(path, user_prompt, terms)
+        if score > -50:
+            scored.append((score, path.count("/"), len(path), path))
+    scored.sort(key=lambda item: (-item[0], item[1], item[2], item[3].lower()))
+    picked = []
+    for score, _depth, _length, path in scored:
+        if score <= 0 and picked:
+            break
+        if path not in picked:
+            picked.append(path)
+        if len(picked) >= limit:
+            break
+    if picked:
+        return picked
+    fallback_names = ("README.md", "app.py", "main.py", "server.py", "services.py", "package.json", "pyproject.toml")
+    lowered = {path.lower(): path for path in files}
+    for name in fallback_names:
+        path = lowered.get(name.lower())
+        if path and path not in picked:
+            picked.append(path)
+        if len(picked) >= limit:
+            break
+    return picked
+
+
+def _fetch_github_raw_source(owner: str, repo: str, path: str, refs: list[str]) -> dict | None:
+    import urllib.error
+    import urllib.request
+
+    for ref in refs:
+        raw_url = _github_raw_url(owner, repo, ref, path)
+        try:
+            req = urllib.request.Request(
+                raw_url,
+                headers={
+                    "User-Agent": "Claude-Web/1.0",
+                    "Accept": "text/plain,*/*",
+                },
+                method="GET",
+            )
+            with resilient_urlopen(req, timeout=15) as resp:
+                raw = resp.read(1024 * 1024)
+            text = raw.decode("utf-8", errors="replace")
+            if len(text) > 12000:
+                text = text[:12000] + "\n\n[GitHub raw 源码内容过长，已截断]"
+            return {
+                "title": f"{owner}/{repo}: {path}",
+                "url": f"https://github.com/{owner}/{repo}/blob/{ref}/{path}",
+                "excerpt": text,
+                "provider": "github-mcp",
+                "quality": "official",
+                "query": "",
+            }
+        except urllib.error.HTTPError as exc:
+            if int(getattr(exc, "code", 0) or 0) == 404:
+                continue
+        except Exception:
+            continue
+    return None
+
+
+def _github_source_from_item(url: str, owner: str, repo: str, item, ref: str = "") -> dict:
+    if isinstance(item, list):
+        excerpt = _summarize_github_directory(item)
+        parsed_url = _parse_github_url(url) or {}
+        rest = parsed_url.get("rest") or []
+        title_path = "/".join(rest[1:]) if (parsed_url.get("mode") == "tree" and len(rest) > 1) else ""
+        title = f"{owner}/{repo}" + (f": {title_path}" if title_path else " directory")
+        return {
+            "title": title,
+            "url": url,
+            "excerpt": excerpt,
+            "provider": "github-mcp",
+            "quality": "official",
+            "query": "",
+        }
+
+    item_type = item.get("type") or "file"
+    path = item.get("path") or ""
+    title = f"{owner}/{repo}: {path or item.get('name') or ref or 'repository'}"
+    if item_type == "file":
+        excerpt = _decode_github_file_content(item, max_chars=12000)
+    elif item_type == "dir":
+        nested = _github_api_json(_github_api_url(owner, repo, path, ref), timeout=15)
+        excerpt = _summarize_github_directory(nested)
+    else:
+        excerpt = json.dumps(item, ensure_ascii=False)[:4000]
+    return {
+        "title": title,
+        "url": item.get("html_url") or url,
+        "excerpt": excerpt,
+        "provider": "github-mcp",
+        "quality": "official",
+        "query": "",
+    }
+
+
+def fetch_github_source(url: str) -> dict | None:
+    parsed = _parse_github_url(url)
+    if not parsed:
+        return None
+
+    cache_key = "github:" + normalize_source_url(url)
+    cached = _cache_get(GITHUB_SOURCE_CACHE, cache_key)
+    if cached is not None:
+        return dict(cached)
+
+    owner = parsed["owner"]
+    repo = parsed["repo"]
+    mode = parsed["mode"]
+    rest = parsed["rest"]
+
+    try:
+        if mode in ("blob", "tree") and rest:
+            errors = []
+            for split_at in range(1, len(rest) + 1):
+                ref = "/".join(rest[:split_at])
+                path = "/".join(rest[split_at:])
+                try:
+                    item = _github_api_json(_github_api_url(owner, repo, path, ref), timeout=15)
+                    source = _github_source_from_item(url, owner, repo, item, ref=ref)
+                    return _cache_set(GITHUB_SOURCE_CACHE, cache_key, source, ttl_seconds=900)
+                except Exception as exc:
+                    errors.append(str(exc))
+                    continue
+            raise RuntimeError(errors[-1] if errors else "无法解析 GitHub ref/path")
+
+        item = _github_api_json(_github_api_url(owner, repo), timeout=15)
+        source = _github_source_from_item(url, owner, repo, item)
+        return _cache_set(GITHUB_SOURCE_CACHE, cache_key, source, ttl_seconds=900)
+    except Exception as exc:
+        source = {
+            "title": f"{owner}/{repo}",
+            "url": url,
+            "excerpt": f"[GitHub 源码读取失败：{exc}]",
+            "provider": "github-mcp",
+            "quality": "official",
+            "query": "",
+        }
+        return _cache_set(GITHUB_SOURCE_CACHE, cache_key, source, ttl_seconds=120)
+
+
+def collect_github_sources_from_urls(urls: list[str], max_sources: int = 4, user_prompt: str = "") -> list[dict]:
+    sources = []
+    seen = set()
+    requested_paths = _extract_requested_repo_paths(user_prompt)
+    for url in urls or []:
+        href = normalize_source_url(url)
+        if not href or href in seen or not _is_github_url(href):
+            continue
+        seen.add(href)
+        parsed = _parse_github_url(href)
+        if parsed and parsed.get("mode") not in ("blob", "tree"):
+            matched_file_count = 0
+            owner = parsed["owner"]
+            repo = parsed["repo"]
+            branch = ""
+            try:
+                branch = _github_default_branch(owner, repo)
+                selected_paths = _github_find_matching_paths(
+                    owner,
+                    repo,
+                    requested_paths,
+                    ref=branch,
+                    limit=max_sources,
+                )
+                if len(selected_paths) < max_sources:
+                    for path in _github_select_relevant_paths(
+                        owner,
+                        repo,
+                        user_prompt,
+                        ref=branch,
+                        limit=max_sources,
+                    ):
+                        if path not in selected_paths:
+                            selected_paths.append(path)
+                        if len(selected_paths) >= max_sources:
+                            break
+                for path in selected_paths:
+                    file_url = f"https://github.com/{owner}/{repo}/blob/{branch}/{path}"
+                    source = fetch_github_source(file_url)
+                    if source and not str(source.get("excerpt", "")).startswith("[GitHub 源码读取失败"):
+                        sources.append(source)
+                        matched_file_count += 1
+                    if len(sources) >= max_sources:
+                        return sources
+            except Exception:
+                pass
+            if matched_file_count:
+                continue
+            for path in _default_repo_paths_for_prompt(user_prompt):
+                source = _fetch_github_raw_source(owner, repo, path, _candidate_branches(branch))
+                if source:
+                    sources.append(source)
+                if len(sources) >= max_sources:
+                    return sources
+            if sources:
+                continue
+        source = fetch_github_source(href)
+        if source and not str(source.get("excerpt", "")).startswith("[GitHub 源码读取失败"):
+            sources.append(source)
+        if len(sources) >= max_sources:
+            break
+    return sources
+
+
 def fetch_webpage_text(url: str, max_chars: int = 12000, timeout: int = 8) -> str:
     """
     读取网页并提取正文纯文本。
@@ -516,7 +1010,7 @@ def enhance_prompt_with_url_fetch(user_prompt: str) -> str:
     直连模式专用：
     如果用户输入里包含 URL，则读取网页内容并拼接到 prompt。
     """
-    urls = extract_urls_from_text(user_prompt)
+    urls = [url for url in extract_urls_from_text(user_prompt) if not _is_github_url(url)]
     if not urls:
         return user_prompt
 
@@ -1730,6 +2224,7 @@ def build_search_tool_call_prompt(user_prompt: str, context_messages=None, force
         "你现在处在工具调用决策阶段。你不能回答用户，只能决定是否调用搜索工具。\n"
         "可用工具：\n"
         "web_search({\"queries\":[\"搜索关键词1\",\"搜索关键词2\"], \"read_urls\":[\"可选URL\"]})\n\n"
+        "说明：如果 read_urls 里包含 github.com 链接，后端会优先用 GitHub 源码读取器解析文件或目录内容。\n\n"
         "决策规则：\n"
         f"1. {force_rule}\n"
         "2. 先理解用户真实需求，再构造 query；query 必须和用户问题一致，不能把问题改成另一个方向。\n"
@@ -1849,29 +2344,32 @@ def select_sources_via_ai(user_prompt: str, context_messages, sources: list[dict
 
 
 def build_search_tool_observation(user_prompt: str, sources: list[dict], plan: dict) -> str:
+    tool_name = "github_mcp" if sources and all(item.get("provider") == "github-mcp" for item in sources) else "web_search"
     tool_call = {
-        "tool": "web_search",
+        "tool": tool_name,
         "queries": plan.get("search_queries") or [],
         "read_urls": plan.get("parse_links", []),
     }
     compact_sources = []
     for item in sources:
+        excerpt_chars = 6000 if item.get("provider") == "github-mcp" else 1800
         compact_sources.append({
             "index": item.get("index"),
             "title": item.get("title", ""),
             "url": item.get("url", ""),
-            "excerpt": _trim_excerpt(item.get("excerpt", ""), 1800),
+            "excerpt": _trim_excerpt(item.get("excerpt", ""), excerpt_chars),
             "provider": item.get("provider", ""),
             "quality": item.get("quality") or classify_source_quality(item.get("url", ""), item.get("title", "")),
             "query": item.get("query", ""),
         })
     return (
         "以下是本轮 AI 自主调用搜索工具后的工具记录。最终回答必须由你自行筛选这些工具结果，不要机械复述。\n"
+        "如果来源 provider=github-mcp，表示后端已经读取 GitHub 仓库的具体源码文件或目录；回答源码问题时优先使用这些内容。\n"
         "如果工具结果不足以回答，就明确说本次后端联网搜索没有找到足够可靠的来源，不要编造。\n"
         "回答时不得说“我不能联网”“我无法实时搜索”“截至我可用信息范围”等模板话；后端已经完成了本轮工具决策/检索流程。\n"
         "引用来源时使用 [1]、[2] 这样的编号；不要引用没有使用的来源编号。\n\n"
-        f"assistant to=web_search:\n{json.dumps(tool_call, ensure_ascii=False)}\n\n"
-        f"tool web_search result:\n{json.dumps(compact_sources, ensure_ascii=False)}\n\n"
+        f"assistant to={tool_name}:\n{json.dumps(tool_call, ensure_ascii=False)}\n\n"
+        f"tool {tool_name} result:\n{json.dumps(compact_sources, ensure_ascii=False)}\n\n"
         f"用户当前问题：\n{user_prompt or ''}"
     )
 
@@ -1913,6 +2411,26 @@ def run_search_tool_round(
     if not plan.get("should_search") and not plan.get("parse_links"):
         return "", [], plan
 
+    github_urls = extract_github_urls_from_text(prompt, max_urls=4)
+    for url in plan.get("parse_links", []) or []:
+        if _is_github_url(url) and url not in github_urls:
+            github_urls.append(url)
+    github_sources = collect_github_sources_from_urls(
+        github_urls,
+        max_sources=max(6, max_results),
+        user_prompt=prompt,
+    )
+    github_sources = [
+        item for item in github_sources
+        if item.get("excerpt") and not str(item.get("excerpt", "")).startswith("[GitHub 源码读取失败")
+    ]
+    if github_sources:
+        for idx, item in enumerate(github_sources, 1):
+            item["index"] = idx
+        plan["tool"] = "github_mcp"
+        observation = build_search_tool_observation(prompt, github_sources, plan)
+        return observation, github_sources, plan
+
     queries = [q for q in plan.get("search_queries", []) if q][:3]
     sources = compile_search_sources_from_queries(
         prompt,
@@ -1926,18 +2444,34 @@ def run_search_tool_round(
         max_pages=2,
         max_chars=2000,
     )
+    merged_sources = []
+    seen_urls = set()
+    for item in list(github_sources) + list(sources):
+        href = normalize_source_url(item.get("url", ""))
+        if href and href in seen_urls:
+            continue
+        if href:
+            seen_urls.add(href)
+        merged_sources.append(item)
+    sources = merged_sources
+
     for idx, item in enumerate(sources, 1):
         item["index"] = idx
 
-    selected = select_sources_via_ai(
+    selected_github = [item for item in sources if item.get("provider") == "github-mcp"]
+    non_github_sources = [item for item in sources if item.get("provider") != "github-mcp"]
+    selected = selected_github + select_sources_via_ai(
         prompt,
         context_messages,
-        sources,
+        non_github_sources,
         plan,
         api_base_url,
         api_auth_token,
         api_model,
     )
+    if not selected:
+        selected = selected_github
+    selected = selected[:max(1, max_results)]
     for idx, item in enumerate(selected, 1):
         item["index"] = idx
     observation = build_search_tool_observation(prompt, selected, plan) if selected else build_search_tool_observation(prompt, [], plan)

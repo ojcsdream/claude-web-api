@@ -583,7 +583,10 @@ def chat_stream(body: ChatBody):
             yield "\n[[STATUS:parsing]]\n"
         if search_intent:
             yield "\n[[STATUS:planning_search]]\n"
-            yield "\n[[STATUS:searching]]\n"
+            if any("github.com" in url.lower() for url in extract_urls_from_text(body.prompt)):
+                yield "\n[[STATUS:github_mcp]]\n"
+            else:
+                yield "\n[[STATUS:searching]]\n"
 
         effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
         sources = []
