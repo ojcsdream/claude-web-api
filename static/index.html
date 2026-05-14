@@ -5267,13 +5267,13 @@
     const STREAMING_RENDER_THROTTLE = 16; // 接近 60fps，优先更快把新内容画出来
     let streamingDisplayContent = "";
     let streamingTargetContent = "";
+    let streamingStableContent = "";
+    let streamingPendingContent = "";
+    let streamingFullContent = "";
     let streamingTypewriterTimer = null;
     let streamingScheduleSeq = 0;
     let isAssistantTyping = false;
     let thinkingMotionTimer = null;
-    let lastStreamingMathRenderTime = 0;
-    const STREAMING_MATH_RENDER_THROTTLE = 140;
-
     function getLastAssistantBubble() {
       const assistantWraps = chatList.querySelectorAll(".msg-wrap.assistant");
       if (!assistantWraps.length) return null;
@@ -5293,19 +5293,83 @@
       return `<div class="streaming-plain-text">${escapeHtml(text || "")}</div>`;
     }
 
-    function hasRenderableInlineDollarMath(text) {
-      return /(^|[^\$\\])\$[^$\n][\s\S]*?[^$\n]\$(?!\$)/.test(text || "");
+    function isCodeFenceClosed(text) {
+      const matches = String(text || "").match(/```/g) || [];
+      return matches.length % 2 === 0;
     }
 
-    function hasRenderableMath(text) {
-      const source = String(text || "");
-      return (
-        source.includes("\\(") ||
-        source.includes("$$") ||
-        source.includes("\\[") ||
-        source.includes("\\begin{") ||
-        hasRenderableInlineDollarMath(source)
+    function isMathClosed(text) {
+      const source = String(text || "").replace(/\\\$/g, "");
+      const blockMatches = source.match(/\$\$/g) || [];
+      if (blockMatches.length % 2 !== 0) return false;
+
+      const withoutBlocks = source.replace(/\$\$[\s\S]*?\$\$/g, "");
+      const inlineMatches = withoutBlocks.match(/(?<!\$)\$(?!\$)/g) || [];
+      return inlineMatches.length % 2 === 0;
+    }
+
+    function looksLikeIncompleteTable(text) {
+      const recent = String(text || "").split("\n").slice(-6);
+      const tableLikeLines = recent.filter(line => line.includes("|"));
+      if (tableLikeLines.length < 2) return false;
+      return !recent.some(line =>
+        /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(line)
       );
+    }
+
+    function isSafeStableSegment(text) {
+      const source = String(text || "");
+      if (!source.trim()) return true;
+      if (!isCodeFenceClosed(source)) return false;
+      if (!isMathClosed(source)) return false;
+      if (looksLikeIncompleteTable(source)) return false;
+      return true;
+    }
+
+    function findLastSentenceBoundary(text) {
+      const re = /[。？！.!?]/g;
+      let last = -1;
+      let match;
+      while ((match = re.exec(text)) !== null) {
+        last = match.index + match[0].length;
+      }
+      return last;
+    }
+
+    function splitStableSegment(buffer) {
+      const source = String(buffer || "");
+      if (!source) return { stable: "", pending: "" };
+
+      const paragraphBoundary = source.lastIndexOf("\n\n");
+      if (paragraphBoundary >= 0) {
+        const candidate = source.slice(0, paragraphBoundary + 2);
+        if (isSafeStableSegment(candidate)) {
+          return {
+            stable: candidate,
+            pending: source.slice(paragraphBoundary + 2)
+          };
+        }
+      }
+
+      const sentenceBoundary = findLastSentenceBoundary(source);
+      if (sentenceBoundary > 0) {
+        const candidate = source.slice(0, sentenceBoundary);
+        if (isSafeStableSegment(candidate)) {
+          return {
+            stable: candidate,
+            pending: source.slice(sentenceBoundary)
+          };
+        }
+      }
+
+      return {
+        stable: "",
+        pending: source
+      };
+    }
+
+    function buildStreamingRenderContent() {
+      return (streamingStableContent || "") + (streamingDisplayContent || "");
     }
 
     function renderAssistantContentIntoBubble(bubble, content, finalRender = false, showCaret = false) {
@@ -5329,12 +5393,20 @@
       const heightBefore = getPageHeight();
       const wasNearBottom = isNearBottom(AUTO_SCROLL_THRESHOLD);
 
-      // 流式中间帧先走纯文本，优先降低每次增量渲染成本。
-      // 最后一帧再补完整 Markdown、代码高亮和 MathJax。
-      const canRenderStreamingMath = !finalRender && hasRenderableMath(text);
-      const contentHtml = (finalRender || canRenderStreamingMath)
-        ? renderMarkdown(text)
-        : renderStreamingPlainText(text);
+      const stableText = stripStreamingStatusMarkers(streamingStableContent || "");
+      const pendingText = stripStreamingStatusMarkers(streamingDisplayContent || "");
+      const hasStreamingBuffers = !finalRender && (stableText || pendingText);
+
+      let contentHtml = "";
+      if (finalRender) {
+        contentHtml = renderMarkdown(text);
+      } else if (hasStreamingBuffers) {
+        contentHtml =
+          (stableText ? renderMarkdown(stableText) : "") +
+          (pendingText ? renderStreamingPlainText(pendingText) : "");
+      } else {
+        contentHtml = renderStreamingPlainText(text);
+      }
       bubble.innerHTML = (finalRender ? "" : renderThinkingHtml()) + renderToolStatusesHtml() + contentHtml;
       if (!finalRender) bindThinkingPanels(bubble);
       injectCitationMarkers(bubble, sources);
@@ -5351,12 +5423,6 @@
         enhanceCodeBlocks(bubble);
         renderMath(bubble);
         applyMessageCollapse(bubble.closest(".msg-wrap"), true);
-      } else if (canRenderStreamingMath) {
-        const now = Date.now();
-        if (now - lastStreamingMathRenderTime >= STREAMING_MATH_RENDER_THROTTLE) {
-          lastStreamingMathRenderTime = now;
-          renderMath(bubble);
-        }
       }
 
       // 渲染后，如果用户不在底部且内容高度变化了，保持滚动位置
@@ -5546,14 +5612,14 @@
 
       const remaining = streamingTargetContent.length - streamingDisplayContent.length;
       if (remaining <= 0) {
-        updateLastAssistantBubble(streamingDisplayContent, false, true);
+        updateLastAssistantBubble(buildStreamingRenderContent(), false, true);
         return;
       }
 
       const next = getNextTypewriterSlice();
       streamingDisplayContent = next.nextText;
 
-      updateLastAssistantBubble(streamingDisplayContent, false, true);
+      updateLastAssistantBubble(buildStreamingRenderContent(), false, true);
 
       if (streamingDisplayContent.length < streamingTargetContent.length) {
         streamingTypewriterTimer = setTimeout(tickStreamingTypewriter, next.delay);
@@ -5575,18 +5641,30 @@
       pendingStreamingContent = "";
       streamingDisplayContent = "";
       streamingTargetContent = "";
+      streamingStableContent = "";
+      streamingPendingContent = "";
+      streamingFullContent = "";
       activeToolStatuses = [];
       activeStreamingSources = [];
       lastStreamingRenderTime = 0;
-      lastStreamingMathRenderTime = 0;
       ensureThinkingMotion();
     }
 
     function commitStreamingFrame(text) {
       pendingStreamingContent = "";
-      streamingTargetContent = text;
+      const incoming = String(text || "");
+      streamingFullContent = incoming;
+      streamingPendingContent = incoming.slice(streamingStableContent.length);
+
+      const split = splitStableSegment(streamingPendingContent);
+      if (split.stable) {
+        streamingStableContent += split.stable;
+      }
+      streamingPendingContent = split.pending;
+      streamingTargetContent = streamingPendingContent;
+      streamingDisplayContent = "";
       if (messages.length && messages[messages.length - 1].role === "assistant") {
-        messages[messages.length - 1].content = text;
+        messages[messages.length - 1].content = incoming;
       }
       ensureStreamingTypewriter();
     }
@@ -5640,12 +5718,19 @@
       streamingRenderQueued = false;
       const text = pendingStreamingContent || (messages.length ? (messages[messages.length - 1].content || "") : "");
       pendingStreamingContent = "";
-      streamingTargetContent = text;
+      streamingFullContent = String(text || "");
+      streamingPendingContent = streamingFullContent.slice(streamingStableContent.length);
+      if (streamingPendingContent) {
+        streamingStableContent += streamingPendingContent;
+      }
+      streamingPendingContent = "";
+      streamingTargetContent = "";
+      streamingDisplayContent = "";
       if (messages.length && messages[messages.length - 1].role === "assistant") {
         messages[messages.length - 1].content = text;
       }
       stopStreamingTypewriter(finalRender);
-      updateLastAssistantBubble(streamingTargetContent, finalRender, false);
+      updateLastAssistantBubble(streamingStableContent, finalRender, false);
     }
 
     function showLoadError(message) {
