@@ -8,6 +8,7 @@ import re
 import base64
 import time
 import html
+import mimetypes
 from urllib.parse import quote, urlparse, parse_qs, unquote
 
 from fastapi import UploadFile
@@ -2029,11 +2030,52 @@ def _split_system_prompt(system_prompt: str) -> str:
     return value.strip()
 
 
+def _normalize_protocol(protocol: str, api_model: str = "") -> str:
+    value = (protocol or "").strip().lower()
+    if value in ("claude", "completions", "responses"):
+        return value
+    model = (api_model or "").strip().lower()
+    if model.startswith("gpt") or "gpt-" in model:
+        return "completions"
+    return "claude"
+
+
+def _extract_response_output_text(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+
+    if isinstance(data.get("output_text"), str):
+        return data.get("output_text", "").strip()
+
+    parts = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            text = node.get("text")
+            if isinstance(text, str) and text:
+                parts.append(text)
+            if isinstance(node.get("content"), list):
+                for item in node.get("content") or []:
+                    walk(item)
+            if isinstance(node.get("output"), list):
+                for item in node.get("output") or []:
+                    walk(item)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data.get("output"))
+    if not parts:
+        walk(data)
+    return "".join(parts).strip()
+
+
 def call_direct_text_api(
     prompt: str,
     api_base_url: str,
     api_auth_token: str,
     api_model: str = DEFAULT_MODEL,
+    api_protocol: str = "",
     system_prompt: str = "",
     max_tokens: int = 900,
     temperature: float = 0.1,
@@ -2050,9 +2092,21 @@ def call_direct_text_api(
     if not token:
         raise RuntimeError("缺少 API Key")
 
+    protocol = _normalize_protocol(api_protocol, model)
+
+    if protocol == "responses":
+        return call_direct_responses_api(
+            prompt,
+            base_url,
+            token,
+            api_model=model,
+            system_prompt=system_prompt,
+            max_output_tokens=max_tokens,
+        )
+
     lower_model = model.lower()
 
-    if lower_model.startswith("gpt") or "gpt-" in lower_model:
+    if protocol == "completions" or lower_model.startswith("gpt") or "gpt-" in lower_model:
         return call_direct_chat_completions_text(
             prompt,
             base_url,
@@ -2161,6 +2215,160 @@ def call_direct_chat_completions_text(
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="ignore")
         raise RuntimeError("OpenAI接口失败: " + (err or str(e)))
+
+
+def call_direct_responses_api(
+    prompt: str,
+    api_base_url: str,
+    api_auth_token: str,
+    api_model: str = DEFAULT_MODEL,
+    system_prompt: str = "",
+    max_output_tokens: int = 900,
+    search_context_size: str = "low",
+    use_web_search: bool = False,
+    input_payload=None,
+) -> str:
+    import urllib.request
+    import urllib.error
+
+    base_url = (api_base_url or "").strip().rstrip("/")
+    token = (api_auth_token or "").strip()
+    model = (api_model or DEFAULT_MODEL).strip()
+    if not base_url:
+        raise RuntimeError("缺少 API URL")
+    if not token:
+        raise RuntimeError("缺少 API Key")
+
+    url = build_api_url(base_url, "/v1/responses")
+    body = {
+        "model": model,
+        "instructions": _split_system_prompt(system_prompt) or None,
+        "input": input_payload if input_payload is not None else prompt,
+        "max_output_tokens": max_output_tokens,
+    }
+    if use_web_search:
+        body["tools"] = [{
+            "type": "web_search",
+            "search_context_size": search_context_size or "low",
+        }]
+    body = {k: v for k, v in body.items() if v not in (None, "", [], {})}
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": "Bearer " + token,
+            "User-Agent": "Mozilla/5.0 Claude-Web/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with resilient_urlopen(req, timeout=300) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        return _extract_response_output_text(data) or "(responses 接口无输出)"
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="ignore")
+        raise RuntimeError("Responses接口失败: " + (err or str(e)))
+
+
+def stream_direct_responses_api_text(
+    prompt: str,
+    api_base_url: str,
+    api_auth_token: str,
+    api_model: str = DEFAULT_MODEL,
+    system_prompt: str = "",
+    max_output_tokens: int = 4096,
+    search_context_size: str = "low",
+    use_web_search: bool = False,
+    input_payload=None,
+):
+    import urllib.request
+    import urllib.error
+
+    base_url = (api_base_url or "").strip().rstrip("/")
+    token = (api_auth_token or "").strip()
+    model = (api_model or DEFAULT_MODEL).strip()
+    if not base_url:
+        yield "缺少 API URL"
+        return
+    if not token:
+        yield "缺少 API Key"
+        return
+
+    url = build_api_url(base_url, "/v1/responses")
+    body = {
+        "model": model,
+        "instructions": _split_system_prompt(system_prompt) or None,
+        "input": input_payload if input_payload is not None else prompt,
+        "max_output_tokens": max_output_tokens,
+        "stream": True,
+    }
+    if use_web_search:
+        body["tools"] = [{
+            "type": "web_search",
+            "search_context_size": search_context_size or "low",
+        }]
+    body = {k: v for k, v in body.items() if v not in (None, "", [], {})}
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream, application/json, text/plain, */*",
+            "Authorization": "Bearer " + token,
+            "User-Agent": "Mozilla/5.0 Claude-Web/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with resilient_urlopen(req, timeout=300) as resp:
+            event_name = ""
+            data_lines = []
+            def flush_event():
+                nonlocal event_name, data_lines
+                payload = "\n".join(data_lines).strip()
+                if payload and payload != "[DONE]":
+                    try:
+                        obj = json.loads(payload)
+                        typ = obj.get("type") or event_name
+                        if typ == "response.output_text.delta":
+                            delta = obj.get("delta") or ""
+                            if delta:
+                                yield delta
+                        elif typ == "error" or obj.get("error"):
+                            err = obj.get("error") or obj
+                            yield "\n[Responses流式接口失败]\n" + json.dumps(err, ensure_ascii=False)
+                    except Exception:
+                        pass
+                event_name = ""
+                data_lines = []
+
+            for raw in resp:
+                text = raw.decode("utf-8", errors="ignore")
+                for line in text.splitlines():
+                    line = line.rstrip("\r")
+                    if not line:
+                        yield from flush_event()
+                        continue
+                    if line.startswith(":"):
+                        continue
+                    if line.startswith("event:"):
+                        event_name = line[6:].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].strip())
+            if data_lines:
+                yield from flush_event()
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="ignore")
+        yield (
+            "\n[Responses流式接口失败]\n"
+            f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
+            f"请求地址: {url}\n"
+            + (err or str(e))
+        )
+    except Exception as e:
+        yield "\n[Responses流式接口失败]\n" + str(e)
 
 
 def plan_search_actions(
@@ -2632,7 +2840,9 @@ def stream_direct_api_text(
     api_base_url: str,
     api_auth_token: str,
     api_model: str = DEFAULT_MODEL,
+    api_protocol: str = "",
     system_prompt: str = "",
+    use_web_search: bool = False,
 ):
     """
     第三方 API 直连真流式。
@@ -2654,10 +2864,26 @@ def stream_direct_api_text(
         yield "直连模式缺少 API Key"
         return
 
+    protocol = _normalize_protocol(api_protocol, model)
     lower_model = model.lower()
 
+    if protocol == "responses":
+        try:
+            yield from stream_direct_responses_api_text(
+                prompt,
+                base_url,
+                token,
+                api_model=model,
+                system_prompt=system_prompt,
+                max_output_tokens=4096,
+                use_web_search=use_web_search,
+            )
+        except Exception as e:
+            yield "\n[直连Responses接口失败]\n" + str(e)
+        return
+
     # OpenAI-compatible / GPT-compatible
-    if lower_model.startswith("gpt") or "gpt-" in lower_model:
+    if protocol == "completions" or lower_model.startswith("gpt") or "gpt-" in lower_model:
         url = build_api_url(base_url, "/v1/chat/completions")
         system_text = _split_system_prompt(system_prompt)
         messages = []
@@ -2725,6 +2951,7 @@ def stream_direct_api_text(
                         api_base_url,
                         api_auth_token,
                         api_model=api_model,
+                        api_protocol=api_protocol,
                         system_prompt=system_prompt,
                         max_tokens=4096,
                         temperature=MODEL_TEMPERATURE,
@@ -2829,6 +3056,7 @@ def stream_direct_api_text(
                     api_base_url,
                     api_auth_token,
                     api_model=api_model,
+                    api_protocol=api_protocol,
                     system_prompt=system_prompt,
                     max_tokens=4096,
                     temperature=MODEL_TEMPERATURE,
@@ -2859,9 +3087,11 @@ def stream_direct_and_save(
     api_base_url: str,
     api_auth_token: str,
     api_model: str,
+    api_protocol: str = "",
     provider_name: str = "",
     system_prompt: str = "",
     sources: str = "",
+    use_web_search: bool = False,
 ):
     full = ""
     for chunk in stream_direct_api_text(
@@ -2869,7 +3099,9 @@ def stream_direct_and_save(
         api_base_url,
         api_auth_token,
         api_model,
+        api_protocol,
         system_prompt,
+        use_web_search,
     ):
         full += chunk
         yield chunk
@@ -2984,13 +3216,66 @@ def build_vision_payload_parts(prompt: str, image_local_paths: list[str]):
     return openai_content, anthropic_content
 
 
+def guess_file_media_type(path: str) -> str:
+    guessed, _ = mimetypes.guess_type(path)
+    return guessed or "application/octet-stream"
+
+
+def _file_data_url(local_path: str, media_type: str = "") -> str:
+    abs_path = local_upload_path_to_abs(local_path)
+    if not abs_path.exists():
+        raise RuntimeError(f"文件不存在: {local_path}")
+    raw = abs_path.read_bytes()
+    b64 = base64.b64encode(raw).decode("utf-8")
+    return f"data:{media_type or guess_file_media_type(local_path)};base64,{b64}"
+
+
+def build_responses_input_payload(
+    prompt: str,
+    image_local_paths: list[str] | None = None,
+    file_items: list[dict] | None = None,
+):
+    content = [{
+        "type": "input_text",
+        "text": prompt,
+    }]
+
+    for local_path in image_local_paths or []:
+        media_type = guess_media_type(local_path)
+        content.append({
+            "type": "input_image",
+            "detail": "auto",
+            "image_url": _file_data_url(local_path, media_type),
+        })
+
+    for item in file_items or []:
+        local_path = item.get("local_path") if isinstance(item, dict) else ""
+        if not local_path:
+            continue
+        filename = item.get("name") or Path(local_path).name
+        content.append({
+            "type": "input_file",
+            "filename": filename,
+            "file_data": _file_data_url(local_path),
+        })
+
+    return [{
+        "type": "message",
+        "role": "user",
+        "content": content,
+    }]
+
+
 def stream_direct_vision_api_text(
     prompt: str,
     image_local_paths: list[str],
     api_base_url: str,
     api_auth_token: str,
     api_model: str,
+    api_protocol: str = "",
     system_prompt: str = "",
+    file_items: list[dict] | None = None,
+    use_web_search: bool = False,
 ):
     import urllib.request
     import urllib.error
@@ -3008,9 +3293,31 @@ def stream_direct_vision_api_text(
 
     openai_content, anthropic_content = build_vision_payload_parts(prompt, image_local_paths)
     system_text = _split_system_prompt(system_prompt)
+    protocol = _normalize_protocol(api_protocol, model)
     lower_model = model.lower()
 
-    if lower_model.startswith("gpt") or "gpt-" in lower_model:
+    if protocol == "responses":
+        try:
+            input_payload = build_responses_input_payload(
+                prompt,
+                image_local_paths=image_local_paths,
+                file_items=file_items,
+            )
+            yield from stream_direct_responses_api_text(
+                prompt,
+                base_url,
+                token,
+                api_model=model,
+                system_prompt=system_prompt,
+                max_output_tokens=4096,
+                use_web_search=use_web_search,
+                input_payload=input_payload,
+            )
+        except Exception as e:
+            yield "\n[Responses视觉/文件流式接口失败]\n" + str(e)
+        return
+
+    if protocol == "completions" or lower_model.startswith("gpt") or "gpt-" in lower_model:
         url = build_api_url(base_url, "/v1/chat/completions")
         messages = []
         if system_text:
@@ -3134,6 +3441,7 @@ def call_direct_vision_api(
     api_base_url: str,
     api_auth_token: str,
     api_model: str,
+    api_protocol: str = "",
     system_prompt: str = "",
 ) -> str:
     """
@@ -3156,10 +3464,23 @@ def call_direct_vision_api(
     openai_content, anthropic_content = build_vision_payload_parts(prompt, image_local_paths)
     system_text = _split_system_prompt(system_prompt)
 
+    protocol = _normalize_protocol(api_protocol, model)
     lower_model = model.lower()
 
+    if protocol == "responses":
+        input_payload = build_responses_input_payload(prompt, image_local_paths=image_local_paths)
+        return call_direct_responses_api(
+            prompt,
+            base_url,
+            token,
+            api_model=model,
+            system_prompt=system_prompt,
+            max_output_tokens=4096,
+            input_payload=input_payload,
+        )
+
     # GPT / OpenAI compatible
-    if lower_model.startswith("gpt") or "gpt-" in lower_model:
+    if protocol == "completions" or lower_model.startswith("gpt") or "gpt-" in lower_model:
         messages = []
         if system_text:
             messages.append({"role": "system", "content": system_text})

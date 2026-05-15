@@ -59,6 +59,7 @@ def init_db():
         ("messages", "superseded_by", "INTEGER"),
         ("messages", "sources", "TEXT"),
         ("conversations", "is_pinned", "INTEGER NOT NULL DEFAULT 0"),
+        ("api_profiles", "protocol", "TEXT"),
     ]:
         add_column_if_missing(cur, table, column, definition)
 
@@ -71,6 +72,7 @@ def init_db():
         base_url TEXT NOT NULL,
         auth_token TEXT NOT NULL,
         model TEXT NOT NULL,
+        protocol TEXT,
         is_default INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -181,7 +183,7 @@ def db_update_title_if_needed(conversation_id: str, title_source: str):
 def db_list_api_profiles():
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, name, base_url, auth_token, model, is_default, created_at, updated_at FROM api_profiles ORDER BY is_default DESC, updated_at DESC"
+        "SELECT id, name, base_url, auth_token, model, protocol, is_default, created_at, updated_at FROM api_profiles ORDER BY is_default DESC, updated_at DESC"
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
@@ -202,7 +204,7 @@ def db_save_api_profile(profile_id: str, body: ApiProfileBody):
         conn.execute(
             """
             UPDATE api_profiles
-            SET name=?, base_url=?, auth_token=?, model=?, is_default=?, updated_at=?
+            SET name=?, base_url=?, auth_token=?, model=?, protocol=?, is_default=?, updated_at=?
             WHERE id=?
             """,
             (
@@ -210,6 +212,7 @@ def db_save_api_profile(profile_id: str, body: ApiProfileBody):
                 body.base_url.strip(),
                 body.auth_token.strip(),
                 body.model.strip() or DEFAULT_MODEL,
+                (body.protocol or "").strip(),
                 1 if body.is_default else 0,
                 ts,
                 pid,
@@ -219,8 +222,8 @@ def db_save_api_profile(profile_id: str, body: ApiProfileBody):
         conn.execute(
             """
             INSERT INTO api_profiles
-            (id, name, base_url, auth_token, model, is_default, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, name, base_url, auth_token, model, protocol, is_default, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 pid,
@@ -228,6 +231,7 @@ def db_save_api_profile(profile_id: str, body: ApiProfileBody):
                 body.base_url.strip(),
                 body.auth_token.strip(),
                 body.model.strip() or DEFAULT_MODEL,
+                (body.protocol or "").strip(),
                 1 if body.is_default else 0,
                 ts,
                 ts,
@@ -436,4 +440,3 @@ def db_get_message_superseded_by(message_id: int):
     if row:
         return row["superseded_by"]
     return None
-

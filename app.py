@@ -53,7 +53,7 @@ from schemas import (
     SystemPromptBody,
 )
 from services import (
-    collect_search_sources,
+    build_fallback_search_queries,
     enhance_prompt_with_url_fetch,
     extract_urls_from_text,
     looks_like_search_request,
@@ -62,6 +62,8 @@ from services import (
     save_uploaded_file_dual_paths,
     stream_direct_and_save,
     stream_direct_api_text,
+    stream_direct_responses_api_text,
+    build_responses_input_payload,
     stream_direct_vision_api_text,
     stream_direct_vision_and_save,
 )
@@ -172,6 +174,7 @@ def test_api_profile(body: ApiProfileBody):
             body.base_url,
             body.auth_token,
             body.model or DEFAULT_MODEL,
+            body.protocol or "",
         )).strip()
         failed = "[直连" in reply and "失败]" in reply
         return {
@@ -559,6 +562,7 @@ def echo(body: ChatBody):
             body.api_base_url,
             body.api_auth_token,
             body.api_model or DEFAULT_MODEL,
+            body.api_protocol or "",
             body.system_prompt,
         )).strip()
         db_add_message(cid, "assistant", reply, model=body.api_model or DEFAULT_MODEL, provider_name=body.api_profile_name or "")
@@ -574,6 +578,9 @@ def chat_stream(body: ChatBody):
     history = db_get_messages(cid)
     db_add_message(cid, "user", body.prompt)
     db_update_title_if_needed(cid, body.prompt)
+    protocol = (body.api_protocol or "").strip().lower()
+    if not protocol:
+        protocol = "completions" if (body.api_model or "").lower().startswith("gpt") or "gpt-" in (body.api_model or "").lower() else "claude"
 
     def gen():
         has_urls = bool(extract_urls_from_text(body.prompt))
@@ -588,11 +595,20 @@ def chat_stream(body: ChatBody):
             else:
                 yield "\n[[STATUS:searching]]\n"
 
-        effective_prompt = enhance_prompt_with_url_fetch(body.prompt)
+        effective_prompt = body.prompt if protocol == "responses" else enhance_prompt_with_url_fetch(body.prompt)
         sources = []
         plan = {}
+        observation = ""
 
-        if search_intent:
+        if search_intent and protocol == "responses":
+            plan = {
+                "should_search": True,
+                "search_queries": build_fallback_search_queries(body.prompt, context_messages=history, max_queries=3),
+                "parse_links": extract_urls_from_text(body.prompt, max_urls=2),
+                "tool": "responses_web_search",
+            }
+            should_search = True
+        elif search_intent:
             observation, sources, plan = resolve_search_tool_context(
                 body.prompt,
                 history,
@@ -603,10 +619,9 @@ def chat_stream(body: ChatBody):
             )
             should_search = bool(plan.get("should_search") or plan.get("parse_links"))
         else:
-            observation = ""
             should_search = False
 
-        if should_search:
+        if should_search and protocol != "responses":
             if plan.get("parse_links"):
                 yield "\n[[STATUS:reading_sources]]\n"
             if observation:
@@ -626,9 +641,11 @@ def chat_stream(body: ChatBody):
             body.api_base_url,
             body.api_auth_token,
             body.api_model or DEFAULT_MODEL,
+            protocol,
             body.api_profile_name or "",
             system_prompt=body.system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
+            use_web_search=bool(protocol == "responses" and should_search),
         )
 
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
@@ -670,24 +687,37 @@ def _build_regenerate_prompt_with_search(
     api_base_url="",
     api_auth_token="",
     api_model=DEFAULT_MODEL,
+    api_protocol="",
 ):
     sources = []
     observation = ""
     plan = {}
+    protocol = (api_protocol or "").strip().lower()
+    if not protocol:
+        protocol = "completions" if (api_model or "").lower().startswith("gpt") or "gpt-" in (api_model or "").lower() else "claude"
+
     search_intent = should_autonomous_search_with_context(
         last_user_prompt,
         context_messages,
         force=web_search,
     ) or bool(extract_urls_from_text(last_user_prompt))
     if search_intent:
-        observation, sources, plan = resolve_search_tool_context(
-            last_user_prompt,
-            context_messages,
-            web_search,
-            api_base_url,
-            api_auth_token,
-            api_model,
-        )
+        if protocol == "responses":
+            plan = {
+                "should_search": True,
+                "search_queries": build_fallback_search_queries(last_user_prompt, context_messages=context_messages, max_queries=3),
+                "parse_links": extract_urls_from_text(last_user_prompt, max_urls=2),
+                "tool": "responses_web_search",
+            }
+        else:
+            observation, sources, plan = resolve_search_tool_context(
+                last_user_prompt,
+                context_messages,
+                web_search,
+                api_base_url,
+                api_auth_token,
+                api_model,
+            )
 
     final_user_prompt = last_user_prompt
     if observation:
@@ -806,6 +836,7 @@ def regenerate_from_stream(body: ChatBody):
         body.api_base_url,
         body.api_auth_token,
         body.api_model or DEFAULT_MODEL,
+        body.api_protocol or "",
     )
 
     _api_model = body.api_model or DEFAULT_MODEL
@@ -819,6 +850,9 @@ def regenerate_from_stream(body: ChatBody):
                 body.api_base_url,
                 body.api_auth_token,
                 _api_model,
+                body.api_protocol or "",
+                body.system_prompt,
+                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search")),
             )
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
@@ -835,9 +869,11 @@ def regenerate_from_stream(body: ChatBody):
                 body.api_base_url,
                 body.api_auth_token,
                 _api_model,
+                body.api_protocol or "",
                 _api_profile_name,
                 system_prompt=body.system_prompt,
                 sources=json.dumps(sources, ensure_ascii=False) if sources else "",
+                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search")),
             )
 
     return StreamingResponse(gen_stream(), media_type="text/plain; charset=utf-8")
@@ -927,6 +963,7 @@ def regenerate_stream(body: ChatBody):
         body.api_base_url,
         body.api_auth_token,
         body.api_model or DEFAULT_MODEL,
+        body.api_protocol or "",
     )
 
     _api_model = body.api_model or DEFAULT_MODEL
@@ -940,7 +977,9 @@ def regenerate_stream(body: ChatBody):
                 body.api_base_url,
                 body.api_auth_token,
                 _api_model,
+                body.api_protocol or "",
                 body.system_prompt,
+                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search")),
             )
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
@@ -957,9 +996,11 @@ def regenerate_stream(body: ChatBody):
                 body.api_base_url,
                 body.api_auth_token,
                 _api_model,
+                body.api_protocol or "",
                 _api_profile_name,
                 system_prompt=body.system_prompt,
                 sources=json.dumps(sources, ensure_ascii=False) if sources else "",
+                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search")),
             )
 
     return StreamingResponse(gen_regen(), media_type="text/plain; charset=utf-8")
@@ -975,12 +1016,16 @@ async def chat_upload_stream(
     api_base_url: str = Form(""),
     api_auth_token: str = Form(""),
     api_model: str = Form(DEFAULT_MODEL),
+    api_protocol: str = Form(""),
     api_profile_name: str = Form(""),
     system_prompt: str = Form(""),
     files: list[UploadFile] = File([]),
 ):
     cid = db_ensure_conversation(conversation_id)
     history = db_get_messages(cid)
+    protocol = (api_protocol or "").strip().lower()
+    if not protocol:
+        protocol = "completions" if (api_model or "").lower().startswith("gpt") or "gpt-" in (api_model or "").lower() else "claude"
 
     text_files = []
     image_files = []
@@ -1065,15 +1110,32 @@ async def chat_upload_stream(
     ) or bool(extract_urls_from_text(user_prompt))
     should_search = False
     if search_intent:
-        search_observation, sources, _plan = resolve_search_tool_context(
-            user_prompt,
-            history,
-            web_search,
-            api_base_url,
-            api_auth_token,
-            api_model or DEFAULT_MODEL,
-        )
-        should_search = bool(_plan.get("should_search") or _plan.get("parse_links"))
+        if protocol == "responses":
+            _plan = {
+                "should_search": True,
+                "search_queries": build_fallback_search_queries(user_prompt, context_messages=history, max_queries=3),
+                "parse_links": extract_urls_from_text(user_prompt, max_urls=2),
+                "tool": "responses_web_search",
+            }
+            should_search = True
+        else:
+            search_observation, sources, _plan = resolve_search_tool_context(
+                user_prompt,
+                history,
+                web_search,
+                api_base_url,
+                api_auth_token,
+                api_model or DEFAULT_MODEL,
+            )
+            should_search = bool(_plan.get("should_search") or _plan.get("parse_links"))
+
+    responses_file_items = [
+        {
+            "name": item["name"],
+            "local_path": item["local_path"],
+        }
+        for item in text_files
+    ]
 
     # 有图片时，强制走 base64 视觉 API
     if image_files:
@@ -1124,7 +1186,10 @@ async def chat_upload_stream(
                     api_base_url,
                     api_auth_token,
                     api_model or DEFAULT_MODEL,
+                    protocol,
                     system_prompt=system_prompt,
+                    file_items=responses_file_items if protocol == "responses" else None,
+                    use_web_search=bool(protocol == "responses" and should_search),
                 ):
                     full += chunk
                     yield chunk
@@ -1208,6 +1273,45 @@ async def chat_upload_stream(
         prompt=final_user_prompt,
     )
 
+    if protocol == "responses" and text_files:
+        def gen_responses_file_upload():
+            yield from iter_search_status_lines(should_search, sources)
+            yield f"正在读取 {len(text_files)} 个附件...\n\n"
+            full = ""
+            try:
+                input_payload = build_responses_input_payload(
+                    final_prompt,
+                    file_items=responses_file_items,
+                )
+                for chunk in stream_direct_responses_api_text(
+                    final_prompt,
+                    api_base_url,
+                    api_auth_token,
+                    api_model or DEFAULT_MODEL,
+                    system_prompt=system_prompt,
+                    max_output_tokens=4096,
+                    use_web_search=bool(should_search),
+                    input_payload=input_payload,
+                ):
+                    full += chunk
+                    yield chunk
+            finally:
+                token_count = estimate_round_tokens(final_prompt, full)
+                db_add_message(
+                    cid,
+                    "assistant",
+                    full,
+                    model=api_model or DEFAULT_MODEL,
+                    provider_name=(api_profile_name or "") + "｜直连流式",
+                    token_count=token_count,
+                    sources=json.dumps(sources, ensure_ascii=False) if sources else "",
+                )
+
+        return StreamingResponse(
+            gen_responses_file_upload(),
+            media_type="text/plain; charset=utf-8",
+        )
+
     def gen_text_upload():
         yield from iter_search_status_lines(should_search, sources)
         if text_files:
@@ -1218,9 +1322,11 @@ async def chat_upload_stream(
             api_base_url,
             api_auth_token,
             api_model or DEFAULT_MODEL,
+            protocol,
             api_profile_name or "",
             system_prompt=system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
+            use_web_search=bool(protocol == "responses" and should_search),
         )
 
     return StreamingResponse(

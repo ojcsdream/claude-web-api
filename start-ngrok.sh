@@ -15,6 +15,52 @@ NGROK_URL_FILE="ngrok-url.txt"
 NGROK_URL="${NGROK_URL:-}"
 START_LOCAL="${START_LOCAL:-1}"
 
+pid_matches() {
+  local pid="$1"
+  local expected="$2"
+  [ -n "$pid" ] || return 1
+  [ -r "/proc/$pid/cmdline" ] || return 1
+  tr '\000' ' ' < "/proc/$pid/cmdline" | grep -F -- "$expected" >/dev/null 2>&1
+}
+
+find_matching_pids() {
+  local expected="$1"
+  local cmdline
+  local comm
+  for proc_dir in /proc/[0-9]*; do
+    [ -r "$proc_dir/cmdline" ] || continue
+    comm="$(cat "$proc_dir/comm" 2>/dev/null || true)"
+    case "$comm" in
+      bash|sh|dash|zsh|fish) continue ;;
+    esac
+    cmdline="$(tr '\000' ' ' < "$proc_dir/cmdline" 2>/dev/null || true)"
+    case "$cmdline" in
+      *"$expected"* )
+        printf '%s\n' "${proc_dir##*/}"
+        ;;
+    esac
+  done
+}
+
+stop_existing_ngrok() {
+  local pattern="ngrok http"
+  local pid
+
+  if [ -f "$NGROK_PID_FILE" ]; then
+    pid="$(cat "$NGROK_PID_FILE" 2>/dev/null || true)"
+    if pid_matches "$pid" "$pattern"; then
+      kill "$pid" >/dev/null 2>&1 || true
+      sleep 1
+    fi
+    rm -f "$NGROK_PID_FILE"
+  fi
+
+  for pid in $(find_matching_pids "$pattern"); do
+    kill "$pid" >/dev/null 2>&1 || true
+  done
+  sleep 1
+}
+
 if [ "$START_LOCAL" = "1" ]; then
   START_PUBLIC=0 ./start-local.sh >/dev/null
 fi
@@ -43,10 +89,7 @@ if [ -n "$NGROK_URL" ] && [ -z "${NGROK_AUTHTOKEN:-}" ] && ! grep -q "authtoken:
   exit 1
 fi
 
-if pgrep -f "ngrok http" >/dev/null 2>&1; then
-  pkill -f "ngrok http" || true
-  sleep 1
-fi
+stop_existing_ngrok
 
 rm -f "$NGROK_LOG" "$NGROK_PID_FILE"
 
@@ -81,6 +124,10 @@ for item in tunnels:
 PY
 )"
     if [ -n "$PUBLIC_URL" ]; then
+      for pid in $(find_matching_pids "ngrok http"); do
+        echo "$pid" > "$NGROK_PID_FILE"
+        break
+      done
       break
     fi
   fi

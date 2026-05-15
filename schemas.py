@@ -28,6 +28,7 @@ class ChatBody(BaseModel):
     api_base_url: str = ""
     api_auth_token: str = ""
     api_model: str = DEFAULT_MODEL
+    api_protocol: str = ""
     api_profile_name: str = ""
     web_search: bool = False
     web_search_explicit: bool = False
@@ -52,6 +53,7 @@ class ApiProfileBody(BaseModel):
     base_url: str
     auth_token: str
     model: str = DEFAULT_MODEL
+    protocol: str = ""
     is_default: bool = False
 
 
