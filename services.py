@@ -1031,8 +1031,14 @@ def enhance_prompt_with_url_fetch(user_prompt: str) -> str:
 
 
 def looks_like_search_request(text: str) -> bool:
-    # 搜索功能已禁用，适用于本地 Android APK
-    return False
+    value = (text or "").lower()
+    patterns = [
+        "搜索", "搜一下", "搜一搜", "查一下", "查一查", "查找", "检索",
+        "最新", "最近", "新闻", "消息", "动态", "网页", "浏览网页",
+        "新功能", "功能清单", "有什么", "有哪些", "区别", "变化", "不一样",
+        "search ", "google ", "look up", "browse", "web search", "latest", "what's new"
+    ]
+    return any(p in value for p in patterns)
 
 
 SEARCH_COMMAND_PATTERNS = [
@@ -1689,13 +1695,95 @@ def normalize_source_url(url: str) -> str:
 
 
 def fetch_tavily_search_results(query: str, max_results: int = 5) -> list[dict]:
-    # 搜索功能已禁用，适用于本地 Android APK
-    return []
+    client = get_tavily_client()
+    if not client:
+        return []
+
+    q = rewrite_search_query((query or "").strip())
+    if not q:
+        return []
+
+    try:
+        data = client.search(
+            q,
+            search_depth="advanced",
+            max_results=max(1, min(int(max_results or 5), 10)),
+            include_raw_content=False,
+        )
+    except Exception:
+        return []
+
+    items = data.get("results") or []
+    cleaned = []
+    seen = set()
+    for item in items:
+        href = normalize_source_url(item.get("url", ""))
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        title = normalize_source_title(item.get("title", ""), href)
+        excerpt = _trim_excerpt(item.get("content") or item.get("snippet") or "", 2200)
+        score = source_relevance_score(q, title, href, excerpt) + 18
+        cleaned.append({
+            "title": title,
+            "url": href,
+            "description": excerpt,
+            "score": score,
+            "provider": "tavily",
+            "quality": classify_source_quality(href, title),
+        })
+    cleaned.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return cleaned[:max_results]
 
 
 def fetch_serpapi_search_results(query: str, max_results: int = 5) -> list[dict]:
-    # 搜索功能已禁用，适用于本地 Android APK
-    return []
+    token = os.environ.get("SERPAPI_API_KEY", "").strip()
+    if not token:
+        return []
+
+    q = rewrite_search_query((query or "").strip())
+    if not q:
+        return []
+
+    try:
+        import serpapi
+        client = serpapi.Client(api_key=token)
+        data = client.search({
+            "engine": "google",
+            "q": q,
+            "location": "Austin, Texas, United States",
+            "google_domain": "google.com",
+            "hl": "en",
+            "gl": "us",
+            "num": max(1, min(int(max_results or 5), 10)),
+        })
+    except Exception:
+        return []
+
+    items = data.get("organic_results") or data.get("results") or []
+    cleaned = []
+    seen = set()
+
+    for item in items:
+        href = normalize_source_url(item.get("link") or item.get("url") or "")
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        title = normalize_source_title(item.get("title", ""), href)
+        excerpt = _trim_excerpt(item.get("snippet") or item.get("snippet_highlighted_words") or item.get("description") or "", 2200)
+        cleaned.append({
+            "title": title,
+            "url": href,
+            "description": excerpt,
+            "score": source_relevance_score(q, title, href, excerpt) + 14,
+            "provider": "serpapi",
+            "quality": classify_source_quality(href, title),
+        })
+        if len(cleaned) >= max_results:
+            break
+
+    cleaned.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return cleaned[:max_results]
 
 
 def merge_search_results(result_groups: list[list[dict]], max_results: int = 5) -> list[dict]:

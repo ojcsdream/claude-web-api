@@ -4075,6 +4075,7 @@
         <label id="plusBtn" class="plus-btn" for="fileInput" role="button" tabindex="0" aria-label="上传文件">+</label>
         <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf" />
         <button id="modelPill" class="model-pill">Opus 4.7⌄</button>
+        <button id="webSearchBtn" class="web-search-btn" type="button" title="强制联网搜索">⌕</button>
         <button id="sendBtn" class="send-btn" aria-label="发送消息">
           <span class="send-arrow">↑</span>
           <span class="stop-icon" aria-hidden="true"></span>
@@ -4163,6 +4164,7 @@
 
     const promptEl = $("prompt");
     const sendBtn = $("sendBtn");
+    const webSearchBtn = $("webSearchBtn");
     const fileInput = $("fileInput");
     const fileInfo = $("fileInfo");
     const preview = $("preview");
@@ -4258,7 +4260,9 @@
     }
 
     function renderWebSearchButton() {
-      // 搜索功能已禁用
+      if (!webSearchBtn) return;
+      webSearchBtn.classList.toggle("active", webSearchEnabled);
+      webSearchBtn.title = webSearchEnabled ? "本条消息将强制联网搜索" : "强制联网搜索";
     }
 
     function renderSendButtonState() {
@@ -7193,7 +7197,9 @@
       const protocol = apiProtocol.value || "claude";
       const systemPrompt = activeSystemPromptText();
       setModel(model);
-      const useWebSearch = false; // 搜索功能已禁用
+      const useWebSearch = webSearchEnabled === true;
+      webSearchEnabled = false;
+      renderWebSearchButton();
       activeStreamController = new AbortController();
 
       try {
@@ -7209,8 +7215,8 @@
           form.append("api_protocol", protocol);
           form.append("api_profile_name", providerName());
           form.append("system_prompt", systemPrompt);
-          form.append("web_search", "false");
-          form.append("web_search_explicit", "false");
+          form.append("web_search", useWebSearch ? "true" : "false");
+          form.append("web_search_explicit", useWebSearch ? "true" : "false");
 
           for (const f of files) form.append("files", f);
 
@@ -7227,8 +7233,8 @@
             body: JSON.stringify({
               conversation_id: activeConversationId,
               prompt: text,
-              web_search: false,
-              web_search_explicit: false,
+              web_search: useWebSearch,
+              web_search_explicit: useWebSearch,
               api_base_url: apiUrl.value.trim(),
               api_auth_token: apiKey.value.trim(),
               api_model: model,
@@ -7337,8 +7343,8 @@
             api_protocol: apiProtocol.value || "claude",
             api_profile_name: providerName(),
             system_prompt: activeSystemPromptText(),
-            web_search: false,
-            web_search_explicit: false
+            web_search: webSearchEnabled,
+            web_search_explicit: webSearchEnabled
           })
         });
 
@@ -7598,7 +7604,12 @@
       }
     };
 
-    // 搜索功能已禁用
+    if (webSearchBtn) {
+      webSearchBtn.onclick = () => {
+        webSearchEnabled = !webSearchEnabled;
+        renderWebSearchButton();
+      };
+    }
 
     document.addEventListener("keydown", e => {
       if (e.key === "Escape" && systemPromptEditor.classList.contains("open")) {
