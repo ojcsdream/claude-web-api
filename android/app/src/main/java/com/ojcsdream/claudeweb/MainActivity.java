@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
@@ -16,14 +18,21 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+
+import com.chaquo.python.PyObject;
+import com.chaquo.python.Python;
+import com.chaquo.python.android.AndroidPlatform;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
+    private static final String LOCAL_URL = "http://127.0.0.1:8765/";
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,7 +44,12 @@ public class MainActivity extends Activity {
         ));
         setContentView(webView);
         configureWebView();
-        webView.loadUrl(BuildConfig.APP_URL, ngrokHeaders());
+        webView.loadData(
+                "<html><body style='font-family:sans-serif;padding:24px'>正在启动本地服务...</body></html>",
+                "text/html",
+                "UTF-8"
+        );
+        startLocalBackend();
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -59,8 +73,9 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme();
-                if ("http".equals(scheme) || "https".equals(scheme)) {
-                    view.loadUrl(uri.toString(), ngrokHeaders());
+                String host = uri.getHost();
+                if ("127.0.0.1".equals(host) || "localhost".equals(host)) {
+                    view.loadUrl(uri.toString());
                     return true;
                 }
                 openExternal(uri);
@@ -91,10 +106,64 @@ public class MainActivity extends Activity {
         });
     }
 
-    private Map<String, String> ngrokHeaders() {
-        Map<String, String> headers = new HashMap<>();
-        headers.put("ngrok-skip-browser-warning", "true");
-        return headers;
+    private void startLocalBackend() {
+        new Thread(() -> {
+            try {
+                if (!Python.isStarted()) {
+                    Python.start(new AndroidPlatform(this));
+                }
+                Python py = Python.getInstance();
+                PyObject server = py.getModule("android_server");
+                String assetZip = copyBundledAppZip();
+                String localUrl = server.callAttr(
+                        "start",
+                        assetZip,
+                        getFilesDir().getAbsolutePath(),
+                        "127.0.0.1",
+                        8765
+                ).toString();
+                String ready = server.callAttr("wait_until_ready", localUrl, 25.0).toString();
+                mainHandler.post(() -> {
+                    if ("ready".equals(ready)) {
+                        webView.loadUrl(localUrl);
+                    } else {
+                        showStartupError(ready);
+                    }
+                });
+            } catch (Exception e) {
+                mainHandler.post(() -> showStartupError(e.toString()));
+            }
+        }, "claude-web-startup").start();
+    }
+
+    private String copyBundledAppZip() throws Exception {
+        File out = new File(getFilesDir(), "claude-web.zip");
+        try (InputStream in = getAssets().open("claude-web.zip");
+             FileOutputStream fos = new FileOutputStream(out)) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                fos.write(buffer, 0, read);
+            }
+        }
+        return out.getAbsolutePath();
+    }
+
+    private void showStartupError(String message) {
+        String html = "<html><body style='font-family:sans-serif;padding:24px'>"
+                + "<h3>本地服务启动失败</h3><pre style='white-space:pre-wrap'>"
+                + escapeHtml(message)
+                + "</pre></body></html>";
+        webView.loadData(html, "text/html", "UTF-8");
+    }
+
+    private String escapeHtml(String value) {
+        return value == null
+                ? ""
+                : value.replace("&", "&amp;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                        .replace("\"", "&quot;");
     }
 
     private void openExternal(Uri uri) {

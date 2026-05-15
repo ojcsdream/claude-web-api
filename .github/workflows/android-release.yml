@@ -5,11 +5,6 @@ on:
     tags:
       - "android-v*"
   workflow_dispatch:
-    inputs:
-      app_url:
-        description: "URL loaded by the Android WebView"
-        required: false
-        default: "https://kindling-shaft-creamer.ngrok-free.dev"
 
 permissions:
   contents: write
@@ -31,6 +26,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Python for Chaquopy
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
@@ -43,9 +43,7 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build debug APK
-        run: |
-          APP_URL="${{ github.event.inputs.app_url || 'https://kindling-shaft-creamer.ngrok-free.dev' }}"
-          gradle assembleDebug -PappUrl="$APP_URL"
+        run: gradle assembleDebug
 
       - name: Rename APK
         run: |
@@ -60,9 +58,10 @@ jobs:
           files: release/ClaudeWeb-${{ github.ref_name }}.apk
           name: Claude Web Android ${{ github.ref_name }}
           body: |
-            Android WebView APK for Claude Web.
+            Local-first Android APK for Claude Web.
 
-            Default server URL: https://kindling-shaft-creamer.ngrok-free.dev
+            The APK starts the bundled FastAPI backend on the device and loads it
+            through the embedded WebView at 127.0.0.1.
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

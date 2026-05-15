@@ -476,7 +476,7 @@ def get_conversation_messages(conversation_id: str):
     msgs = db_get_messages(conversation_id)
     return {
         "ok": True,
-        "messages": [m.model_dump() for m in msgs],
+        "messages": [m.model_dump() if hasattr(m, "model_dump") else m.dict() for m in msgs],
     }
 
 

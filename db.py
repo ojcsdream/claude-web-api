@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import sqlite3
 import time
@@ -7,7 +8,7 @@ from typing import Optional
 from config import DEFAULT_MODEL
 from schemas import ApiProfileBody, MessageItem, SystemPromptBody
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(os.environ.get("CLAUDE_WEB_BASE_DIR") or Path(__file__).resolve().parent)
 DB_PATH = BASE_DIR / "chat.db"
 
 def get_conn():

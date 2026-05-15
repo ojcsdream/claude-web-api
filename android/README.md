@@ -1,18 +1,23 @@
 # Claude Web Android
 
-This Android project builds an installable WebView APK for Claude Web.
+This Android project builds a local-first APK for Claude Web.
 
-The APK loads the deployed web app URL configured by the Gradle property `appUrl`.
-Default:
+The APK embeds:
 
-```text
-https://kindling-shaft-creamer.ngrok-free.dev
-```
+- the FastAPI backend
+- the static frontend
+- a private on-device SQLite database
+- an on-device upload directory
+
+On launch, the app starts the Python backend on `127.0.0.1:8765` and loads it in
+the WebView. It does not require the ngrok/public web deployment to open the UI.
+External model providers still require network access when configured in the app.
 
 Build locally:
 
 ```bash
-gradle assembleDebug -PappUrl="https://your-server.example.com"
+gradle assembleDebug
 ```
 
-The GitHub Actions workflow publishes an APK when a tag matching `android-v*` is pushed.
+The GitHub Actions workflow builds the APK on demand and publishes an APK when a
+tag matching `android-v*` is pushed.

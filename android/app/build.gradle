@@ -1,5 +1,6 @@
 plugins {
     id "com.android.application"
+    id "com.chaquo.python"
 }
 
 android {
@@ -8,16 +9,52 @@ android {
 
     defaultConfig {
         applicationId "com.ojcsdream.claudeweb"
-        minSdk 23
+        minSdk 24
         targetSdk 35
         versionCode 1
         versionName "1.0.0"
 
-        def appUrl = project.findProperty("appUrl") ?: "https://kindling-shaft-creamer.ngrok-free.dev"
-        buildConfigField "String", "APP_URL", "\"${appUrl}\""
+        buildConfigField "String", "APP_URL", "\"http://127.0.0.1:8765/\""
+
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+        }
+    }
+
+    chaquopy {
+        defaultConfig {
+            version "3.11"
+            pip {
+                install "fastapi<0.100"
+                install "uvicorn"
+                install "python-multipart"
+                install "pydantic<2"
+                install "tavily-python"
+                install "serpapi"
+            }
+        }
     }
 
     buildFeatures {
         buildConfig true
     }
 }
+
+tasks.register("packageClaudeWebAssets", Zip) {
+    archiveFileName = "claude-web.zip"
+    destinationDirectory = layout.buildDirectory.dir("generated/assets")
+    from(project.rootProject.projectDir.parentFile) {
+        include "app.py"
+        include "chat_utils.py"
+        include "config.py"
+        include "db.py"
+        include "schemas.py"
+        include "services.py"
+        include "requirements.txt"
+        include "static/**"
+        exclude "static/**/*.map"
+    }
+}
+
+android.sourceSets.main.assets.srcDir(layout.buildDirectory.dir("generated/assets"))
+preBuild.dependsOn("packageClaudeWebAssets")
