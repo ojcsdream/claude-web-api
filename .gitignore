@@ -35,6 +35,11 @@ cloudflare-url.txt
 # Local Claude/project settings
 .claude/
 
+# Android build outputs
+android/.gradle/
+android/app/build/
+release/
+
 # Backups and broken snapshots
 *.bak
 *.bak_*

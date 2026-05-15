@@ -1,16 +1,14 @@
-plugins {
-    id "com.android.application"
-    id "com.chaquo.python"
-}
+apply plugin: "com.android.application"
+apply plugin: "com.chaquo.python"
 
 android {
     namespace "com.ojcsdream.claudeweb"
-    compileSdk 35
+    compileSdk 34
 
     defaultConfig {
         applicationId "com.ojcsdream.claudeweb"
         minSdk 24
-        targetSdk 35
+        targetSdk 34
         versionCode 1
         versionName "1.0.0"
 
@@ -29,8 +27,6 @@ android {
                 install "uvicorn"
                 install "python-multipart"
                 install "pydantic<2"
-                install "tavily-python"
-                install "serpapi"
             }
         }
     }
