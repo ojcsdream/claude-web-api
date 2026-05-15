@@ -1,5 +1,6 @@
 import os
 import shutil
+import traceback
 import threading
 import time
 import zipfile
@@ -10,10 +11,30 @@ _SERVER_THREAD = None
 _SERVER_ERROR = None
 
 
+def _remove_app_code(target: Path):
+    preserved = {
+        "chat.db",
+        "admin-token.txt",
+        "uploads",
+        ".android-assets-ready",
+        ".android-assets-version",
+    }
+    if not target.exists():
+        return
+    for child in target.iterdir():
+        if child.name in preserved:
+            continue
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
 def _copy_tree_from_assets(asset_zip: str, target_dir: str):
     target = Path(target_dir)
-    marker = target / ".android-assets-ready"
-    if marker.exists():
+    version = str(Path(asset_zip).stat().st_mtime_ns)
+    version_file = target / ".android-assets-version"
+    if version_file.exists() and version_file.read_text(encoding="utf-8").strip() == version:
         return
 
     tmp = target.with_name(target.name + ".tmp")
@@ -28,6 +49,7 @@ def _copy_tree_from_assets(asset_zip: str, target_dir: str):
     uploads.mkdir(exist_ok=True)
 
     if target.exists():
+        _remove_app_code(target)
         for child in tmp.iterdir():
             dst = target / child.name
             if dst.exists():
@@ -37,6 +59,7 @@ def _copy_tree_from_assets(asset_zip: str, target_dir: str):
     else:
         tmp.rename(target)
     (target / ".android-assets-ready").write_text("ready", encoding="utf-8")
+    (target / ".android-assets-version").write_text(version, encoding="utf-8")
 
 
 def start(asset_zip: str, data_dir: str, host: str = "127.0.0.1", port: int = 8765):
@@ -63,7 +86,7 @@ def start(asset_zip: str, data_dir: str, host: str = "127.0.0.1", port: int = 87
                 access_log=False,
             )
         except Exception as exc:
-            _SERVER_ERROR = repr(exc)
+            _SERVER_ERROR = "".join(traceback.format_exception(exc))
 
     _SERVER_ERROR = None
     _SERVER_THREAD = threading.Thread(target=run, name="claude-web-uvicorn", daemon=True)

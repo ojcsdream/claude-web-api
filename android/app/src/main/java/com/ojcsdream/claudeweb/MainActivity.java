@@ -122,7 +122,7 @@ public class MainActivity extends Activity {
                         "127.0.0.1",
                         8765
                 ).toString();
-                String ready = server.callAttr("wait_until_ready", localUrl, 25.0).toString();
+                String ready = server.callAttr("wait_until_ready", localUrl, 60.0).toString();
                 mainHandler.post(() -> {
                     if ("ready".equals(ready)) {
                         webView.loadUrl(localUrl);
