@@ -162,6 +162,18 @@ def health():
     return {"ok": True, "message": "backend running", "default_model": DEFAULT_MODEL}
 
 
+@app.get("/api/startup")
+def startup_status():
+    return {
+        "ok": True,
+        "message": "local backend ready",
+        "default_model": DEFAULT_MODEL,
+        "project_dir": str(BASE_DIR),
+        "static_dir": str(STATIC_DIR),
+        "upload_dir": str(UPLOAD_DIR),
+    }
+
+
 
 
 

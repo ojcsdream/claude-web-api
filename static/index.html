@@ -4124,6 +4124,10 @@
 
 <script>
     const $ = id => document.getElementById(id);
+    const isLocalAndroidRuntime =
+      location.hostname === "127.0.0.1" ||
+      location.hostname === "localhost" ||
+      location.protocol === "file:";
 
     const chatList = $("chatList");
     const topTitle = $("topTitle");
@@ -4348,7 +4352,8 @@
 
     async function api(method, url, body, form = false) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
+      const timeoutMs = isLocalAndroidRuntime ? 60000 : 15000;
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         const opt = { method, signal: controller.signal };
@@ -4379,7 +4384,7 @@
         return data;
       } catch (e) {
         if (e && e.name === "AbortError") {
-          throw new Error("请求超时，请检查本地服务或公网隧道是否在线");
+          throw new Error(isLocalAndroidRuntime ? "本地服务响应超时，请稍后重试" : "请求超时，请检查本地服务或公网隧道是否在线");
         }
         throw e;
       } finally {
@@ -6691,6 +6696,18 @@
       if (retry) retry.onclick = initPage;
     }
 
+    function showLoadStatus(message) {
+      if (!chatList) return;
+      chatList.innerHTML =
+        '<div class="empty">' +
+        '<div>' + escapeHtml(message) + '</div>' +
+        '<button class="empty-retry" type="button" id="retryLoadBtn">重试</button>' +
+        '</div>';
+
+      const retry = $("retryLoadBtn");
+      if (retry) retry.onclick = initPage;
+    }
+
     async function switchConversation(conversation) {
       activeConversationId = conversation.id;
       closeDrawer();
@@ -7767,17 +7784,24 @@
       chatList.innerHTML = '<div class="empty">加载中...</div>';
       const fallbackTimer = setTimeout(() => {
         if (seq === loadSeq && chatList.textContent.includes("加载中")) {
-          showLoadError("页面初始化超时，请点击重试");
+          if (isLocalAndroidRuntime) {
+            showLoadStatus("正在连接本地服务，首次启动可能需要更久...");
+          } else {
+            showLoadError("页面初始化超时，请点击重试");
+          }
         }
       }, 8000);
 
       try {
+        showLoadStatus("正在加载接入商配置...");
         await loadProfiles();
+        showLoadStatus("正在加载系统提示词...");
         await loadSystemPrompts();
         if (seq !== loadSeq) return;
         restoreModel();
         loadProviderModels();
         setModelChoicesCollapsed(localStorage.getItem("model_choices_collapsed") !== "0");
+        showLoadStatus("正在加载本地会话...");
         await loadConversations();
       } catch (e) {
         if (seq === loadSeq) showLoadError(e.message || String(e));
