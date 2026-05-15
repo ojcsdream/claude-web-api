@@ -28,7 +28,6 @@ import com.chaquo.python.android.AndroidPlatform;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
-    private static final String LOCAL_URL = "http://127.0.0.1:8765/";
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
@@ -44,11 +43,7 @@ public class MainActivity extends Activity {
         ));
         setContentView(webView);
         configureWebView();
-        webView.loadData(
-                "<html><body style='font-family:sans-serif;padding:24px'>正在启动本地服务...</body></html>",
-                "text/html",
-                "UTF-8"
-        );
+        loadBundledFrontendShell("正在启动本地服务...");
         startLocalBackend();
     }
 
@@ -115,10 +110,15 @@ public class MainActivity extends Activity {
                 Python py = Python.getInstance();
                 PyObject server = py.getModule("android_server");
                 String assetZip = copyBundledAppZip();
-                String localUrl = server.callAttr(
-                        "start",
+                String appDir = server.callAttr(
+                        "prepare",
                         assetZip,
-                        getFilesDir().getAbsolutePath(),
+                        getFilesDir().getAbsolutePath()
+                ).toString();
+                mainHandler.post(() -> webView.loadUrl("file://" + appDir + "/static/index.html"));
+                String localUrl = server.callAttr(
+                        "start_prepared",
+                        appDir,
                         "127.0.0.1",
                         8765
                 ).toString();
@@ -149,9 +149,30 @@ public class MainActivity extends Activity {
         return out.getAbsolutePath();
     }
 
+    private void loadBundledFrontendShell(String statusText) {
+        try {
+            InputStream in = getAssets().open("claude-web.zip");
+            in.close();
+            String html = "<html><body style='font-family:sans-serif;padding:24px'>"
+                    + "<h3>Claude Web</h3><p>" + escapeHtml(statusText) + "</p>"
+                    + "</body></html>";
+            webView.loadDataWithBaseURL("file:///android_asset/", html, "text/html", "UTF-8", null);
+        } catch (Exception e) {
+            webView.loadData(
+                    "<html><body style='font-family:sans-serif;padding:24px'>"
+                            + "<h3>Claude Web</h3><p>" + escapeHtml(statusText) + "</p>"
+                            + "</body></html>",
+                    "text/html",
+                    "UTF-8"
+            );
+        }
+    }
+
     private void showStartupError(String message) {
         String html = "<html><body style='font-family:sans-serif;padding:24px'>"
-                + "<h3>本地服务启动失败</h3><pre style='white-space:pre-wrap'>"
+                + "<h3>本地服务启动失败</h3>"
+                + "<p>前端已内置在 APK 中，但本地后端没有成功监听。请截图这段错误。</p>"
+                + "<pre style='white-space:pre-wrap'>"
                 + escapeHtml(message)
                 + "</pre></body></html>";
         webView.loadData(html, "text/html", "UTF-8");
