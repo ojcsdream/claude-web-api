@@ -13,6 +13,7 @@ _SERVER_THREAD = None
 _SERVER_ERROR = None
 _SERVER_STAGE = "not started"
 _APP_DIR = None
+_SERVER_URL = None
 
 
 def _log(message: str):
@@ -105,13 +106,14 @@ def start(asset_zip: str, data_dir: str, host: str = "127.0.0.1", port: int = 87
 
 
 def start_prepared(app_dir: str, host: str = "127.0.0.1", port: int = 8765):
-    global _SERVER_THREAD, _SERVER_ERROR, _SERVER_STAGE, _APP_DIR
+    global _SERVER_THREAD, _SERVER_ERROR, _SERVER_STAGE, _APP_DIR, _SERVER_URL
     if _SERVER_THREAD and _SERVER_THREAD.is_alive():
-        return f"http://{host}:{port}/"
+        return _SERVER_URL or f"http://{host}:{port}/"
 
     app_dir = Path(app_dir)
     _APP_DIR = str(app_dir)
     port = _pick_port(host, int(port))
+    _SERVER_URL = f"http://{host}:{port}/"
 
     os.environ["CLAUDE_WEB_BASE_DIR"] = str(app_dir)
     os.chdir(app_dir)
@@ -146,7 +148,7 @@ def start_prepared(app_dir: str, host: str = "127.0.0.1", port: int = 8765):
     _SERVER_STAGE = "thread starting"
     _SERVER_THREAD = threading.Thread(target=run, name="claude-web-uvicorn", daemon=True)
     _SERVER_THREAD.start()
-    return f"http://{host}:{port}/"
+    return _SERVER_URL
 
 
 def status():

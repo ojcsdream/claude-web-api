@@ -115,14 +115,14 @@ public class MainActivity extends Activity {
                         assetZip,
                         getFilesDir().getAbsolutePath()
                 ).toString();
-                mainHandler.post(() -> webView.loadUrl("file://" + appDir + "/static/index.html"));
+                mainHandler.post(() -> showStartupPage("资源已解包，正在启动本地后端..."));
                 String localUrl = server.callAttr(
                         "start_prepared",
                         appDir,
                         "127.0.0.1",
                         8765
                 ).toString();
-                String ready = server.callAttr("wait_until_ready", localUrl, 60.0).toString();
+                String ready = waitForBackend(server, localUrl);
                 mainHandler.post(() -> {
                     if ("ready".equals(ready)) {
                         webView.loadUrl(localUrl);
@@ -134,6 +134,27 @@ public class MainActivity extends Activity {
                 mainHandler.post(() -> showStartupError(e.toString()));
             }
         }, "claude-web-startup").start();
+    }
+
+    private String waitForBackend(PyObject server, String localUrl) {
+        long deadline = System.currentTimeMillis() + 90_000L;
+        String last = "";
+        while (System.currentTimeMillis() < deadline) {
+            String ready = server.callAttr("wait_until_ready", localUrl, 1.0).toString();
+            if ("ready".equals(ready)) {
+                return "ready";
+            }
+            String status = server.callAttr("status").toString();
+            last = ready + "\n\n启动阶段: " + status;
+            String statusText = status;
+            mainHandler.post(() -> showStartupPage("正在启动本地后端...\n\n" + statusText));
+            try {
+                Thread.sleep(1000L);
+            } catch (InterruptedException ignored) {
+                break;
+            }
+        }
+        return last.isEmpty() ? "启动超时" : last;
     }
 
     private String copyBundledAppZip() throws Exception {
@@ -150,21 +171,33 @@ public class MainActivity extends Activity {
     }
 
     private void loadBundledFrontendShell(String statusText) {
+        showStartupPage(statusText);
+    }
+
+    private void showStartupPage(String statusText) {
+        String html = "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                + "<style>"
+                + "html,body{height:100%;margin:0;background:#101418;color:#eef2f5;font-family:sans-serif;}"
+                + "body{display:flex;align-items:center;justify-content:center;}"
+                + ".wrap{width:min(86vw,420px);}"
+                + ".brand{font-size:26px;font-weight:700;margin-bottom:8px;}"
+                + ".sub{color:#aeb8c2;line-height:1.5;margin-bottom:22px;}"
+                + ".bar{height:4px;background:#2b333b;overflow:hidden;border-radius:4px;margin-bottom:18px;}"
+                + ".bar:before{content:'';display:block;width:42%;height:100%;background:#58a6ff;animation:move 1.2s infinite ease-in-out;}"
+                + "pre{white-space:pre-wrap;line-height:1.45;color:#c9d1d9;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;max-height:32vh;overflow:auto;}"
+                + "@keyframes move{0%{transform:translateX(-100%)}50%{transform:translateX(90%)}100%{transform:translateX(240%)}}"
+                + "</style></head><body><main class='wrap'>"
+                + "<div class='brand'>Claude Web</div>"
+                + "<div class='sub'>正在启动本机前端和后端，完成后会自动进入应用。</div>"
+                + "<div class='bar'></div>"
+                + "<pre>" + escapeHtml(statusText) + "</pre>"
+                + "</main></body></html>";
         try {
             InputStream in = getAssets().open("claude-web.zip");
             in.close();
-            String html = "<html><body style='font-family:sans-serif;padding:24px'>"
-                    + "<h3>Claude Web</h3><p>" + escapeHtml(statusText) + "</p>"
-                    + "</body></html>";
             webView.loadDataWithBaseURL("file:///android_asset/", html, "text/html", "UTF-8", null);
         } catch (Exception e) {
-            webView.loadData(
-                    "<html><body style='font-family:sans-serif;padding:24px'>"
-                            + "<h3>Claude Web</h3><p>" + escapeHtml(statusText) + "</p>"
-                            + "</body></html>",
-                    "text/html",
-                    "UTF-8"
-            );
+            webView.loadData(html, "text/html", "UTF-8");
         }
     }
 
