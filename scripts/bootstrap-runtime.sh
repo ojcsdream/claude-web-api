@@ -25,12 +25,12 @@ have_cmd() {
 package_hint() {
   local manager="${1:-}"
   case "$manager" in
-    apt-get) echo "sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip curl tar" ;;
-    dnf) echo "sudo dnf install -y python3 python3-pip python3-virtualenv curl tar" ;;
-    yum) echo "sudo yum install -y python3 python3-pip curl tar" ;;
-    pacman) echo "sudo pacman -Sy --noconfirm python python-pip curl tar" ;;
-    apk) echo "sudo apk add python3 py3-pip py3-virtualenv curl tar" ;;
-    zypper) echo "sudo zypper install -y python3 python3-pip python3-virtualenv curl tar" ;;
+    apt-get) echo "sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip curl tar ca-certificates git build-essential" ;;
+    dnf) echo "sudo dnf install -y python3 python3-pip python3-virtualenv curl tar ca-certificates git gcc gcc-c++ make" ;;
+    yum) echo "sudo yum install -y python3 python3-pip curl tar ca-certificates git gcc gcc-c++ make" ;;
+    pacman) echo "sudo pacman -Sy --noconfirm python python-pip curl tar ca-certificates git base-devel" ;;
+    apk) echo "sudo apk add python3 py3-pip py3-virtualenv curl tar ca-certificates git build-base" ;;
+    zypper) echo "sudo zypper install -y python3 python3-pip python3-virtualenv curl tar ca-certificates git gcc gcc-c++ make" ;;
     brew) echo "brew install python curl" ;;
     pkg) echo "pkg install -y python curl tar" ;;
     *) echo "请先安装 Python 3.10+、venv、pip、curl 和 tar" ;;
@@ -52,7 +52,7 @@ can_run_privileged() {
   if [ "$(id -u)" -eq 0 ]; then
     return 0
   fi
-  if have_cmd sudo && sudo -n true >/dev/null 2>&1; then
+  if have_cmd sudo; then
     return 0
   fi
   return 1
@@ -62,7 +62,7 @@ run_privileged() {
   if [ "$(id -u)" -eq 0 ]; then
     "$@"
   else
-    sudo -n "$@"
+    sudo "$@"
   fi
 }
 
@@ -78,22 +78,22 @@ install_system_prereqs() {
   case "$manager" in
     apt-get)
       run_privileged apt-get update
-      run_privileged apt-get install -y python3 python3-venv python3-pip curl tar
+      run_privileged apt-get install -y python3 python3-venv python3-pip curl tar ca-certificates git build-essential
       ;;
     dnf)
-      run_privileged dnf install -y python3 python3-pip python3-virtualenv curl tar
+      run_privileged dnf install -y python3 python3-pip python3-virtualenv curl tar ca-certificates git gcc gcc-c++ make
       ;;
     yum)
-      run_privileged yum install -y python3 python3-pip curl tar
+      run_privileged yum install -y python3 python3-pip curl tar ca-certificates git gcc gcc-c++ make
       ;;
     pacman)
-      run_privileged pacman -Sy --noconfirm python python-pip curl tar
+      run_privileged pacman -Sy --noconfirm python python-pip curl tar ca-certificates git base-devel
       ;;
     apk)
-      run_privileged apk add python3 py3-pip py3-virtualenv curl tar
+      run_privileged apk add python3 py3-pip py3-virtualenv curl tar ca-certificates git build-base
       ;;
     zypper)
-      run_privileged zypper --non-interactive install python3 python3-pip python3-virtualenv curl tar
+      run_privileged zypper --non-interactive install python3 python3-pip python3-virtualenv curl tar ca-certificates git gcc gcc-c++ make
       ;;
     brew)
       brew install python curl
@@ -261,6 +261,10 @@ download_ngrok_if_needed() {
   if curl -fsSL "$url" | tar -xz -C "$tmp_dir"; then
     mv "${tmp_dir}/ngrok" "${NGROK_BIN}"
     chmod +x "${NGROK_BIN}"
+    case ":${PATH}:" in
+      *":${BIN_DIR}:"*) ;;
+      *) export PATH="${BIN_DIR}:${PATH}" ;;
+    esac
     bootstrap_log "ngrok 已安装到 ${NGROK_BIN}"
   else
     bootstrap_log "警告：ngrok 下载失败，公网隧道可后续手动安装。"
