@@ -445,7 +445,7 @@ def resolve_search_tool_context(
 def resolve_responses_search_context(user_prompt, history, force, api_base_url, api_auth_token, api_model):
     github_urls = [url for url in extract_urls_from_text(user_prompt, max_urls=4) if "github.com" in url.lower()]
     if github_urls:
-        return resolve_search_tool_context(
+        observation, sources, plan = resolve_search_tool_context(
             user_prompt,
             history,
             force,
@@ -453,6 +453,9 @@ def resolve_responses_search_context(user_prompt, history, force, api_base_url, 
             api_auth_token,
             api_model,
         )
+        if observation or sources:
+            return observation, sources, plan
+        return build_empty_github_mcp_result(github_urls)
     plan = {
         "should_search": True,
         "search_queries": build_fallback_search_queries(user_prompt, context_messages=history, max_queries=3),
@@ -460,6 +463,33 @@ def resolve_responses_search_context(user_prompt, history, force, api_base_url, 
         "tool": "responses_web_search",
     }
     return "", [], plan
+
+
+def build_empty_github_mcp_result(github_urls):
+    sources = [
+        {
+            "index": idx,
+            "title": url,
+            "url": url,
+            "excerpt": "GitHub MCP 已被触发，但没有读取到源码。私有仓库需要在服务端环境变量 GITHUB_TOKEN 或 GH_TOKEN 中配置有仓库读取权限的 token。",
+            "provider": "github-mcp",
+            "quality": "official",
+            "query": "",
+        }
+        for idx, url in enumerate(github_urls, 1)
+    ]
+    plan = {
+        "should_search": True,
+        "search_queries": [],
+        "parse_links": github_urls[:2],
+        "tool": "github_mcp",
+    }
+    observation = (
+        "GitHub MCP 已被触发，但源码读取结果为空。"
+        "如果这是私有仓库，请在服务端配置 GITHUB_TOKEN 或 GH_TOKEN 后重试。\n\n"
+        + "\n".join(f"{item['index']}. {item['url']}" for item in sources)
+    )
+    return observation, sources, plan
 
 
 def should_autonomous_search(prompt: str, force: bool = False) -> bool:

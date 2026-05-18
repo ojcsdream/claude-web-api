@@ -63,6 +63,7 @@ CLAUDE_WEB_DB_PATH="./chat_multi.db"
 
 TAVILY_API_KEY="你的 Tavily key"
 SERPAPI_API_KEY="你的 SerpAPI key"
+GITHUB_TOKEN="可选：用于读取私有 GitHub 仓库"
 
 SMTP_HOST="smtp.example.com"
 SMTP_PORT="587"
@@ -75,6 +76,7 @@ SMTP_SSL="0"
 说明：
 
 - 如果不配置 SMTP，注册/重置密码邮件会不可用。
+- 如果要让 GitHub MCP 读取私有仓库，必须配置有仓库读取权限的 `GITHUB_TOKEN` 或 `GH_TOKEN`。
 - Gmail、QQ 邮箱等通常需要使用“应用专用密码/授权码”，不要使用网页登录密码。
 - `.env.multi`、`chat_multi.db`、`uploads/`、`logs/` 默认不应提交到 Git。
 
