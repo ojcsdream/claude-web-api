@@ -2,9 +2,11 @@ import json
 import sys
 import types
 import unittest
+import importlib.util
 from unittest.mock import patch
 
-sys.modules.setdefault("fastapi", types.SimpleNamespace(UploadFile=object))
+if importlib.util.find_spec("fastapi") is None:
+    sys.modules.setdefault("fastapi", types.SimpleNamespace(UploadFile=object))
 sys.modules.setdefault(
     "chat_utils",
     types.SimpleNamespace(
@@ -48,6 +50,27 @@ class ResponsesPayloadTest(unittest.TestCase):
             return _FakeResponse()
 
         prompt = "请解释这段普通文本"
+        with patch.object(services, "resilient_urlopen", fake_urlopen):
+            result = services.call_direct_responses_api(
+                prompt,
+                "https://api.openai.com",
+                "test-token",
+                api_model="gpt-5.5",
+            )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(captured["body"]["input"], prompt)
+        self.assertNotIn("tools", captured["body"])
+        self.assertNotIn("tool_choice", captured["body"])
+
+    def test_github_url_stays_in_responses_input_without_default_tools(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout=0):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return _FakeResponse()
+
+        prompt = "请分析 https://github.com/owner/repo 这个项目"
         with patch.object(services, "resilient_urlopen", fake_urlopen):
             result = services.call_direct_responses_api(
                 prompt,

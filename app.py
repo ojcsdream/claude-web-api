@@ -442,56 +442,6 @@ def resolve_search_tool_context(
     )
 
 
-def resolve_responses_search_context(user_prompt, history, force, api_base_url, api_auth_token, api_model):
-    github_urls = [url for url in extract_urls_from_text(user_prompt, max_urls=4) if "github.com" in url.lower()]
-    if github_urls:
-        observation, sources, plan = resolve_search_tool_context(
-            user_prompt,
-            history,
-            force,
-            api_base_url,
-            api_auth_token,
-            api_model,
-        )
-        if observation or sources:
-            return observation, sources, plan
-        return build_empty_github_mcp_result(github_urls)
-    plan = {
-        "should_search": True,
-        "search_queries": build_fallback_search_queries(user_prompt, context_messages=history, max_queries=3),
-        "parse_links": extract_urls_from_text(user_prompt, max_urls=2),
-        "tool": "responses_web_search",
-    }
-    return "", [], plan
-
-
-def build_empty_github_mcp_result(github_urls):
-    sources = [
-        {
-            "index": idx,
-            "title": url,
-            "url": url,
-            "excerpt": "GitHub MCP 已被触发，但没有读取到源码。私有仓库需要在服务端环境变量 GITHUB_TOKEN 或 GH_TOKEN 中配置有仓库读取权限的 token。",
-            "provider": "github-mcp",
-            "quality": "official",
-            "query": "",
-        }
-        for idx, url in enumerate(github_urls, 1)
-    ]
-    plan = {
-        "should_search": True,
-        "search_queries": [],
-        "parse_links": github_urls[:2],
-        "tool": "github_mcp",
-    }
-    observation = (
-        "GitHub MCP 已被触发，但源码读取结果为空。"
-        "如果这是私有仓库，请在服务端配置 GITHUB_TOKEN 或 GH_TOKEN 后重试。\n\n"
-        + "\n".join(f"{item['index']}. {item['url']}" for item in sources)
-    )
-    return observation, sources, plan
-
-
 def should_autonomous_search(prompt: str, force: bool = False) -> bool:
     if force:
         return True
@@ -518,6 +468,15 @@ def should_autonomous_search_with_context(prompt: str, history=None, force: bool
 
 def search_status_key(sources) -> str:
     return "github_mcp" if sources and all(item.get("provider") == "github-mcp" for item in sources) else "searching"
+
+
+def build_responses_search_plan(user_prompt, history):
+    return {
+        "should_search": True,
+        "search_queries": build_fallback_search_queries(user_prompt, context_messages=history, max_queries=3),
+        "parse_links": extract_urls_from_text(user_prompt, max_urls=2),
+        "tool": "responses_web_search",
+    }
 
 
 app.add_middleware(
@@ -992,12 +951,14 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
 
     def gen():
         has_urls = bool(extract_urls_from_text(body.prompt))
-        search_intent = should_autonomous_search_with_context(body.prompt, history, force=body.web_search) or has_urls
+        search_intent = should_autonomous_search_with_context(body.prompt, history, force=body.web_search)
+        should_fetch_urls = has_urls and protocol != "responses"
+        should_prepare_search = search_intent or should_fetch_urls
         yield "\n[[STATUS:thinking]]\n"
-        if search_intent:
+        if should_prepare_search:
             yield "\n[[STATUS:parsing]]\n"
-        if search_intent:
-            yield "\n[[STATUS:planning_search]]\n"
+            if search_intent:
+                yield "\n[[STATUS:planning_search]]\n"
 
         effective_prompt = body.prompt if protocol == "responses" else enhance_prompt_with_url_fetch(body.prompt)
         sources = []
@@ -1005,16 +966,9 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
         observation = ""
 
         if search_intent and protocol == "responses":
-            observation, sources, plan = resolve_responses_search_context(
-                body.prompt,
-                history,
-                body.web_search,
-                body.api_base_url,
-                body.api_auth_token,
-                body.api_model or DEFAULT_MODEL,
-            )
-            should_search = bool(plan.get("should_search") or plan.get("parse_links"))
-        elif search_intent:
+            plan = build_responses_search_plan(body.prompt, history)
+            should_search = True
+        elif search_intent or should_fetch_urls:
             observation, sources, plan = resolve_search_tool_context(
                 body.prompt,
                 history,
@@ -1027,7 +981,7 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
         else:
             should_search = False
 
-        if should_search:
+        if should_search and (protocol != "responses" or observation):
             yield f"\n[[STATUS:{search_status_key(sources)}]]\n"
             if plan.get("parse_links"):
                 yield "\n[[STATUS:reading_sources]]\n"
@@ -1107,17 +1061,11 @@ def _build_regenerate_prompt_with_search(
         last_user_prompt,
         context_messages,
         force=web_search,
-    ) or bool(extract_urls_from_text(last_user_prompt))
+    )
+    should_fetch_urls = bool(extract_urls_from_text(last_user_prompt)) and protocol != "responses"
     if search_intent:
         if protocol == "responses":
-            observation, sources, plan = resolve_responses_search_context(
-                last_user_prompt,
-                context_messages,
-                web_search,
-                api_base_url,
-                api_auth_token,
-                api_model,
-            )
+            plan = build_responses_search_plan(last_user_prompt, context_messages)
         else:
             observation, sources, plan = resolve_search_tool_context(
                 last_user_prompt,
@@ -1127,6 +1075,15 @@ def _build_regenerate_prompt_with_search(
                 api_auth_token,
                 api_model,
             )
+    elif should_fetch_urls:
+        observation, sources, plan = resolve_search_tool_context(
+            last_user_prompt,
+            context_messages,
+            web_search,
+            api_base_url,
+            api_auth_token,
+            api_model,
+        )
 
     final_user_prompt = last_user_prompt
     if observation:
@@ -1522,19 +1479,13 @@ async def chat_upload_stream(
         user_prompt,
         history,
         force=web_search,
-    ) or bool(extract_urls_from_text(user_prompt))
+    )
+    should_fetch_urls = bool(extract_urls_from_text(user_prompt)) and protocol != "responses"
     should_search = False
     if search_intent:
         if protocol == "responses":
-            search_observation, sources, _plan = resolve_responses_search_context(
-                user_prompt,
-                history,
-                web_search,
-                api_base_url,
-                api_auth_token,
-                api_model or DEFAULT_MODEL,
-            )
-            should_search = bool(_plan.get("should_search") or _plan.get("parse_links"))
+            _plan = build_responses_search_plan(user_prompt, history)
+            should_search = True
         else:
             search_observation, sources, _plan = resolve_search_tool_context(
                 user_prompt,
@@ -1545,6 +1496,16 @@ async def chat_upload_stream(
                 api_model or DEFAULT_MODEL,
             )
             should_search = bool(_plan.get("should_search") or _plan.get("parse_links"))
+    elif should_fetch_urls:
+        search_observation, sources, _plan = resolve_search_tool_context(
+            user_prompt,
+            history,
+            web_search,
+            api_base_url,
+            api_auth_token,
+            api_model or DEFAULT_MODEL,
+        )
+        should_search = bool(_plan.get("should_search") or _plan.get("parse_links"))
 
     responses_file_items = [
         {
