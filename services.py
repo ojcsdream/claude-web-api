@@ -1217,15 +1217,62 @@ def _dedupe_queries(items, limit: int = 4) -> list[str]:
     return queries
 
 
+
+def _query_expansion_candidates(primary_query: str, user_prompt: str = "", max_queries: int = 3) -> list[str]:
+    primary = _finalize_search_query(primary_query or user_prompt or "")
+    if not primary or _is_bad_search_query(primary):
+        return []
+
+    candidates = [primary]
+    prompt = user_prompt or primary
+    lowered = prompt.lower()
+    time_sensitive = any(word in prompt for word in ("最新", "最近", "新闻", "消息", "动态", "更新", "发布时间", "发布日期")) or any(
+        word in lowered for word in ("latest", "recent", "news", "update", "updates", "release date", "released")
+    )
+    comparison = _is_comparison_request(prompt)
+
+    primary_lowered = primary.lower()
+
+    def add_expansion(suffix: str):
+        words = [w for w in suffix.lower().split() if w]
+        missing = [w for w in words if w not in primary_lowered]
+        if missing:
+            candidates.append(f"{primary} {' '.join(missing)}")
+
+    if time_sensitive:
+        add_expansion("official latest update")
+    if any(word in prompt for word in ("官方", "来源", "文档", "公告")) or any(word in lowered for word in ("official", "docs", "documentation", "announcement")):
+        add_expansion("official documentation announcement")
+    if comparison:
+        add_expansion("comparison review benchmark")
+    if any(word in prompt for word in ("价格", "费用", "定价")) or any(word in lowered for word in ("price", "pricing", "cost")):
+        add_expansion("pricing official")
+    if any(word in prompt for word in ("错误", "报错", "失败", "修复", "问题")) or any(word in lowered for word in ("error", "bug", "fix", "issue", "failed")):
+        add_expansion("issue fix documentation")
+
+    filtered = _filter_aligned_search_queries(
+        _dedupe_queries(candidates, limit=max_queries + 2),
+        user_prompt=prompt,
+        fallback_queries=[primary],
+        limit=max_queries,
+    )
+    return filtered or [primary[:180]]
+
 def build_fallback_search_queries(user_prompt: str, context_messages=None, max_queries: int = 3) -> list[str]:
+    limit = max(1, min(int(max_queries or 3), 4))
     queries = []
+
+    # CHIQ-style: first rewrite the conversational turn into a standalone search query.
+    # Jina-style: keep that primary query, then add only aligned expansion queries.
     for query in _comparison_search_queries(user_prompt):
         if query and query not in queries:
             queries.append(query)
-    contextual = build_contextual_search_query(user_prompt, context_messages=context_messages, max_chars=160)
-    if contextual and contextual not in queries:
-        queries.append(contextual)
-    return queries[:max(1, min(int(max_queries or 3), 4))]
+    contextual = build_contextual_search_query(user_prompt, context_messages=context_messages, max_chars=180)
+    base = contextual or _strip_leading_search_command_words(user_prompt or "")
+    for query in _query_expansion_candidates(base, user_prompt=user_prompt, max_queries=limit):
+        if query and query not in queries:
+            queries.append(query)
+    return queries[:limit]
 
 
 def _has_specific_search_entity(text: str) -> bool:
@@ -1361,7 +1408,7 @@ def build_search_planner_prompt(user_prompt: str, context_messages=None) -> str:
         "4. 搜索词要像真实搜索引擎查询：短、具体、可检索；保留专名、产品名、公司名、人名、版本号、地点、时间范围、用户指定的比较对象。\n"
         "5. 禁止只输出“最新消息”“相关信息”“这个”“搜索一下”“查一下”等空泛词，也禁止只复述命令词。\n"
         "6. 用户只是普通聊天、写作、解释代码、数学推导、翻译、总结已给内容时，不需要联网，should_search=false。\n"
-        "7. 可以给 1-4 个搜索词。比较、评测、全方面对比类问题，不要只搜其中一方，优先让 queries 覆盖双方和综合比较。\n"
+        "7. 可以给 1-4 个搜索词。第一条必须是独立主查询；后续只能是同主题扩展关键词，不能替换或泛化第一条。比较、评测、全方面对比类问题，不要只搜其中一方，优先让 queries 覆盖双方和综合比较。\n"
         "8. 只输出 JSON，不要解释。\n"
         'JSON 格式：{"should_search":true,"search_queries":["准确关键词"],"parse_links":[]}\n\n'
         f"后端基于上下文得到的候选关键词，仅供校验，不要盲从：\n{heuristic_query or '（无）'}\n\n"
@@ -1390,6 +1437,85 @@ def _is_bad_search_query(query: str) -> bool:
     return not meaningful_terms
 
 
+
+def _model_like_search_terms(text: str) -> list[str]:
+    value = (text or "").lower()
+    terms = []
+    patterns = [
+        r"\b[a-z]+[-\s]?[a-z]*[-\s]?\d+(?:\.\d+)?[a-z0-9.-]*\b",
+        r"\b\d+(?:\.\d+)+(?:[-\w.]*)?\b",
+        r"\b[a-z0-9_.+-]+@[a-z0-9.-]+\.[a-z]{2,}\b",
+        r"\b[a-z0-9.-]+\.[a-z]{2,}\b",
+    ]
+    for pattern in patterns:
+        for match in re.findall(pattern, value, flags=re.I):
+            term = re.sub(r"\s+", " ", str(match).strip().lower())
+            if term and term not in terms:
+                terms.append(term)
+    return terms
+
+
+def _important_search_terms(text: str) -> list[str]:
+    terms = []
+    for term in extract_query_terms(text):
+        if term in GENERIC_SEARCH_WORDS:
+            continue
+        if term in {"search", "latest", "news", "update", "updates", "official", "source", "sources"}:
+            continue
+        if re.search(r"[a-z0-9]", term) and len(term) >= 2 and term not in terms:
+            terms.append(term)
+    for term in _model_like_search_terms(text):
+        if term not in terms:
+            terms.append(term)
+    return terms
+
+
+def _query_keeps_user_subject(query: str, user_prompt: str = "", context_messages=None, fallback_queries=None) -> bool:
+    q = (query or "").lower()
+    if not q:
+        return False
+
+    basis_parts = [user_prompt or ""]
+    basis_parts.extend(fallback_queries or [])
+    contextual = build_contextual_search_query(user_prompt, context_messages=context_messages, max_chars=180)
+    if contextual:
+        basis_parts.append(contextual)
+    basis = "\n".join(str(part or "") for part in basis_parts)
+
+    model_terms = _model_like_search_terms(basis)
+    if model_terms and not any(term in q or term.replace(" ", "-") in q or term.replace("-", " ") in q for term in model_terms):
+        return False
+
+    important_terms = _important_search_terms(basis)
+    broad_entity_terms = {
+        "openai", "anthropic", "google", "apple", "microsoft", "github",
+        "meta", "amazon", "aws", "claude", "gpt",
+    }
+    anchor_terms = [term for term in important_terms if term not in broad_entity_terms]
+    terms_to_check = anchor_terms or important_terms
+    if terms_to_check:
+        return any(
+            term in q or term.replace(" ", "-") in q or term.replace("-", " ") in q
+            for term in terms_to_check
+        )
+
+    return True
+
+
+def _filter_aligned_search_queries(queries: list[str], user_prompt: str = "", context_messages=None, fallback_queries=None, limit: int = 4) -> list[str]:
+    filtered = []
+    for query in queries or []:
+        q = re.sub(r"\s+", " ", str(query or "")).strip(" ，,。.!！?？")
+        if not q or _is_bad_search_query(q):
+            continue
+        if not _query_keeps_user_subject(q, user_prompt=user_prompt, context_messages=context_messages, fallback_queries=fallback_queries):
+            continue
+        if q not in filtered:
+            filtered.append(q[:180])
+        if len(filtered) >= limit:
+            break
+    return filtered
+
 def normalize_search_plan(raw_plan: dict | None, fallback: dict, user_prompt: str = "", context_messages=None) -> dict:
     if not isinstance(raw_plan, dict):
         return fallback
@@ -1413,9 +1539,18 @@ def normalize_search_plan(raw_plan: dict | None, fallback: dict, user_prompt: st
         if len(links) >= 2:
             break
 
+    fallback_queries = _dedupe_queries(fallback.get("search_queries") or [], limit=3)
+    queries = _filter_aligned_search_queries(
+        queries,
+        user_prompt=user_prompt,
+        context_messages=context_messages,
+        fallback_queries=fallback_queries,
+        limit=4,
+    )
+
     should_search = bool(raw_plan.get("should_search")) or bool(queries) or bool(links)
-    if not queries and fallback.get("search_queries"):
-        queries = _dedupe_queries(fallback.get("search_queries") or [], limit=3)
+    if not queries and fallback_queries:
+        queries = fallback_queries
     if should_search and not queries and not links:
         queries = _dedupe_queries(
             build_fallback_search_queries(user_prompt, context_messages=context_messages, max_queries=3),
@@ -1589,8 +1724,6 @@ def rewrite_search_query(query: str) -> str:
         if any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
             return "Claude Code latest update Anthropic official"
         return "Claude Code Anthropic official"
-    if "openai" in lowered and any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
-        return "OpenAI latest news official"
     if "python" in lowered and re.search(r"3\.\d+", lowered):
         version = re.search(r"3\.\d+", lowered).group(0)
         if any(word in q for word in ("发布日期", "发布时间", "什么时候发布", "何时发布", "release date", "released")):
@@ -1598,10 +1731,6 @@ def rewrite_search_query(query: str) -> str:
         if any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
             return f"Python {version} latest update official site:python.org"
         return f"Python {version} official site:python.org"
-    if any(token in lowered for token in ("apple", "m4", "iphone", "ipad", "mac")) and any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
-        return "Apple latest news official site:apple.com"
-    if any(token in lowered for token in ("github", "github.com")) and any(word in q for word in ("最新", "latest", "news", "update", "updates", "最近更新")):
-        return "GitHub latest update official"
     return q
 
 
@@ -2040,6 +2169,16 @@ def _normalize_protocol(protocol: str, api_model: str = "") -> str:
     return "claude"
 
 
+def _add_default_claude_web_search_tool(body: dict) -> dict:
+    if isinstance(body, dict) and not body.get("tools"):
+        body["tools"] = [{
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 5,
+        }]
+    return body
+
+
 def _extract_response_output_text(data: dict) -> str:
     if not isinstance(data, dict):
         return ""
@@ -2130,6 +2269,7 @@ def call_direct_text_api(
         "messages": messages,
         "stream": False,
     }
+    _add_default_claude_web_search_tool(body)
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
@@ -2247,10 +2387,8 @@ def call_direct_responses_api(
         "max_output_tokens": max_output_tokens,
     }
     if use_web_search:
-        body["tools"] = [{
-            "type": "web_search",
-            "search_context_size": search_context_size or "low",
-        }]
+        body["tools"] = [{"type": "web_search"}]
+        body["tool_choice"] = "auto"
     body = {k: v for k, v in body.items() if v not in (None, "", [], {})}
     req = urllib.request.Request(
         url,
@@ -2305,10 +2443,8 @@ def stream_direct_responses_api_text(
         "stream": True,
     }
     if use_web_search:
-        body["tools"] = [{
-            "type": "web_search",
-            "search_context_size": search_context_size or "low",
-        }]
+        body["tools"] = [{"type": "web_search"}]
+        body["tool_choice"] = "auto"
     body = {k: v for k, v in body.items() if v not in (None, "", [], {})}
     req = urllib.request.Request(
         url,
@@ -2431,22 +2567,22 @@ def build_search_tool_call_prompt(user_prompt: str, context_messages=None, force
     return (
         "你现在处在工具调用决策阶段。你不能回答用户，只能决定是否调用搜索工具。\n"
         "可用工具：\n"
-        "web_search({\"queries\":[\"搜索关键词1\",\"搜索关键词2\"], \"read_urls\":[\"可选URL\"]})\n\n"
+        "web_search({\"queries\":[\"主查询\",\"补充查询1\",\"补充查询2\"], \"read_urls\":[\"可选URL\"]})\n\n"
         "说明：如果 read_urls 里包含 github.com 链接，后端会优先用 GitHub 源码读取器解析文件或目录内容。\n\n"
         "决策规则：\n"
         f"1. {force_rule}\n"
-        "2. 先理解用户真实需求，再构造 query；query 必须和用户问题一致，不能把问题改成另一个方向。\n"
-        "3. 如果用户使用“这个/它/他/上述/刚才/最新消息/查一下”等指代，必须从最近对话中补全真实主体。\n"
-        "4. 如果上下文不足以确定要搜索什么，输出 tool=none，不要猜。\n"
-        "5. queries 要短、具体、可检索，保留专名、产品名、公司名、人名、版本号、地点、时间范围、比较对象。\n"
-        "6. 对比/评测/全方面比较类问题，不要只搜索其中一方；你可以自由给 2-4 个 query 覆盖双方官方信息和综合比较。\n"
-        "7. 禁止输出“最新消息”“相关信息”“这个”“查一下”“搜索一下”等空泛 query。\n"
+        "2. 采用 CHIQ 风格：先判断新问题是新主题还是延续旧主题；若有指代，必须用最近对话补全为独立、无歧义的主查询。\n"
+        "3. 采用 query expansion 风格：queries[0] 必须是保留用户原始主体的主查询；后续 query 只能添加同主题关键词/短语用于提升召回，不能替换或泛化主查询。\n"
+        "4. query 必须和用户问题一致，保留专名、产品名、公司名、人名、版本号、地点、时间范围、比较对象、错误码/API 名称等关键锚点。\n"
+        "5. 如果上下文不足以确定要搜索什么，输出 tool=none，不要猜。\n"
+        "6. queries 要短、具体、可检索。补充查询最多 2 条，可加入 official/documentation/release notes/pricing/issue/benchmark 等限定词。\n"
+        "7. 禁止输出只含“最新消息”“相关信息”“这个”“查一下”“搜索一下”或只含厂商名的空泛 query。\n"
         "8. 普通写作、翻译、数学、代码解释、总结用户已给内容，不调用搜索。\n"
         "9. 只输出 JSON，不要解释。\n\n"
         "输出格式二选一：\n"
-        "{\"tool\":\"web_search\",\"queries\":[\"准确搜索关键词\"],\"read_urls\":[]}\n"
+        "{\"tool\":\"web_search\",\"queries\":[\"独立主查询\",\"同主题补充查询\"],\"read_urls\":[]}\n"
         "{\"tool\":\"none\",\"query\":\"\",\"read_urls\":[]}\n\n"
-        f"后端候选 query，仅供兜底，不要被它限制：\n{candidate_query or '（无）'}\n\n"
+        f"后端候选 query，仅供校验；如果合理，应优先保留第一条：\n{candidate_query or '（无）'}\n\n"
         f"最近对话：\n{context or '（无）'}\n\n"
         f"用户最新问题：\n{user_prompt or ''}"
     )
@@ -2470,12 +2606,20 @@ def normalize_search_tool_call(raw_call: dict | None, fallback: dict, user_promp
 
     queries = []
     queries = _dedupe_queries(list(raw_queries or []) + ([raw_query] if raw_query else []), limit=4)
+    fallback_queries = _dedupe_queries(fallback.get("search_queries") or [], limit=3)
+    queries = _filter_aligned_search_queries(
+        queries,
+        user_prompt=user_prompt,
+        context_messages=context_messages,
+        fallback_queries=fallback_queries,
+        limit=4,
+    )
 
     should_search = tool == "web_search" or force or bool(parse_links)
-    if not should_search and fallback.get("should_search") and fallback.get("search_queries"):
+    if not should_search and fallback.get("should_search") and fallback_queries:
         should_search = True
-    if should_search and not queries and fallback.get("search_queries"):
-        queries = _dedupe_queries(fallback.get("search_queries") or [], limit=3)
+    if should_search and not queries and fallback_queries:
+        queries = fallback_queries
     if should_search and not queries and not parse_links:
         queries = _dedupe_queries(
             build_fallback_search_queries(user_prompt, context_messages=context_messages, max_queries=3),
@@ -2990,6 +3134,7 @@ def stream_direct_api_text(
         "messages": messages,
         "stream": True,
     }
+    _add_default_claude_web_search_tool(body)
     headers = {
         "Content-Type": "application/json",
         "Accept": "text/event-stream, application/json, text/plain, */*",
@@ -3375,6 +3520,7 @@ def stream_direct_vision_api_text(
         "messages": messages,
         "stream": True,
     }
+    _add_default_claude_web_search_tool(body)
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
@@ -3529,6 +3675,7 @@ def call_direct_vision_api(
         "temperature": MODEL_TEMPERATURE,
         "messages": messages
     }
+    _add_default_claude_web_search_tool(body)
 
     url = base_url + "/v1/messages"
 

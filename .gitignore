@@ -15,6 +15,7 @@ Screenshot_*.png
 
 # Runtime databases and local state
 chat.db
+*.db
 *.sqlite
 *.sqlite3
 filebrowser.db
@@ -28,6 +29,7 @@ cloudflare-url.txt
 .env
 .env.*
 .cc-proxy.env
+add_api_profile.py
 *.key
 *.pem
 *.secret
@@ -49,3 +51,4 @@ release/
 *.before*
 app.py.bak*
 static/*.bak*
+backups/

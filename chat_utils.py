@@ -1,6 +1,12 @@
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
+
+try:
+    import tiktoken
+except Exception:  # pragma: no cover - optional runtime dependency
+    tiktoken = None
 
 from config import (
     IMAGE_EXTS,
@@ -12,31 +18,58 @@ from config import (
 from schemas import MessageItem
 
 
-def estimate_tokens(text: str) -> int:
-    """
-    粗略 token 估算：
-    - 中文：约 1 字 ≈ 1 token
-    - 英文/代码：约 4 字符 ≈ 1 token
-    混合场景取折中算法。
-    """
-    if not text:
-        return 0
+@lru_cache(maxsize=16)
+def _get_token_encoding(model: str = ""):
+    if tiktoken is None:
+        return None
 
+    model_name = (model or "").strip()
+    if model_name:
+        try:
+            return tiktoken.encoding_for_model(model_name)
+        except KeyError:
+            pass
+
+    for encoding_name in ("o200k_base", "cl100k_base"):
+        try:
+            return tiktoken.get_encoding(encoding_name)
+        except Exception:
+            continue
+    return None
+
+
+def _estimate_tokens_fallback(text: str) -> int:
     chinese = 0
     other = 0
 
     for ch in text:
-        if "\u4e00" <= ch <= "\u9fff":
+        if "一" <= ch <= "鿿":
             chinese += 1
         else:
             other += 1
 
-    return max(1, chinese + other // 4)
+    return max(1, chinese + (other + 3) // 4)
 
 
-def estimate_round_tokens(input_text: str, output_text: str, image_count: int = 0) -> int:
-    # 图片 token 很难精确，不同模型差异很大，这里给每张图一个保守估算值
-    return estimate_tokens(input_text) + estimate_tokens(output_text) + image_count * 1000
+def estimate_tokens(text: str, model: str = "") -> int:
+    """Estimate text tokens with tiktoken, falling back to a lightweight heuristic."""
+    if not text:
+        return 0
+
+    value = str(text)
+    encoding = _get_token_encoding(model)
+    if encoding is not None:
+        try:
+            return len(encoding.encode(value, disallowed_special=()))
+        except Exception:
+            pass
+
+    return _estimate_tokens_fallback(value)
+
+
+def estimate_round_tokens(input_text: str, output_text: str, image_count: int = 0, model: str = "") -> int:
+    # 图片 token 不同模型差异很大，这里仍保留保守估算值。
+    return estimate_tokens(input_text, model=model) + estimate_tokens(output_text, model=model) + image_count * 1000
 
 
 def is_image_file(filename: str) -> bool:

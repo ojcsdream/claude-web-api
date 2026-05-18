@@ -20,9 +20,8 @@ VISION_CONTEXT_CHARS = 30000
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 
-# Public tunnels on mobile/Termux are sensitive to large multipart uploads.
-# Keep request bodies small enough that cloudflared and vision APIs do not
-# buffer very large base64 payloads.
-MAX_UPLOAD_BYTES = 8 * 1024 * 1024
-MAX_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024
+# Keep request bodies small enough that reverse proxies and vision APIs do not
+# buffer very large base64 payloads, while allowing normal phone screenshots.
+MAX_UPLOAD_BYTES = 24 * 1024 * 1024
+MAX_IMAGE_UPLOAD_BYTES = 16 * 1024 * 1024
 VISION_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}

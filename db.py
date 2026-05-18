@@ -9,7 +9,7 @@ from config import DEFAULT_MODEL
 from schemas import ApiProfileBody, MessageItem, SystemPromptBody
 
 BASE_DIR = Path(os.environ.get("CLAUDE_WEB_BASE_DIR") or Path(__file__).resolve().parent)
-DB_PATH = BASE_DIR / "chat.db"
+DB_PATH = Path(os.environ.get("CLAUDE_WEB_DB_PATH") or (BASE_DIR / "chat_multi.db"))
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -29,8 +29,40 @@ def init_db():
     cur = conn.cursor()
 
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        email TEXT,
+        password_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS email_verification_codes (
+        email TEXT PRIMARY KEY,
+        purpose TEXT NOT NULL DEFAULT 'register',
+        code TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        consumed_at INTEGER
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """)
+
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
+        user_id TEXT,
         title TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -53,6 +85,9 @@ def init_db():
 
 
     for table, column, definition in [
+        ("users", "email", "TEXT"),
+        ("email_verification_codes", "purpose", "TEXT NOT NULL DEFAULT 'register'"),
+        ("conversations", "user_id", "TEXT"),
         ("messages", "model", "TEXT"),
         ("messages", "provider_name", "TEXT"),
         ("messages", "token_count", "INTEGER"),
@@ -60,15 +95,21 @@ def init_db():
         ("messages", "superseded_by", "INTEGER"),
         ("messages", "sources", "TEXT"),
         ("conversations", "is_pinned", "INTEGER NOT NULL DEFAULT 0"),
+        ("api_profiles", "user_id", "TEXT"),
         ("api_profiles", "protocol", "TEXT"),
+        ("system_prompts", "user_id", "TEXT"),
     ]:
         add_column_if_missing(cur, table, column, definition)
 
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id)")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_email_verification_expires ON email_verification_codes(expires_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id)")
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS api_profiles (
         id TEXT PRIMARY KEY,
+        user_id TEXT,
         name TEXT NOT NULL,
         base_url TEXT NOT NULL,
         auth_token TEXT NOT NULL,
@@ -80,11 +121,12 @@ def init_db():
     )
     """)
 
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_api_profiles_updated_at ON api_profiles(updated_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_api_profiles_user_updated ON api_profiles(user_id, updated_at)")
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS system_prompts (
         id TEXT PRIMARY KEY,
+        user_id TEXT,
         title TEXT NOT NULL,
         content TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 0,
@@ -93,7 +135,7 @@ def init_db():
     )
     """)
 
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_system_prompts_updated_at ON system_prompts(updated_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_system_prompts_user_updated ON system_prompts(user_id, updated_at)")
 
     conn.commit()
     conn.close()
@@ -111,29 +153,228 @@ def new_id() -> str:
     return uuid.uuid4().hex
 
 
-def db_create_conversation(title: str = "新对话") -> str:
+def db_create_user(username: str, email: str, password_hash: str) -> str:
+    uid = new_id()
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO users (id, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+        (uid, username, email, password_hash, now_ms()),
+    )
+    conn.commit()
+    conn.close()
+    return uid
+
+
+def db_get_user_by_username(username: str):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, username, email, password_hash, created_at FROM users WHERE lower(username)=lower(?)",
+        (username,),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def db_get_user_by_email(email: str):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, username, email, password_hash, created_at FROM users WHERE lower(email)=lower(?)",
+        (email,),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def db_get_user_by_id(user_id: str):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, username, email, created_at FROM users WHERE id=?",
+        (user_id,),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def db_get_user_auth_by_id(user_id: str):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, username, email, password_hash, created_at FROM users WHERE id=?",
+        (user_id,),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def db_update_user_profile(user_id: str, username: str, email: str):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET username=?, email=? WHERE id=?",
+        (username, email, user_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id, username, email, created_at FROM users WHERE id=?",
+        (user_id,),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def db_update_user_password_by_id(user_id: str, password_hash: str):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET password_hash=? WHERE id=?",
+        (password_hash, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def db_create_session(token: str, user_id: str, expires_at: int):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO auth_sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        (token, user_id, now_ms(), expires_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def db_get_session_user(token: str):
+    conn = get_conn()
+    row = conn.execute(
+        """
+        SELECT users.id, users.username, users.email, users.created_at
+        FROM auth_sessions
+        JOIN users ON users.id = auth_sessions.user_id
+        WHERE auth_sessions.token=? AND auth_sessions.expires_at>?
+        """,
+        (token, now_ms()),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def db_delete_session(token: str):
+    conn = get_conn()
+    conn.execute("DELETE FROM auth_sessions WHERE token=?", (token,))
+    conn.commit()
+    conn.close()
+
+
+def db_delete_other_sessions_by_user(user_id: str, keep_token: str):
+    conn = get_conn()
+    conn.execute("DELETE FROM auth_sessions WHERE user_id=? AND token<>?", (user_id, keep_token))
+    conn.commit()
+    conn.close()
+
+
+def db_save_email_verification_code(email: str, purpose: str, code: str, expires_at: int):
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO email_verification_codes (email, purpose, code, created_at, expires_at, consumed_at)
+        VALUES (?, ?, ?, ?, ?, NULL)
+        ON CONFLICT(email) DO UPDATE SET
+            purpose=excluded.purpose,
+            code=excluded.code,
+            created_at=excluded.created_at,
+            expires_at=excluded.expires_at,
+            consumed_at=NULL
+        """,
+        (email, purpose, code, now_ms(), expires_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def db_get_email_verification_code(email: str, purpose: str = ""):
+    conn = get_conn()
+    row = conn.execute(
+        """
+        SELECT email, purpose, code, created_at, expires_at, consumed_at
+        FROM email_verification_codes
+        WHERE lower(email)=lower(?) AND (? = '' OR purpose=?)
+        """,
+        (email, purpose, purpose),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def db_verify_email_code(email: str, purpose: str, code: str) -> bool:
+    conn = get_conn()
+    row = conn.execute(
+        """
+        SELECT code FROM email_verification_codes
+        WHERE lower(email)=lower(?) AND purpose=? AND expires_at>? AND consumed_at IS NULL
+        """,
+        (email, purpose, now_ms()),
+    ).fetchone()
+    if not row or row["code"] != code:
+        conn.close()
+        return False
+    conn.execute(
+        "UPDATE email_verification_codes SET consumed_at=? WHERE lower(email)=lower(?) AND purpose=?",
+        (now_ms(), email, purpose),
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def db_update_user_password_by_email(email: str, password_hash: str):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET password_hash=? WHERE lower(email)=lower(?)",
+        (password_hash, email),
+    )
+    conn.commit()
+    conn.close()
+
+
+def db_delete_sessions_by_user(user_id: str):
+    conn = get_conn()
+    conn.execute("DELETE FROM auth_sessions WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def db_user_owns_conversation(user_id: str, conversation_id: str) -> bool:
+    if not user_id or not conversation_id:
+        return False
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id FROM conversations WHERE id=? AND user_id=?",
+        (conversation_id, user_id),
+    ).fetchone()
+    conn.close()
+    return bool(row)
+
+
+def db_create_conversation(title: str = "新对话", user_id: str = "") -> str:
     cid = new_id()
     ts = now_ms()
     conn = get_conn()
     conn.execute(
-        "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (cid, title or "新对话", ts, ts),
+        "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (cid, user_id, title or "新对话", ts, ts),
     )
     conn.commit()
     conn.close()
     return cid
 
 
-def db_ensure_conversation(cid: str, title: str = "新对话") -> str:
+def db_ensure_conversation(cid: str, title: str = "新对话", user_id: str = "") -> str:
     if cid:
         conn = get_conn()
-        row = conn.execute("SELECT id FROM conversations WHERE id=?", (cid,)).fetchone()
+        row = conn.execute("SELECT id FROM conversations WHERE id=? AND user_id=?", (cid, user_id)).fetchone()
         if row:
             conn.close()
             return cid
         conn.close()
 
-    return db_create_conversation(title)
+    return db_create_conversation(title, user_id=user_id)
 
 
 def db_add_message(
@@ -168,45 +409,46 @@ def db_add_message(
     return new_id
 
 
-def db_update_title_if_needed(conversation_id: str, title_source: str):
+def db_update_title_if_needed(conversation_id: str, title_source: str, user_id: str = ""):
     conn = get_conn()
-    row = conn.execute("SELECT title FROM conversations WHERE id=?", (conversation_id,)).fetchone()
+    row = conn.execute("SELECT title FROM conversations WHERE id=? AND user_id=?", (conversation_id, user_id)).fetchone()
     if row and (row["title"].startswith("新对话") or row["title"].strip() == ""):
         title = (title_source or "新对话").strip().replace("\n", " ")[:18] or "新对话"
         conn.execute(
-            "UPDATE conversations SET title=?, updated_at=? WHERE id=?",
-            (title, now_ms(), conversation_id),
+            "UPDATE conversations SET title=?, updated_at=? WHERE id=? AND user_id=?",
+            (title, now_ms(), conversation_id, user_id),
         )
         conn.commit()
     conn.close()
 
 
-def db_list_api_profiles():
+def db_list_api_profiles(user_id: str = ""):
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, name, base_url, auth_token, model, protocol, is_default, created_at, updated_at FROM api_profiles ORDER BY is_default DESC, updated_at DESC"
+        "SELECT id, name, base_url, auth_token, model, protocol, is_default, created_at, updated_at FROM api_profiles WHERE user_id=? ORDER BY is_default DESC, updated_at DESC",
+        (user_id,),
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
 
-def db_save_api_profile(profile_id: str, body: ApiProfileBody):
+def db_save_api_profile(profile_id: str, body: ApiProfileBody, user_id: str = ""):
     ts = now_ms()
     pid = profile_id or new_id()
 
     conn = get_conn()
 
     if body.is_default:
-        conn.execute("UPDATE api_profiles SET is_default=0")
+        conn.execute("UPDATE api_profiles SET is_default=0 WHERE user_id=?", (user_id,))
 
-    old = conn.execute("SELECT id FROM api_profiles WHERE id=?", (pid,)).fetchone()
+    old = conn.execute("SELECT id FROM api_profiles WHERE id=? AND user_id=?", (pid, user_id)).fetchone()
 
     if old:
         conn.execute(
             """
             UPDATE api_profiles
             SET name=?, base_url=?, auth_token=?, model=?, protocol=?, is_default=?, updated_at=?
-            WHERE id=?
+            WHERE id=? AND user_id=?
             """,
             (
                 body.name.strip() or "未命名接入商",
@@ -217,17 +459,19 @@ def db_save_api_profile(profile_id: str, body: ApiProfileBody):
                 1 if body.is_default else 0,
                 ts,
                 pid,
+                user_id,
             ),
         )
     else:
         conn.execute(
             """
             INSERT INTO api_profiles
-            (id, name, base_url, auth_token, model, protocol, is_default, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, user_id, name, base_url, auth_token, model, protocol, is_default, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 pid,
+                user_id,
                 body.name.strip() or "未命名接入商",
                 body.base_url.strip(),
                 body.auth_token.strip(),
@@ -244,59 +488,60 @@ def db_save_api_profile(profile_id: str, body: ApiProfileBody):
     return pid
 
 
-def db_delete_api_profile(profile_id: str):
+def db_delete_api_profile(profile_id: str, user_id: str = ""):
     conn = get_conn()
-    conn.execute("DELETE FROM api_profiles WHERE id=?", (profile_id,))
+    conn.execute("DELETE FROM api_profiles WHERE id=? AND user_id=?", (profile_id, user_id))
     conn.commit()
     conn.close()
 
 
-def db_set_default_api_profile(profile_id: str):
+def db_set_default_api_profile(profile_id: str, user_id: str = ""):
     conn = get_conn()
-    conn.execute("UPDATE api_profiles SET is_default=0")
+    conn.execute("UPDATE api_profiles SET is_default=0 WHERE user_id=?", (user_id,))
     conn.execute(
-        "UPDATE api_profiles SET is_default=1, updated_at=? WHERE id=?",
-        (now_ms(), profile_id),
+        "UPDATE api_profiles SET is_default=1, updated_at=? WHERE id=? AND user_id=?",
+        (now_ms(), profile_id, user_id),
     )
     conn.commit()
     conn.close()
 
 
-def db_list_system_prompts():
+def db_list_system_prompts(user_id: str = ""):
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, title, content, enabled, created_at, updated_at FROM system_prompts ORDER BY enabled DESC, updated_at DESC"
+        "SELECT id, title, content, enabled, created_at, updated_at FROM system_prompts WHERE user_id=? ORDER BY enabled DESC, updated_at DESC",
+        (user_id,),
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
 
-def db_save_system_prompt(prompt_id: str, body: SystemPromptBody):
+def db_save_system_prompt(prompt_id: str, body: SystemPromptBody, user_id: str = ""):
     ts = now_ms()
     pid = prompt_id or new_id()
     title = (body.title or "").strip() or "系统提示词"
     content = (body.content or "").strip()
 
     conn = get_conn()
-    old = conn.execute("SELECT id FROM system_prompts WHERE id=?", (pid,)).fetchone()
+    old = conn.execute("SELECT id FROM system_prompts WHERE id=? AND user_id=?", (pid, user_id)).fetchone()
 
     if old:
         conn.execute(
             """
             UPDATE system_prompts
             SET title=?, content=?, enabled=?, updated_at=?
-            WHERE id=?
+            WHERE id=? AND user_id=?
             """,
-            (title, content, 1 if body.enabled else 0, ts, pid),
+            (title, content, 1 if body.enabled else 0, ts, pid, user_id),
         )
     else:
         conn.execute(
             """
             INSERT INTO system_prompts
-            (id, title, content, enabled, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (id, user_id, title, content, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (pid, title, content, 1 if body.enabled else 0, ts, ts),
+            (pid, user_id, title, content, 1 if body.enabled else 0, ts, ts),
         )
 
     conn.commit()
@@ -304,18 +549,18 @@ def db_save_system_prompt(prompt_id: str, body: SystemPromptBody):
     return pid
 
 
-def db_delete_system_prompt(prompt_id: str):
+def db_delete_system_prompt(prompt_id: str, user_id: str = ""):
     conn = get_conn()
-    conn.execute("DELETE FROM system_prompts WHERE id=?", (prompt_id,))
+    conn.execute("DELETE FROM system_prompts WHERE id=? AND user_id=?", (prompt_id, user_id))
     conn.commit()
     conn.close()
 
 
-def db_set_system_prompt_enabled(prompt_id: str, enabled: bool):
+def db_set_system_prompt_enabled(prompt_id: str, enabled: bool, user_id: str = ""):
     conn = get_conn()
     conn.execute(
-        "UPDATE system_prompts SET enabled=?, updated_at=? WHERE id=?",
-        (1 if enabled else 0, now_ms(), prompt_id),
+        "UPDATE system_prompts SET enabled=?, updated_at=? WHERE id=? AND user_id=?",
+        (1 if enabled else 0, now_ms(), prompt_id, user_id),
     )
     conn.commit()
     conn.close()

@@ -4,8 +4,14 @@ import os
 import json
 import uuid
 import time
+import hashlib
+import hmac
+import secrets
+import smtplib
+import re
+from email.message import EmailMessage
 
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Cookie, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,17 +28,33 @@ from chat_utils import (
 from config import BASE_DIR, DEFAULT_MODEL, STATIC_DIR, UPLOAD_DIR, VISION_IMAGE_EXTS
 from db import (
     db_add_message,
+    db_create_session,
     db_create_conversation,
+    db_create_user,
     db_delete_api_profile,
+    db_delete_session,
+    db_delete_sessions_by_user,
+    db_delete_other_sessions_by_user,
     db_delete_last_assistant_message,
     db_delete_message_and_after_raw,
     db_ensure_conversation,
+    db_get_email_verification_code,
+    db_get_session_user,
     db_get_message_by_id,
     db_get_messages,
     db_get_messages_before_id,
     db_get_regenerate_history,
+    db_get_user_auth_by_id,
     db_list_api_profiles,
     db_list_system_prompts,
+    db_get_user_by_username,
+    db_get_user_by_email,
+    db_save_email_verification_code,
+    db_verify_email_code,
+    db_update_user_password_by_email,
+    db_update_user_password_by_id,
+    db_update_user_profile,
+    db_user_owns_conversation,
     db_mark_message_superseded,
     db_save_api_profile,
     db_save_system_prompt,
@@ -45,12 +67,15 @@ from db import (
     now_ms,
 )
 from schemas import (
+    AuthBody,
     ApiProfileBody,
     ChatBody,
     ConversationCreateBody,
     ConversationPinBody,
     ConversationRenameBody,
+    PasswordChangeBody,
     SystemPromptBody,
+    UserProfileUpdateBody,
 )
 from services import (
     build_fallback_search_queries,
@@ -68,9 +93,319 @@ from services import (
     stream_direct_vision_and_save,
 )
 
+def load_local_env_file(path: Path):
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        cleaned = value.strip()
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+            cleaned = cleaned[1:-1]
+        os.environ[key] = cleaned
+
+
+load_local_env_file(BASE_DIR / ".env.multi")
+
 init_db()
 
 app = FastAPI(title="Claude Web")
+
+AUTH_COOKIE_NAME = "cw_multi_session"
+AUTH_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30
+EMAIL_CODE_TTL_MS = 1000 * 60 * 10
+EMAIL_CODE_RESEND_COOLDOWN_MS = 1000 * 60
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+AUTH_LOGIN_RESEND_COOLDOWN_MS = 1000 * 10
+
+
+def normalize_username(username: str) -> str:
+    return (username or "").strip().lower()
+
+
+def normalize_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def is_email_identifier(value: str) -> bool:
+    return bool(EMAIL_RE.match(normalize_email(value)))
+
+
+def hash_password(password: str, salt: str | None = None) -> str:
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 200_000).hex()
+    return f"pbkdf2_sha256$200000${salt}${digest}"
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        scheme, rounds, salt, digest = (encoded or "").split("$", 3)
+        if scheme != "pbkdf2_sha256":
+            return False
+        check = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), int(rounds)).hex()
+        return hmac.compare_digest(check, digest)
+    except Exception:
+        return False
+
+
+def set_auth_cookie(response: Response, token: str):
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        max_age=60 * 60 * 24 * 30,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+
+
+def public_user(row):
+    return {"id": row["id"], "username": row["username"], "email": row["email"] if "email" in row.keys() else "", "created_at": row["created_at"]}
+
+
+def smtp_config():
+    host = os.environ.get("SMTP_HOST", "").strip()
+    user = os.environ.get("SMTP_USER", "").strip()
+    password = os.environ.get("SMTP_PASSWORD", "")
+    sender = os.environ.get("SMTP_FROM", "").strip() or user
+    port = int(os.environ.get("SMTP_PORT", "587") or "587")
+    use_ssl = (os.environ.get("SMTP_SSL", "0").strip().lower() in {"1", "true", "yes"})
+    if not host or not sender:
+        return None
+    return {"host": host, "port": port, "user": user, "password": password, "sender": sender, "ssl": use_ssl}
+
+
+def send_verification_email(email: str, code: str):
+    cfg = smtp_config()
+    if not cfg:
+        raise HTTPException(status_code=503, detail="邮箱服务未配置，请设置 SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD/SMTP_FROM")
+
+    msg = EmailMessage()
+    msg["Subject"] = "Claude Web 注册验证码"
+    msg["From"] = cfg["sender"]
+    msg["To"] = email
+    msg.set_content(f"你的注册验证码是：{code}\n\n验证码 10 分钟内有效。如果不是你本人操作，请忽略这封邮件。")
+
+    if cfg["ssl"]:
+        server = smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=12)
+    else:
+        server = smtplib.SMTP(cfg["host"], cfg["port"], timeout=12)
+    try:
+        if not cfg["ssl"]:
+            server.starttls()
+        if cfg["user"]:
+            server.login(cfg["user"], cfg["password"])
+        server.send_message(msg)
+    except smtplib.SMTPAuthenticationError as e:
+        raise HTTPException(status_code=502, detail="SMTP 登录失败。Gmail 通常需要使用 App Password，而不是账户登录密码。") from e
+    except smtplib.SMTPException as e:
+        raise HTTPException(status_code=502, detail=f"SMTP 发送失败: {e}") from e
+    finally:
+        server.quit()
+
+
+def require_current_user(cw_multi_session: str = Cookie(default="")):
+    if not cw_multi_session:
+        raise HTTPException(status_code=401, detail="请先登录")
+    row = db_get_session_user(cw_multi_session)
+    if not row:
+        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+    return dict(row)
+
+
+def require_conversation_owner(conversation_id: str, user_id: str):
+    if not db_user_owns_conversation(user_id, conversation_id):
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+
+@app.get("/api/auth/me")
+def auth_me(user=Depends(require_current_user)):
+    return {"ok": True, "user": public_user(user)}
+
+
+def validate_username_or_raise(username: str):
+    if len(username) < 3 or len(username) > 32:
+        raise HTTPException(status_code=400, detail="用户名长度需要在 3 到 32 位之间")
+    if not username.replace("_", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="用户名只能包含字母、数字、横线和下划线")
+
+
+@app.patch("/api/auth/me")
+def auth_update_me(body: UserProfileUpdateBody, user=Depends(require_current_user)):
+    username = normalize_username(body.username)
+    email = normalize_email(body.email)
+    validate_username_or_raise(username)
+    if not EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="请输入有效邮箱")
+
+    existing_username = db_get_user_by_username(username)
+    if existing_username and existing_username["id"] != user["id"]:
+        raise HTTPException(status_code=409, detail="用户名已被占用")
+
+    existing_email = db_get_user_by_email(email)
+    if existing_email and existing_email["id"] != user["id"]:
+        raise HTTPException(status_code=409, detail="邮箱已被占用")
+
+    updated = db_update_user_profile(user["id"], username, email)
+    return {"ok": True, "user": public_user(updated)}
+
+
+@app.post("/api/auth/change-password")
+def auth_change_password(body: PasswordChangeBody, cw_multi_session: str = Cookie(default=""), user=Depends(require_current_user)):
+    new_password = body.new_password or ""
+    confirm_password = body.confirm_password or ""
+    verification_code = (body.verification_code or "").strip()
+    auth_user = db_get_user_auth_by_id(user["id"])
+    if not auth_user:
+        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+    email = normalize_email(auth_user["email"] or "")
+    if not EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="当前账号未绑定有效邮箱，无法通过邮箱验证修改密码")
+    if not verification_code:
+        raise HTTPException(status_code=400, detail="请输入邮箱验证码")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密码至少 6 位")
+    if new_password != confirm_password:
+        raise HTTPException(status_code=400, detail="两次输入的新密码不一致")
+    if verify_password(new_password, auth_user["password_hash"]):
+        raise HTTPException(status_code=400, detail="新密码不能和当前密码相同")
+    if not db_verify_email_code(email, "change_password", verification_code):
+        raise HTTPException(status_code=400, detail="邮箱验证码不正确或已过期")
+
+    db_update_user_password_by_id(user["id"], hash_password(new_password))
+    if cw_multi_session:
+        db_delete_other_sessions_by_user(user["id"], cw_multi_session)
+    else:
+        db_delete_sessions_by_user(user["id"])
+    return {"ok": True, "message": "密码已更新"}
+
+
+@app.post("/api/auth/send-password-change-code")
+def auth_send_password_change_code(user=Depends(require_current_user)):
+    email = normalize_email(user.get("email") or "")
+    if not EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="当前账号未绑定有效邮箱，无法发送验证码")
+    previous = db_get_email_verification_code(email, "change_password")
+    if previous and previous["created_at"]:
+        elapsed = int(time.time() * 1000) - int(previous["created_at"])
+        if elapsed < EMAIL_CODE_RESEND_COOLDOWN_MS:
+            wait_s = max(1, int((EMAIL_CODE_RESEND_COOLDOWN_MS - elapsed + 999) / 1000))
+            raise HTTPException(status_code=429, detail=f"请等待 {wait_s} 秒后再重新发送验证码")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    db_save_email_verification_code(email, "change_password", code, int(time.time() * 1000) + EMAIL_CODE_TTL_MS)
+    send_verification_email(email, code)
+    return {"ok": True, "message": "验证码已发送", "email": email}
+
+
+@app.post("/api/auth/send-code")
+def auth_send_code(body: AuthBody):
+    email = normalize_email(body.email)
+    purpose = (body.purpose or "register").strip().lower()
+    if purpose not in {"register", "reset"}:
+        raise HTTPException(status_code=400, detail="不支持的验证码用途")
+    if not EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="请输入有效邮箱")
+    existing = db_get_user_by_email(email)
+    if purpose == "register" and existing:
+        raise HTTPException(status_code=409, detail="邮箱已被注册")
+    if purpose == "reset" and not existing:
+        raise HTTPException(status_code=404, detail="该邮箱尚未注册")
+    previous = db_get_email_verification_code(email)
+    if previous and previous["created_at"]:
+        elapsed = int(time.time() * 1000) - int(previous["created_at"])
+        if elapsed < EMAIL_CODE_RESEND_COOLDOWN_MS:
+            wait_s = max(1, int((EMAIL_CODE_RESEND_COOLDOWN_MS - elapsed + 999) / 1000))
+            raise HTTPException(status_code=429, detail=f"请等待 {wait_s} 秒后再重新发送验证码")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    db_save_email_verification_code(email, purpose, code, int(time.time() * 1000) + EMAIL_CODE_TTL_MS)
+    send_verification_email(email, code)
+    return {"ok": True, "message": "验证码已发送", "purpose": purpose}
+
+
+@app.post("/api/auth/register")
+def auth_register(body: AuthBody, response: Response):
+    username = normalize_username(body.username)
+    email = normalize_email(body.email)
+    password = body.password or ""
+    confirm_password = body.confirm_password or ""
+    verification_code = (body.verification_code or "").strip()
+    validate_username_or_raise(username)
+    if not EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="请输入有效邮箱")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少 6 位")
+    if password != confirm_password:
+        raise HTTPException(status_code=400, detail="两次输入的密码不一致")
+    if not verification_code:
+        raise HTTPException(status_code=400, detail="请输入邮箱验证码")
+    if db_get_user_by_username(username):
+        raise HTTPException(status_code=409, detail="用户名已存在")
+    if db_get_user_by_email(email):
+        raise HTTPException(status_code=409, detail="邮箱已被注册")
+    if not db_verify_email_code(email, "register", verification_code):
+        raise HTTPException(status_code=400, detail="邮箱验证码不正确或已过期")
+
+    uid = db_create_user(username, email, hash_password(password))
+    token = secrets.token_urlsafe(32)
+    db_create_session(token, uid, int(time.time() * 1000) + AUTH_SESSION_TTL_MS)
+    set_auth_cookie(response, token)
+    return {"ok": True, "user": {"id": uid, "username": username, "email": email, "created_at": int(time.time() * 1000)}}
+
+
+@app.post("/api/auth/reset-password")
+def auth_reset_password(body: AuthBody):
+    email = normalize_email(body.email)
+    password = body.password or ""
+    confirm_password = body.confirm_password or ""
+    verification_code = (body.verification_code or "").strip()
+    if not EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="请输入有效邮箱")
+    user = db_get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="该邮箱尚未注册")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少 6 位")
+    if password != confirm_password:
+        raise HTTPException(status_code=400, detail="两次输入的密码不一致")
+    if not verification_code:
+        raise HTTPException(status_code=400, detail="请输入邮箱验证码")
+    if not db_verify_email_code(email, "reset", verification_code):
+        raise HTTPException(status_code=400, detail="邮箱验证码不正确或已过期")
+
+    db_update_user_password_by_email(email, hash_password(password))
+    db_delete_sessions_by_user(user["id"])
+    return {"ok": True, "message": "密码已重置，请重新登录"}
+
+
+@app.post("/api/auth/login")
+def auth_login(body: AuthBody, response: Response):
+    identifier = (body.username or "").strip()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="请输入用户名或邮箱")
+    row = db_get_user_by_email(identifier) if is_email_identifier(identifier) else db_get_user_by_username(normalize_username(identifier))
+    if not row or not verify_password(body.password or "", row["password_hash"]):
+        raise HTTPException(status_code=401, detail="用户名或密码不正确")
+
+    token = secrets.token_urlsafe(32)
+    db_create_session(token, row["id"], int(time.time() * 1000) + AUTH_SESSION_TTL_MS)
+    set_auth_cookie(response, token)
+    return {"ok": True, "user": {"id": row["id"], "username": row["username"], "email": row["email"] or "", "created_at": row["created_at"]}}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(response: Response, cw_multi_session: str = Cookie(default="")):
+    if cw_multi_session:
+        db_delete_session(cw_multi_session)
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return {"ok": True}
 
 
 def iter_search_status_lines(enabled: bool, sources=None):
@@ -179,7 +514,7 @@ def startup_status():
 
 
 @app.post("/api/profiles/test")
-def test_api_profile(body: ApiProfileBody):
+def test_api_profile(body: ApiProfileBody, user=Depends(require_current_user)):
     try:
         reply = "".join(stream_direct_api_text(
             "只回复：API配置可用",
@@ -276,12 +611,12 @@ def do_fetch_models_from_profile(base_url: str, token: str):
 
 
 @app.post("/api/profiles/models")
-def fetch_api_profile_models_post(body: ApiProfileBody):
+def fetch_api_profile_models_post(body: ApiProfileBody, user=Depends(require_current_user)):
     return do_fetch_models_from_profile(body.base_url, body.auth_token)
 
 
 @app.get("/api/profiles/models")
-def fetch_api_profile_models_get(profile_id: str = ""):
+def fetch_api_profile_models_get(profile_id: str = "", user=Depends(require_current_user)):
     if not profile_id:
         return {
             "ok": False,
@@ -291,8 +626,8 @@ def fetch_api_profile_models_get(profile_id: str = ""):
 
     conn = get_conn()
     row = conn.execute(
-        "SELECT base_url, auth_token FROM api_profiles WHERE id=?",
-        (profile_id,),
+        "SELECT base_url, auth_token FROM api_profiles WHERE id=? AND user_id=?",
+        (profile_id, user["id"]),
     ).fetchone()
     conn.close()
 
@@ -307,73 +642,73 @@ def fetch_api_profile_models_get(profile_id: str = ""):
 
 
 @app.get("/api/profiles")
-def list_api_profiles():
+def list_api_profiles(user=Depends(require_current_user)):
     return {
         "ok": True,
-        "profiles": db_list_api_profiles(),
+        "profiles": db_list_api_profiles(user["id"]),
     }
 
 
 @app.post("/api/profiles")
-def create_api_profile(body: ApiProfileBody):
-    pid = db_save_api_profile("", body)
+def create_api_profile(body: ApiProfileBody, user=Depends(require_current_user)):
+    pid = db_save_api_profile("", body, user["id"])
     return {"ok": True, "id": pid}
 
 
 @app.put("/api/profiles/{profile_id}")
-def update_api_profile(profile_id: str, body: ApiProfileBody):
-    pid = db_save_api_profile(profile_id, body)
+def update_api_profile(profile_id: str, body: ApiProfileBody, user=Depends(require_current_user)):
+    pid = db_save_api_profile(profile_id, body, user["id"])
     return {"ok": True, "id": pid}
 
 
 @app.delete("/api/profiles/{profile_id}")
-def delete_api_profile(profile_id: str):
-    db_delete_api_profile(profile_id)
+def delete_api_profile(profile_id: str, user=Depends(require_current_user)):
+    db_delete_api_profile(profile_id, user["id"])
     return {"ok": True}
 
 
 @app.post("/api/profiles/{profile_id}/default")
-def set_default_api_profile(profile_id: str):
-    db_set_default_api_profile(profile_id)
+def set_default_api_profile(profile_id: str, user=Depends(require_current_user)):
+    db_set_default_api_profile(profile_id, user["id"])
     return {"ok": True}
 
 
 @app.get("/api/system-prompts")
-def list_system_prompts():
+def list_system_prompts(user=Depends(require_current_user)):
     return {
         "ok": True,
-        "prompts": db_list_system_prompts(),
+        "prompts": db_list_system_prompts(user["id"]),
     }
 
 
 @app.post("/api/system-prompts")
-def create_system_prompt(body: SystemPromptBody):
-    pid = db_save_system_prompt("", body)
+def create_system_prompt(body: SystemPromptBody, user=Depends(require_current_user)):
+    pid = db_save_system_prompt("", body, user["id"])
     return {"ok": True, "id": pid}
 
 
 @app.put("/api/system-prompts/{prompt_id}")
-def update_system_prompt(prompt_id: str, body: SystemPromptBody):
-    pid = db_save_system_prompt(prompt_id, body)
+def update_system_prompt(prompt_id: str, body: SystemPromptBody, user=Depends(require_current_user)):
+    pid = db_save_system_prompt(prompt_id, body, user["id"])
     return {"ok": True, "id": pid}
 
 
 @app.post("/api/system-prompts/{prompt_id}/enabled")
-def set_system_prompt_enabled(prompt_id: str, body: SystemPromptBody):
-    db_set_system_prompt_enabled(prompt_id, body.enabled)
+def set_system_prompt_enabled(prompt_id: str, body: SystemPromptBody, user=Depends(require_current_user)):
+    db_set_system_prompt_enabled(prompt_id, body.enabled, user["id"])
     return {"ok": True}
 
 
 @app.delete("/api/system-prompts/{prompt_id}")
-def delete_system_prompt(prompt_id: str):
-    db_delete_system_prompt(prompt_id)
+def delete_system_prompt(prompt_id: str, user=Depends(require_current_user)):
+    db_delete_system_prompt(prompt_id, user["id"])
     return {"ok": True}
 
 
 
 
 @app.get("/api/search")
-def search_messages(q: str = "", conversation_id: str = "", scope: str = "all", limit: int = 50):
+def search_messages(q: str = "", conversation_id: str = "", scope: str = "all", limit: int = 50, user=Depends(require_current_user)):
     keyword = (q or "").strip()
 
     if not keyword:
@@ -384,9 +719,10 @@ def search_messages(q: str = "", conversation_id: str = "", scope: str = "all", 
     search_single_conversation = (scope or "").strip().lower() == "conversation" and bool(conversation_id)
 
     where_parts = [
+        "conversations.user_id=?",
         "(messages.content LIKE ? OR conversations.title LIKE ? OR messages.file_name LIKE ? OR messages.file_context LIKE ?)"
     ]
-    params = [like, like, like, like]
+    params = [user["id"], like, like, like, like]
 
     if search_single_conversation:
         where_parts.append("messages.conversation_id=?")
@@ -465,10 +801,11 @@ def search_messages(q: str = "", conversation_id: str = "", scope: str = "all", 
 
 
 @app.get("/api/conversations")
-def list_conversations():
+def list_conversations(user=Depends(require_current_user)):
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, title, created_at, updated_at, is_pinned FROM conversations ORDER BY is_pinned DESC, updated_at DESC"
+        "SELECT id, title, created_at, updated_at, is_pinned FROM conversations WHERE user_id=? ORDER BY is_pinned DESC, updated_at DESC",
+        (user["id"],),
     ).fetchall()
     conn.close()
     return {
@@ -478,13 +815,14 @@ def list_conversations():
 
 
 @app.post("/api/conversations")
-def create_conversation(body: ConversationCreateBody):
-    cid = db_create_conversation(body.title or "新对话")
+def create_conversation(body: ConversationCreateBody, user=Depends(require_current_user)):
+    cid = db_create_conversation(body.title or "新对话", user["id"])
     return {"ok": True, "id": cid}
 
 
 @app.get("/api/conversations/{conversation_id}/messages")
-def get_conversation_messages(conversation_id: str):
+def get_conversation_messages(conversation_id: str, user=Depends(require_current_user)):
+    require_conversation_owner(conversation_id, user["id"])
     msgs = db_get_messages(conversation_id)
     return {
         "ok": True,
@@ -495,7 +833,8 @@ def get_conversation_messages(conversation_id: str):
 
 
 @app.delete("/api/conversations/{conversation_id}/messages/{message_id}/after")
-def delete_message_and_after(conversation_id: str, message_id: int):
+def delete_message_and_after(conversation_id: str, message_id: int, user=Depends(require_current_user)):
+    require_conversation_owner(conversation_id, user["id"])
     conn = get_conn()
 
     row = conn.execute(
@@ -524,7 +863,8 @@ def delete_message_and_after(conversation_id: str, message_id: int):
 
 
 @app.delete("/api/conversations/{conversation_id}")
-def delete_conversation(conversation_id: str):
+def delete_conversation(conversation_id: str, user=Depends(require_current_user)):
+    require_conversation_owner(conversation_id, user["id"])
     conn = get_conn()
     conn.execute("DELETE FROM messages WHERE conversation_id=?", (conversation_id,))
     conn.execute("DELETE FROM conversations WHERE id=?", (conversation_id,))
@@ -536,11 +876,12 @@ def delete_conversation(conversation_id: str):
 
 
 @app.post("/api/conversations/{conversation_id}/pin")
-def pin_conversation(conversation_id: str, body: ConversationPinBody):
+def pin_conversation(conversation_id: str, body: ConversationPinBody, user=Depends(require_current_user)):
+    require_conversation_owner(conversation_id, user["id"])
     conn = get_conn()
     conn.execute(
-        "UPDATE conversations SET is_pinned=?, updated_at=? WHERE id=?",
-        (1 if body.pinned else 0, now_ms(), conversation_id),
+        "UPDATE conversations SET is_pinned=?, updated_at=? WHERE id=? AND user_id=?",
+        (1 if body.pinned else 0, now_ms(), conversation_id, user["id"]),
     )
     conn.commit()
     conn.close()
@@ -548,11 +889,12 @@ def pin_conversation(conversation_id: str, body: ConversationPinBody):
 
 
 @app.post("/api/conversations/{conversation_id}/rename")
-def rename_conversation(conversation_id: str, body: ConversationRenameBody):
+def rename_conversation(conversation_id: str, body: ConversationRenameBody, user=Depends(require_current_user)):
+    require_conversation_owner(conversation_id, user["id"])
     conn = get_conn()
     conn.execute(
-        "UPDATE conversations SET title=?, updated_at=? WHERE id=?",
-        (body.title.strip()[:50] or "新对话", now_ms(), conversation_id),
+        "UPDATE conversations SET title=?, updated_at=? WHERE id=? AND user_id=?",
+        (body.title.strip()[:50] or "新对话", now_ms(), conversation_id, user["id"]),
     )
     conn.commit()
     conn.close()
@@ -560,14 +902,14 @@ def rename_conversation(conversation_id: str, body: ConversationRenameBody):
 
 
 @app.post("/api/echo")
-def echo(body: ChatBody):
+def echo(body: ChatBody, user=Depends(require_current_user)):
     try:
-        cid = db_ensure_conversation(body.conversation_id)
+        cid = db_ensure_conversation(body.conversation_id, user_id=user["id"])
         history = db_get_messages(cid)
         final_prompt = build_chat_prompt(history, body.prompt)
 
         db_add_message(cid, "user", body.prompt)
-        db_update_title_if_needed(cid, body.prompt)
+        db_update_title_if_needed(cid, body.prompt, user["id"])
 
         reply = "".join(stream_direct_api_text(
             final_prompt,
@@ -585,11 +927,11 @@ def echo(body: ChatBody):
 
 
 @app.post("/api/chat/stream")
-def chat_stream(body: ChatBody):
-    cid = db_ensure_conversation(body.conversation_id)
+def chat_stream(body: ChatBody, user=Depends(require_current_user)):
+    cid = db_ensure_conversation(body.conversation_id, user_id=user["id"])
     history = db_get_messages(cid)
     db_add_message(cid, "user", body.prompt)
-    db_update_title_if_needed(cid, body.prompt)
+    db_update_title_if_needed(cid, body.prompt, user["id"])
     protocol = (body.api_protocol or "").strip().lower()
     if not protocol:
         protocol = "completions" if (body.api_model or "").lower().startswith("gpt") or "gpt-" in (body.api_model or "").lower() else "claude"
@@ -602,7 +944,7 @@ def chat_stream(body: ChatBody):
             yield "\n[[STATUS:parsing]]\n"
         if search_intent:
             yield "\n[[STATUS:planning_search]]\n"
-            if any("github.com" in url.lower() for url in extract_urls_from_text(body.prompt)):
+            if protocol != "responses" and any("github.com" in url.lower() for url in extract_urls_from_text(body.prompt)):
                 yield "\n[[STATUS:github_mcp]]\n"
             else:
                 yield "\n[[STATUS:searching]]\n"
@@ -746,8 +1088,8 @@ def _build_regenerate_prompt_with_search(
 
 
 @app.post("/api/chat/regenerate_from_stream")
-def regenerate_from_stream(body: ChatBody):
-    cid = db_ensure_conversation(body.conversation_id)
+def regenerate_from_stream(body: ChatBody, user=Depends(require_current_user)):
+    cid = db_ensure_conversation(body.conversation_id, user_id=user["id"])
 
     if body.message_id is None:
         return StreamingResponse(
@@ -892,8 +1234,8 @@ def regenerate_from_stream(body: ChatBody):
 
 
 @app.post("/api/chat/regenerate_stream")
-def regenerate_stream(body: ChatBody):
-    cid = db_ensure_conversation(body.conversation_id)
+def regenerate_stream(body: ChatBody, user=Depends(require_current_user)):
+    cid = db_ensure_conversation(body.conversation_id, user_id=user["id"])
 
     keep_old = body.keep_old
     old_assistant_id = None
@@ -1032,8 +1374,9 @@ async def chat_upload_stream(
     api_profile_name: str = Form(""),
     system_prompt: str = Form(""),
     files: list[UploadFile] = File([]),
+    user=Depends(require_current_user),
 ):
-    cid = db_ensure_conversation(conversation_id)
+    cid = db_ensure_conversation(conversation_id, user_id=user["id"])
     history = db_get_messages(cid)
     protocol = (api_protocol or "").strip().lower()
     if not protocol:
@@ -1052,35 +1395,40 @@ async def chat_upload_stream(
 
         fname = file.filename or "uploaded_file"
 
-        if is_image_file(fname):
-            if Path(fname).suffix.lower() not in VISION_IMAGE_EXTS:
-                raise HTTPException(
-                    status_code=400,
-                    detail="公网模式下暂只支持 jpg/jpeg/png/webp 图片，请先转换后再上传。",
-                )
-            original, local_path, web_path = await save_uploaded_file_dual_paths(file)
+        try:
+            if is_image_file(fname):
+                if Path(fname).suffix.lower() not in VISION_IMAGE_EXTS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="公网模式下暂只支持 jpg/jpeg/png/webp 图片，请先转换后再上传。",
+                    )
+                original, local_path, web_path = await save_uploaded_file_dual_paths(file)
 
-            image_files.append({
-                "name": original,
-                "local_path": local_path,
-                "web_path": web_path,
-            })
+                image_files.append({
+                    "name": original,
+                    "local_path": local_path,
+                    "web_path": web_path,
+                })
 
-            all_names.append(original)
-            web_image_paths.append(web_path)
-            local_image_paths.append(local_path)
-        else:
-            original, local_path, web_path = await save_uploaded_file_dual_paths(file)
-            text = load_uploaded_text_from_path(local_path)
-            if not text:
-                text = "(文件为空，或不是可直接按 UTF-8 读取的文本文件)"
-            text_files.append({
-                "name": original,
-                "text": text,
-                "local_path": local_path,
-                "web_path": web_path,
-            })
-            all_names.append(original)
+                all_names.append(original)
+                web_image_paths.append(web_path)
+                local_image_paths.append(local_path)
+            else:
+                original, local_path, web_path = await save_uploaded_file_dual_paths(file)
+                text = load_uploaded_text_from_path(local_path)
+                if not text:
+                    text = "(文件为空，或不是可直接按 UTF-8 读取的文本文件)"
+                text_files.append({
+                    "name": original,
+                    "text": text,
+                    "local_path": local_path,
+                    "web_path": web_path,
+                })
+                all_names.append(original)
+        except HTTPException:
+            raise
+        except RuntimeError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     user_prompt = prompt.strip() or "请分析我上传的文件/图片。"
 
@@ -1111,7 +1459,7 @@ async def chat_upload_stream(
         file_context=file_context_db,
     )
 
-    db_update_title_if_needed(cid, prompt or file_names_str or "新对话")
+    db_update_title_if_needed(cid, prompt or file_names_str or "新对话", user["id"])
 
     sources = []
     search_observation = ""
@@ -1350,16 +1698,20 @@ async def chat_upload_stream(
 
 
 @app.get("/api/conversations/{conversation_id}/export.md")
-def export_conversation_markdown(conversation_id: str):
+def export_conversation_markdown(conversation_id: str, user=Depends(require_current_user)):
     from fastapi.responses import Response, PlainTextResponse
 
     try:
         conn = get_conn()
 
         conv = conn.execute(
-            "SELECT title FROM conversations WHERE id=?",
-            (conversation_id,),
+            "SELECT title FROM conversations WHERE id=? AND user_id=?",
+            (conversation_id, user["id"]),
         ).fetchone()
+
+        if not conv:
+            conn.close()
+            raise HTTPException(status_code=404, detail="会话不存在")
 
         rows = conn.execute(
             """

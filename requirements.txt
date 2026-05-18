@@ -4,3 +4,4 @@ python-multipart
 pydantic
 tavily-python
 serpapi
+tiktoken

@@ -61,3 +61,23 @@ class SystemPromptBody(BaseModel):
     title: str = "系统提示词"
     content: str = ""
     enabled: bool = False
+
+
+class AuthBody(BaseModel):
+    username: str = ""
+    password: str = ""
+    email: str = ""
+    confirm_password: str = ""
+    verification_code: str = ""
+    purpose: str = "register"
+
+
+class UserProfileUpdateBody(BaseModel):
+    username: str = ""
+    email: str = ""
+
+
+class PasswordChangeBody(BaseModel):
+    verification_code: str = ""
+    new_password: str = ""
+    confirm_password: str = ""
