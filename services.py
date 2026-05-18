@@ -24,6 +24,9 @@ PLANNER_CACHE = {}
 PAGE_CACHE = {}
 TAVILY_CLIENT = None
 GITHUB_SOURCE_CACHE = {}
+GITHUB_SOURCE_MAX_CHARS = int(os.environ.get("GITHUB_SOURCE_MAX_CHARS", "200000") or "200000")
+GITHUB_OBSERVATION_MAX_CHARS = int(os.environ.get("GITHUB_OBSERVATION_MAX_CHARS", "180000") or "180000")
+GITHUB_RAW_MAX_BYTES = int(os.environ.get("GITHUB_RAW_MAX_BYTES", str(2 * 1024 * 1024)) or str(2 * 1024 * 1024))
 
 
 def _cache_get(cache: dict, key: str):
@@ -661,10 +664,10 @@ def _fetch_github_raw_source(owner: str, repo: str, path: str, refs: list[str]) 
                 method="GET",
             )
             with resilient_urlopen(req, timeout=15) as resp:
-                raw = resp.read(1024 * 1024)
+                raw = resp.read(GITHUB_RAW_MAX_BYTES)
             text = raw.decode("utf-8", errors="replace")
-            if len(text) > 12000:
-                text = text[:12000] + "\n\n[GitHub raw 源码内容过长，已截断]"
+            if len(text) > GITHUB_SOURCE_MAX_CHARS:
+                text = text[:GITHUB_SOURCE_MAX_CHARS] + "\n\n[GitHub raw 源码内容过长，已截断]"
             return {
                 "title": f"{owner}/{repo}: {path}",
                 "url": f"https://github.com/{owner}/{repo}/blob/{ref}/{path}",
@@ -701,7 +704,7 @@ def _github_source_from_item(url: str, owner: str, repo: str, item, ref: str = "
     path = item.get("path") or ""
     title = f"{owner}/{repo}: {path or item.get('name') or ref or 'repository'}"
     if item_type == "file":
-        excerpt = _decode_github_file_content(item, max_chars=12000)
+        excerpt = _decode_github_file_content(item, max_chars=GITHUB_SOURCE_MAX_CHARS)
     elif item_type == "dir":
         nested = _github_api_json(_github_api_url(owner, repo, path, ref), timeout=15)
         excerpt = _summarize_github_directory(nested)
@@ -2704,7 +2707,7 @@ def build_search_tool_observation(user_prompt: str, sources: list[dict], plan: d
     }
     compact_sources = []
     for item in sources:
-        excerpt_chars = 6000 if item.get("provider") == "github-mcp" else 1800
+        excerpt_chars = GITHUB_OBSERVATION_MAX_CHARS if item.get("provider") == "github-mcp" else 1800
         compact_sources.append({
             "index": item.get("index"),
             "title": item.get("title", ""),

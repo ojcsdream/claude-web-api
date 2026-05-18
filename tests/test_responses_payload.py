@@ -40,14 +40,14 @@ class _FakeResponse:
 
 
 class ResponsesPayloadTest(unittest.TestCase):
-    def test_github_url_stays_in_input_without_default_tools(self):
+    def test_plain_responses_input_without_default_tools(self):
         captured = {}
 
         def fake_urlopen(request, timeout=0):
             captured["body"] = json.loads(request.data.decode("utf-8"))
             return _FakeResponse()
 
-        prompt = "请分析 https://github.com/openai/openai-python 这个项目"
+        prompt = "请解释这段普通文本"
         with patch.object(services, "resilient_urlopen", fake_urlopen):
             result = services.call_direct_responses_api(
                 prompt,
@@ -79,6 +79,25 @@ class ResponsesPayloadTest(unittest.TestCase):
 
         self.assertEqual(captured["body"]["tools"], [{"type": "web_search"}])
         self.assertEqual(captured["body"]["tool_choice"], "auto")
+
+    def test_github_observation_keeps_large_source_excerpt(self):
+        long_source = "x" * 50000
+        observation = services.build_search_tool_observation(
+            "分析 GitHub 源码",
+            [{
+                "index": 1,
+                "title": "owner/repo: app.py",
+                "url": "https://github.com/owner/repo/blob/main/app.py",
+                "excerpt": long_source,
+                "provider": "github-mcp",
+                "quality": "official",
+                "query": "",
+            }],
+            {"search_queries": [], "parse_links": ["https://github.com/owner/repo"]},
+        )
+
+        self.assertIn("github_mcp", observation)
+        self.assertIn(long_source, observation)
 
 
 if __name__ == "__main__":

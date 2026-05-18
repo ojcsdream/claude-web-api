@@ -412,7 +412,7 @@ def iter_search_status_lines(enabled: bool, sources=None):
     if not enabled:
         return
     yield "\n[[STATUS:planning_search]]\n"
-    yield "\n[[STATUS:searching]]\n"
+    yield f"\n[[STATUS:{search_status_key(sources)}]]\n"
     if sources:
         yield "\n[[STATUS:reading_sources]]\n"
 
@@ -442,6 +442,26 @@ def resolve_search_tool_context(
     )
 
 
+def resolve_responses_search_context(user_prompt, history, force, api_base_url, api_auth_token, api_model):
+    github_urls = [url for url in extract_urls_from_text(user_prompt, max_urls=4) if "github.com" in url.lower()]
+    if github_urls:
+        return resolve_search_tool_context(
+            user_prompt,
+            history,
+            force,
+            api_base_url,
+            api_auth_token,
+            api_model,
+        )
+    plan = {
+        "should_search": True,
+        "search_queries": build_fallback_search_queries(user_prompt, context_messages=history, max_queries=3),
+        "parse_links": extract_urls_from_text(user_prompt, max_urls=2),
+        "tool": "responses_web_search",
+    }
+    return "", [], plan
+
+
 def should_autonomous_search(prompt: str, force: bool = False) -> bool:
     if force:
         return True
@@ -464,6 +484,10 @@ def should_autonomous_search_with_context(prompt: str, history=None, force: bool
         "latest", "recent", "news", "update", "updates", "current",
     )
     return any(w in value for w in reference_words) and any(w in value for w in recency_words)
+
+
+def search_status_key(sources) -> str:
+    return "github_mcp" if sources and all(item.get("provider") == "github-mcp" for item in sources) else "searching"
 
 
 app.add_middleware(
@@ -944,10 +968,6 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
             yield "\n[[STATUS:parsing]]\n"
         if search_intent:
             yield "\n[[STATUS:planning_search]]\n"
-            if protocol != "responses" and any("github.com" in url.lower() for url in extract_urls_from_text(body.prompt)):
-                yield "\n[[STATUS:github_mcp]]\n"
-            else:
-                yield "\n[[STATUS:searching]]\n"
 
         effective_prompt = body.prompt if protocol == "responses" else enhance_prompt_with_url_fetch(body.prompt)
         sources = []
@@ -955,13 +975,15 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
         observation = ""
 
         if search_intent and protocol == "responses":
-            plan = {
-                "should_search": True,
-                "search_queries": build_fallback_search_queries(body.prompt, context_messages=history, max_queries=3),
-                "parse_links": extract_urls_from_text(body.prompt, max_urls=2),
-                "tool": "responses_web_search",
-            }
-            should_search = True
+            observation, sources, plan = resolve_responses_search_context(
+                body.prompt,
+                history,
+                body.web_search,
+                body.api_base_url,
+                body.api_auth_token,
+                body.api_model or DEFAULT_MODEL,
+            )
+            should_search = bool(plan.get("should_search") or plan.get("parse_links"))
         elif search_intent:
             observation, sources, plan = resolve_search_tool_context(
                 body.prompt,
@@ -975,7 +997,8 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
         else:
             should_search = False
 
-        if should_search and protocol != "responses":
+        if should_search:
+            yield f"\n[[STATUS:{search_status_key(sources)}]]\n"
             if plan.get("parse_links"):
                 yield "\n[[STATUS:reading_sources]]\n"
             if observation:
@@ -999,7 +1022,7 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
             body.api_profile_name or "",
             system_prompt=body.system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-            use_web_search=bool(protocol == "responses" and should_search),
+            use_web_search=bool(protocol == "responses" and should_search and not observation),
         )
 
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
@@ -1057,12 +1080,14 @@ def _build_regenerate_prompt_with_search(
     ) or bool(extract_urls_from_text(last_user_prompt))
     if search_intent:
         if protocol == "responses":
-            plan = {
-                "should_search": True,
-                "search_queries": build_fallback_search_queries(last_user_prompt, context_messages=context_messages, max_queries=3),
-                "parse_links": extract_urls_from_text(last_user_prompt, max_urls=2),
-                "tool": "responses_web_search",
-            }
+            observation, sources, plan = resolve_responses_search_context(
+                last_user_prompt,
+                context_messages,
+                web_search,
+                api_base_url,
+                api_auth_token,
+                api_model,
+            )
         else:
             observation, sources, plan = resolve_search_tool_context(
                 last_user_prompt,
@@ -1206,7 +1231,7 @@ def regenerate_from_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_model,
                 body.api_protocol or "",
                 body.system_prompt,
-                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search")),
+                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search") and not sources),
             )
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
@@ -1227,7 +1252,7 @@ def regenerate_from_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_profile_name,
                 system_prompt=body.system_prompt,
                 sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search")),
+                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search") and not sources),
             )
 
     return StreamingResponse(gen_stream(), media_type="text/plain; charset=utf-8")
@@ -1333,7 +1358,7 @@ def regenerate_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_model,
                 body.api_protocol or "",
                 body.system_prompt,
-                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search")),
+                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search") and not sources),
             )
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
@@ -1354,7 +1379,7 @@ def regenerate_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_profile_name,
                 system_prompt=body.system_prompt,
                 sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search")),
+                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search") and not sources),
             )
 
     return StreamingResponse(gen_regen(), media_type="text/plain; charset=utf-8")
@@ -1471,13 +1496,15 @@ async def chat_upload_stream(
     should_search = False
     if search_intent:
         if protocol == "responses":
-            _plan = {
-                "should_search": True,
-                "search_queries": build_fallback_search_queries(user_prompt, context_messages=history, max_queries=3),
-                "parse_links": extract_urls_from_text(user_prompt, max_urls=2),
-                "tool": "responses_web_search",
-            }
-            should_search = True
+            search_observation, sources, _plan = resolve_responses_search_context(
+                user_prompt,
+                history,
+                web_search,
+                api_base_url,
+                api_auth_token,
+                api_model or DEFAULT_MODEL,
+            )
+            should_search = bool(_plan.get("should_search") or _plan.get("parse_links"))
         else:
             search_observation, sources, _plan = resolve_search_tool_context(
                 user_prompt,
@@ -1549,7 +1576,7 @@ async def chat_upload_stream(
                     protocol,
                     system_prompt=system_prompt,
                     file_items=responses_file_items if protocol == "responses" else None,
-                    use_web_search=bool(protocol == "responses" and should_search),
+                    use_web_search=bool(protocol == "responses" and should_search and not search_observation),
                 ):
                     full += chunk
                     yield chunk
@@ -1650,7 +1677,7 @@ async def chat_upload_stream(
                     api_model or DEFAULT_MODEL,
                     system_prompt=system_prompt,
                     max_output_tokens=4096,
-                    use_web_search=bool(should_search),
+                    use_web_search=bool(should_search and not search_observation),
                     input_payload=input_payload,
                 ):
                     full += chunk
@@ -1686,7 +1713,7 @@ async def chat_upload_stream(
             api_profile_name or "",
             system_prompt=system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-            use_web_search=bool(protocol == "responses" and should_search),
+            use_web_search=bool(protocol == "responses" and should_search and not search_observation),
         )
 
     return StreamingResponse(

@@ -15,7 +15,7 @@
 - 流式输出、停止生成、重新回答、保留旧版本
 - 图片上传、文本/代码文件上传、Responses 文件输入
 - 自主联网搜索，支持 Tavily 和 SerpAPI
-- GitHub 链接在 Responses 协议下直接随 `input` 传给上游解析
+- GitHub 链接在 Responses 协议下优先走后端 GitHub MCP 源码读取器，再把源码上下文传给模型
 - 管理后台、健康检查、部署脚本、启动脚本
 
 ## 服务端结构
