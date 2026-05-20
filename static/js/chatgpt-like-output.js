@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const DEFAULT_MIN_DELAY = 8;
+  const DEFAULT_MIN_DELAY = 10;
   const DEFAULT_MAX_DELAY = 170;
 
   function clamp(value, min, max) {
@@ -29,31 +29,41 @@
   }
 
   function getStepAndDelay(remaining, minDelay, maxDelay) {
-    if (remaining > 2400) return { minStep: 72, maxStep: 150, delay: minDelay };
-    if (remaining > 1400) return { minStep: 54, maxStep: 116, delay: minDelay + 2 };
-    if (remaining > 800) return { minStep: 38, maxStep: 86, delay: minDelay + 8 };
-    if (remaining > 420) return { minStep: 24, maxStep: 54, delay: minDelay + 18 };
-    if (remaining > 180) return { minStep: 14, maxStep: 32, delay: minDelay + 32 };
-    if (remaining > 70) return { minStep: 8, maxStep: 18, delay: minDelay + 58 };
-    if (remaining > 28) return { minStep: 4, maxStep: 10, delay: minDelay + 84 };
+    if (remaining > 2400) return { minStep: 54, maxStep: 118, delay: minDelay };
+    if (remaining > 1400) return { minStep: 40, maxStep: 92, delay: minDelay + 4 };
+    if (remaining > 800) return { minStep: 28, maxStep: 70, delay: minDelay + 10 };
+    if (remaining > 420) return { minStep: 18, maxStep: 48, delay: minDelay + 20 };
+    if (remaining > 180) return { minStep: 11, maxStep: 30, delay: minDelay + 34 };
+    if (remaining > 70) return { minStep: 6, maxStep: 17, delay: minDelay + 54 };
+    if (remaining > 28) return { minStep: 3, maxStep: 9, delay: minDelay + 76 };
     return { minStep: 1, maxStep: 4, delay: maxDelay };
+  }
+
+  function breathingJitter(emittedLength, remaining) {
+    const slowWave = Math.sin(emittedLength / 23) * 9;
+    const fastWave = Math.sin(emittedLength / 9) * 4;
+    const randomness = (Math.random() - 0.5) * (remaining > 600 ? 8 : 14);
+    return slowWave + fastWave + randomness;
   }
 
   function getCadenceDelay(baseDelay, emittedLength, lastChar, remaining, minDelay, maxDelay) {
     let delay = baseDelay;
-    const wave = emittedLength % 17;
-    if (wave === 0) delay += 44;
-    else if (wave === 6) delay += 22;
-    else if (wave === 11) delay += 12;
+    const wave = emittedLength % 23;
+    if (wave === 0) delay += 28;
+    else if (wave === 8) delay += 16;
+    else if (wave === 15) delay += 8;
 
-    if (lastChar === "\n") delay += 88;
-    else if (isHardPunctuation(lastChar)) delay += 62;
-    else if (isSoftPunctuation(lastChar)) delay += 30;
-    else if (isWhitespace(lastChar)) delay += 8;
+    if (lastChar === "\n") delay += 14;
+    else if (isHardPunctuation(lastChar)) delay += 48;
+    else if (isSoftPunctuation(lastChar)) delay += 22;
+    else if (isWhitespace(lastChar)) delay += 6;
 
-    if (remaining < 220) delay += 8;
-    if (remaining < 90) delay += 18;
-    if (remaining < 35) delay += 28;
+    if (lastChar !== "\n") {
+      if (remaining < 220) delay += 8;
+      if (remaining < 90) delay += 14;
+      if (remaining < 35) delay += 22;
+    }
+    delay += breathingJitter(emittedLength, remaining);
 
     return clamp(delay, minDelay, maxDelay);
   }
@@ -70,7 +80,11 @@
     let end = start;
 
     if (start >= hardLimit) return hardLimit;
-    if (source[start] === "\n") return Math.min(hardLimit, start + 1);
+    if (source[start] === "\n") {
+      let lineEnd = Math.min(hardLimit, start + 1);
+      while (lineEnd < hardLimit && source[lineEnd] === "\n" && lineEnd - start < 2) lineEnd += 1;
+      return lineEnd;
+    }
 
     while (end < minEnd) {
       const ch = source[end];

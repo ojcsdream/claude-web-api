@@ -1322,6 +1322,43 @@
       align-items: flex-start;
     }
 
+    .msg-wrap.sent-message-enter {
+      animation: messageSendUp 0.86s cubic-bezier(.16, 1, .3, 1) both;
+      transform-origin: right bottom;
+      will-change: opacity, transform, filter;
+    }
+
+    .msg-wrap.sent-message-enter .bubble {
+      animation: messageBubbleSettle 0.96s cubic-bezier(.16, 1, .3, 1) both;
+    }
+
+    @keyframes messageSendUp {
+      0% {
+        opacity: 0;
+        transform: translate3d(0, 54px, 0) scale(0.982);
+        filter: blur(8px);
+      }
+      58% {
+        opacity: 1;
+        transform: translate3d(0, -4px, 0) scale(1.002);
+        filter: blur(0);
+      }
+      100% {
+        opacity: 1;
+        transform: translate3d(0, 0, 0) scale(1);
+        filter: blur(0);
+      }
+    }
+
+    @keyframes messageBubbleSettle {
+      0% {
+        box-shadow: 0 18px 36px rgba(0,0,0,0.18), var(--glass-highlight);
+      }
+      100% {
+        box-shadow: var(--glass-shadow-md), var(--glass-highlight);
+      }
+    }
+
     .msg {
       width: 100%;
       display: flex;
@@ -1833,6 +1870,7 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       opacity: 0.78;
       letter-spacing: 0;
+      min-height: 18px;
     }
 
     .answer-meta::before {
@@ -1840,9 +1878,15 @@
       opacity: 0.65;
     }
 
+    .answer-meta.stream-meta-placeholder {
+      visibility: hidden;
+    }
+
     .msg-actions {
       display: flex;
       gap: 6px;
+      align-items: center;
+      min-height: 32px;
       opacity: 0.38;
       padding: 2px 0;
       transition: opacity .16s ease;
@@ -2434,6 +2478,8 @@
     }
 
     .send-btn {
+      position: relative;
+      overflow: hidden;
       width: 34px;
       height: 34px;
       border: 1px solid rgba(255,255,255,0.08);
@@ -2447,6 +2493,24 @@
       justify-content: center;
       flex: 0 0 auto;
       box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+      transition:
+        background 0.22s ease,
+        border-color 0.22s ease,
+        color 0.22s ease,
+        box-shadow 0.22s ease,
+        transform 0.18s ease;
+      will-change: transform;
+    }
+
+    .send-btn::after {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: inherit;
+      background: currentColor;
+      opacity: 0;
+      transform: scale(0.35);
+      pointer-events: none;
     }
 
     .send-btn.is-stop {
@@ -2454,6 +2518,7 @@
       color: #f0ece3;
       border-color: rgba(255,255,255,0.12);
       box-shadow: none;
+      animation: sendStopBreath 1.5s ease-in-out infinite;
     }
 
     .voice-icon {
@@ -2463,15 +2528,81 @@
     }
 
     .send-arrow {
+      position: relative;
+      z-index: 1;
       transform: translateY(-0.5px);
+      transition: transform 0.18s ease, opacity 0.18s ease;
+    }
+
+    .send-btn.send-launch::after {
+      animation: sendLaunchRipple 0.78s cubic-bezier(.16, 1, .3, 1);
+    }
+
+    .send-btn.send-launch .send-arrow {
+      animation: sendArrowLift 0.78s cubic-bezier(.16, 1, .3, 1);
     }
 
     .stop-icon {
       display: none;
+      position: relative;
+      z-index: 1;
       width: 10px;
       height: 10px;
       border-radius: 3px;
       background: currentColor;
+      transform: scale(0.76);
+    }
+
+    .send-btn.is-stop .stop-icon {
+      animation: stopIconSettle 0.46s cubic-bezier(.16, 1, .3, 1) both;
+    }
+
+    @keyframes sendLaunchRipple {
+      0% {
+        opacity: 0.22;
+        transform: scale(0.32);
+      }
+      100% {
+        opacity: 0;
+        transform: scale(1.65);
+      }
+    }
+
+    @keyframes sendArrowLift {
+      0% {
+        opacity: 1;
+        transform: translateY(-0.5px) scale(1);
+      }
+      45% {
+        opacity: 0;
+        transform: translateY(-13px) scale(0.9);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(-0.5px) scale(1);
+      }
+    }
+
+    @keyframes sendStopBreath {
+      0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(240, 236, 227, 0);
+      }
+      50% {
+        transform: scale(1.035);
+        box-shadow: 0 0 0 5px rgba(240, 236, 227, 0.055);
+      }
+    }
+
+    @keyframes stopIconSettle {
+      0% {
+        opacity: 0;
+        transform: scale(0.58) rotate(-8deg);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1) rotate(0deg);
+      }
     }
 
     .drawer-overlay {
@@ -4712,6 +4843,10 @@
     display: inline;
   }
 
+  body.welcome-mode .send-btn.send-launch .send-arrow {
+    animation-name: welcomeSendArrowLift;
+  }
+
   body.welcome-mode.has-input .voice-icon {
     display: none;
   }
@@ -4733,6 +4868,35 @@
     }
     to {
       transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes welcomeSendArrowLift {
+    0% {
+      opacity: 1;
+      transform: translateY(-1px) scale(1);
+    }
+    45% {
+      opacity: 0;
+      transform: translateY(-10px) scale(0.92);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(-1px) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .send-btn,
+    .send-arrow,
+    .stop-icon,
+    .send-btn::after,
+    .msg-wrap.sent-message-enter,
+    .msg-wrap.sent-message-enter .bubble {
+      animation: none !important;
+      transition: none !important;
+      transform: none !important;
+      filter: none !important;
     }
   }
 
@@ -5548,6 +5712,14 @@
       if (stopIcon) stopIcon.style.display = sending ? "block" : "none";
       if (voice) voice.style.display = !sending && !hasInput ? "block" : "none";
       sendBtn.setAttribute("aria-label", sending ? "暂停回复" : "发送消息");
+    }
+
+    function playSendLaunchAnimation() {
+      if (!sendBtn || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      sendBtn.classList.remove("send-launch");
+      void sendBtn.offsetWidth;
+      sendBtn.classList.add("send-launch");
+      window.setTimeout(() => sendBtn.classList.remove("send-launch"), 840);
     }
 
     function renderWelcomeEmpty() {
@@ -7780,6 +7952,15 @@
       }
       wrap.dataset.msgId = getMessageId(msg);
       if (!wrap.dataset.msgId) wrap.dataset.msgId = "idx:" + idx;
+      if (
+        pendingSentMessageAnimationKey &&
+        msg.role === "user" &&
+        wrap.dataset.msgId === pendingSentMessageAnimationKey &&
+        !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        wrap.classList.add("sent-message-enter");
+        window.setTimeout(() => wrap.classList.remove("sent-message-enter"), 1000);
+      }
 
       const row = document.createElement("div");
       row.className = "msg " + msg.role;
@@ -8062,7 +8243,7 @@
     let streamingRenderQueued = false;
     let pendingStreamingContent = "";
     let lastStreamingRenderTime = 0;
-    const STREAMING_RENDER_THROTTLE = 16; // 接近 60fps，优先更快把新内容画出来
+    const STREAMING_RENDER_THROTTLE = 16; // 接近 60fps，减少换行和段落推进的顿挫
     let streamingDisplayContent = "";
     let streamingDisplayContentPending = "";
     let streamingDisplayAnimateFromPending = 0;
@@ -8078,6 +8259,8 @@
     let streamingMathLastTypesetAt = 0;
     let streamingMathLastTypesetLength = 0;
     let streamingMathTypesetQueued = false;
+    let streamingFinalFlushPending = false;
+    let pendingSentMessageAnimationKey = "";
     function getLastAssistantBubble() {
       const assistantWraps = chatList.querySelectorAll(".msg-wrap.assistant");
       if (!assistantWraps.length) return null;
@@ -8226,6 +8409,9 @@
       html += renderSourcesStrip(sources);
       if (showCaret && text.trim() && text.trim() !== "思考中...") {
         html += '<span class="chatgpt-like-cursor">▍</span>';
+      }
+      if (!finalRender && text.trim() && text.trim() !== "思考中...") {
+        html += '<div class="answer-meta stream-meta-placeholder" aria-hidden="true">streaming</div>';
       }
       return html;
     }
@@ -8528,6 +8714,7 @@
 
         if (isLineBreak(first)) {
           end += 1;
+          while (end < source.length && isLineBreak(source[end]) && end - start < 2) end += 1;
           units += 2;
           break;
         }
@@ -8560,7 +8747,7 @@
       const last = chunk[chunk.length - 1] || "";
 
       let delay = 12;
-      if (isLineBreak(last)) delay = 20;
+      if (isLineBreak(last)) delay = 10;
       else if (isWhitespace(last)) delay = 8;
       else if (isCjkChar(last)) delay = 12;
       else if (isAsciiWordChar(last)) delay = 12;
@@ -8604,8 +8791,8 @@
       if (window.ChatGPTLikeOutput && typeof window.ChatGPTLikeOutput.createStreamingText === "function") {
         streamingTextController = window.ChatGPTLikeOutput.createStreamingText({
           enabled: true,
-          minDelay: 8,
-          maxDelay: 34,
+          minDelay: 10,
+          maxDelay: 170,
           resetKey: streamingScheduleSeq,
           onUpdate(displayContent, state) {
             streamingDisplayContentPending = displayContent;
@@ -8619,6 +8806,9 @@
               updateLastAssistantBubble(nextDisplayContent, false, isAssistantTyping, previousLength);
               if (state.done && isAssistantTyping && streamingTargetContent.length === nextDisplayContent.length) {
                 followBottomDuringStreaming();
+                if (streamingFinalFlushPending) {
+                  completeStreamingAssistantFinalFrame();
+                }
               }
             });
           }
@@ -8648,6 +8838,7 @@
       streamingTargetContent = "";
       activeToolStatuses = [];
       activeStreamingSources = [];
+      streamingFinalFlushPending = false;
       lastStreamingRenderTime = 0;
       ensureThinkingMotion();
     }
@@ -8665,6 +8856,29 @@
           resetKey: streamingScheduleSeq
         });
       }
+    }
+
+    function completeStreamingAssistantFinalFrame() {
+      const text = streamingTargetContent || streamingDisplayContent || "";
+      streamingFinalFlushPending = false;
+      streamingDisplayContent = text;
+      streamingDisplayContentPending = text;
+
+      if (streamingDisplayRaf) {
+        cancelAnimationFrame(streamingDisplayRaf);
+        streamingDisplayRaf = 0;
+      }
+
+      stopStreamingTypewriter(false);
+      if (streamingTextController) {
+        streamingTextController.dispose();
+        streamingTextController = null;
+      }
+
+      updateLastAssistantBubble(text, false, false, text.length);
+      requestAnimationFrame(() => {
+        finalizeLastAssistantBubbleInPlace();
+      });
     }
 
     function setThinkingContextFromInput(text, files, options = {}) {
@@ -8712,27 +8926,35 @@
     }
 
     function flushStreamingAssistantUpdate(finalRender = true) {
+      const activeStreamingSeq = streamingScheduleSeq;
       streamingScheduleSeq += 1;
       streamingRenderQueued = false;
       const text = pendingStreamingContent || streamingTargetContent || (messages.length ? (messages[messages.length - 1].content || "") : "");
       pendingStreamingContent = "";
       streamingTargetContent = text;
-      streamingDisplayContent = text;
-      streamingDisplayContentPending = text;
-      streamingDisplayAnimateFromPending = text.length;
-      if (streamingDisplayRaf) {
-        cancelAnimationFrame(streamingDisplayRaf);
-        streamingDisplayRaf = 0;
-      }
       if (messages.length && messages[messages.length - 1].role === "assistant") {
         messages[messages.length - 1].content = text;
       }
+
+      if (streamingTextController && streamingDisplayContent.length < text.length) {
+        streamingFinalFlushPending = true;
+        isAssistantTyping = true;
+        streamingTextController.setContent(text, {
+          enabled: true,
+          resetKey: activeStreamingSeq
+        });
+        return;
+      }
+
+      streamingDisplayContent = text;
+      streamingDisplayContentPending = text;
+      streamingDisplayAnimateFromPending = text.length;
       if (streamingTextController) {
         streamingTextController.dispose();
         streamingTextController = null;
       }
       stopStreamingTypewriter(false);
-      updateLastAssistantBubble(streamingTargetContent, false, false, text.length);
+      updateLastAssistantBubble(text, false, false, text.length);
       requestAnimationFrame(() => {
         finalizeLastAssistantBubbleInPlace();
       });
@@ -9244,6 +9466,8 @@
 
       if (!text && (!files || !files.length)) return;
 
+      playSendLaunchAnimation();
+
       if (!activeConversationId) {
         const c = await api("POST", "/api/conversations", { title: "新对话" });
         activeConversationId = c.id;
@@ -9273,6 +9497,7 @@
       }
 
       messages.push({ role: "user", content: text, fileName, imagePreview });
+      pendingSentMessageAnimationKey = "idx:" + (messages.length - 1);
       messages.push({ role: "assistant", content: "思考中..." });
       lastUserPromptForThinking = text;
       setThinkingContextFromInput(text, files);
@@ -9282,6 +9507,7 @@
       autoScrollEnabled = true;
       userScrollActive = false;
       renderMessages(true);
+      pendingSentMessageAnimationKey = "";
 
       promptEl.value = "";
 
