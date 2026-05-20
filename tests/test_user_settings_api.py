@@ -135,6 +135,57 @@ class UserSettingsApiTest(unittest.TestCase):
         self.assertEqual(sent["email"], user["email"])
         self.assertRegex(sent["code"], r"^\d{6}$")
 
+    def test_account_summary_is_scoped_to_current_user(self):
+        client_one = TestClient(self.app_module.app)
+        register(client_one, "alice", "alice@example.com")
+        created = client_one.post("/api/conversations", json={"title": "Alice chat"})
+        self.assertEqual(created.status_code, 200, created.text)
+        conversation_id = created.json()["id"]
+        client_one.post(
+            "/api/profiles",
+            json={"name": "Alice API", "base_url": "https://example.com", "auth_token": "k", "model": "m"},
+        )
+        prompt_response = client_one.post("/api/system-prompts", json={"title": "Alice prompt", "content": "Be concise", "enabled": True})
+        self.assertEqual(prompt_response.status_code, 200, prompt_response.text)
+
+        import db
+
+        db.db_add_message(conversation_id, "user", "hello")
+        db.db_add_message(conversation_id, "assistant", "hi")
+
+        client_two = TestClient(self.app_module.app)
+        register(client_two, "bob", "bob@example.com")
+
+        alice_summary = client_one.get("/api/auth/account-summary")
+        bob_summary = client_two.get("/api/auth/account-summary")
+
+        self.assertEqual(alice_summary.status_code, 200, alice_summary.text)
+        self.assertEqual(bob_summary.status_code, 200, bob_summary.text)
+        self.assertEqual(alice_summary.json()["summary"]["conversations"], 1)
+        self.assertEqual(alice_summary.json()["summary"]["messages"], 2)
+        self.assertEqual(alice_summary.json()["summary"]["api_profiles"], 1)
+        self.assertEqual(alice_summary.json()["summary"]["system_prompts"], 1)
+        self.assertEqual(bob_summary.json()["summary"]["conversations"], 0)
+        self.assertEqual(bob_summary.json()["summary"]["messages"], 0)
+
+    def test_logout_other_sessions_keeps_current_and_other_users(self):
+        client_one = TestClient(self.app_module.app)
+        register(client_one, "alice", "alice@example.com", "secret1")
+
+        client_two = TestClient(self.app_module.app)
+        login_two = client_two.post("/api/auth/login", json={"username": "alice", "password": "secret1"})
+        self.assertEqual(login_two.status_code, 200, login_two.text)
+
+        client_three = TestClient(self.app_module.app)
+        register(client_three, "bob", "bob@example.com", "secret2")
+
+        response = client_one.post("/api/auth/logout-other-sessions")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["closed_sessions"], 1)
+        self.assertEqual(client_one.get("/api/auth/me").status_code, 200)
+        self.assertEqual(client_two.get("/api/auth/me").status_code, 401)
+        self.assertEqual(client_three.get("/api/auth/me").status_code, 200)
 
 if __name__ == "__main__":
     unittest.main()

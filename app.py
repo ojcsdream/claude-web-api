@@ -306,6 +306,37 @@ def auth_send_password_change_code(user=Depends(require_current_user)):
     return {"ok": True, "message": "验证码已发送", "email": email}
 
 
+@app.get("/api/auth/account-summary")
+def auth_account_summary(cw_multi_session: str = Cookie(default=""), user=Depends(require_current_user)):
+    conn = get_conn()
+    row = conn.execute(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM auth_sessions WHERE user_id=? AND expires_at>?) AS active_sessions,
+            (SELECT COUNT(*) FROM auth_sessions WHERE user_id=? AND token<>? AND expires_at>?) AS other_sessions,
+            (SELECT COUNT(*) FROM conversations WHERE user_id=?) AS conversations,
+            (SELECT COUNT(*) FROM messages JOIN conversations ON conversations.id = messages.conversation_id WHERE conversations.user_id=?) AS messages,
+            (SELECT COUNT(*) FROM api_profiles WHERE user_id=?) AS api_profiles,
+            (SELECT COUNT(*) FROM system_prompts WHERE user_id=?) AS system_prompts
+        """,
+        (user["id"], now_ms(), user["id"], cw_multi_session, now_ms(), user["id"], user["id"], user["id"], user["id"]),
+    ).fetchone()
+    conn.close()
+    return {"ok": True, "summary": dict(row)}
+
+
+@app.post("/api/auth/logout-other-sessions")
+def auth_logout_other_sessions(cw_multi_session: str = Cookie(default=""), user=Depends(require_current_user)):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT COUNT(*) AS total FROM auth_sessions WHERE user_id=? AND token<>? AND expires_at>?",
+        (user["id"], cw_multi_session, now_ms()),
+    ).fetchone()
+    conn.close()
+    db_delete_other_sessions_by_user(user["id"], cw_multi_session)
+    return {"ok": True, "closed_sessions": int(row["total"] if row else 0)}
+
+
 @app.post("/api/auth/send-code")
 def auth_send_code(body: AuthBody):
     email = normalize_email(body.email)
