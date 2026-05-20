@@ -8035,6 +8035,9 @@
       if (messageHasCopyableText(msg)) {
         actions.appendChild(makeMessageButton("copy-msg", "复制消息", "📋", msg, idx));
       }
+      if (msg.role === "user" && messageHasCopyableText(msg)) {
+        actions.appendChild(makeMessageButton("resend-msg", "重新发送这条消息", "↩", msg, idx));
+      }
       if (msg.role === "assistant" && getMessageId(msg) && !isThinkingMessage(msg)) {
         actions.appendChild(makeMessageButton("regen-msg", "重新回答", "↻", msg, idx));
       }
@@ -9624,6 +9627,25 @@
       renderAll();
     }
 
+    async function resendUserMessage(idx) {
+      const msg = messages[idx];
+      if (sending || !msg || msg.role !== "user") return;
+      const text = (msg.content || "").trim();
+      if (!text) return;
+      if (!confirm("确定重新发送这条消息吗？这条消息以及之后的回复会被删除。")) return;
+
+      if (msg.id) {
+        await api("DELETE", `/api/conversations/${activeConversationId}/messages/${msg.id}/after`);
+        await loadMessages();
+      } else {
+        messages = messages.slice(0, idx);
+        renderMessages();
+      }
+
+      promptEl.value = text;
+      await sendPrompt();
+    }
+
     async function regenerateFrom(idx) {
       const msg = messages[idx];
       if (!msg || msg.role !== "assistant" || !msg.id) return;
@@ -10071,6 +10093,13 @@
       if (regen) {
         const found = findMessageByButton(regen);
         if (found.idx >= 0) return regenerateFrom(found.idx);
+        return;
+      }
+
+      const resend = e.target.closest(".resend-msg");
+      if (resend) {
+        const found = findMessageByButton(resend);
+        if (found.idx >= 0) return resendUserMessage(found.idx);
         return;
       }
 

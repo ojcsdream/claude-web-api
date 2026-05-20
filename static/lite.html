@@ -391,6 +391,12 @@
           actions.appendChild(copyBtn);
         }
 
+        if (msg.role === "user" && messageHasCopyableText(msg)) {
+          const resendBtn = makeSmallButton("resend-msg", "重新发送这条消息", "↩", msg);
+          resendBtn.addEventListener("click", () => resendMsg(msg));
+          actions.appendChild(resendBtn);
+        }
+
         if (msg.role === "assistant" && getMessageId(msg) && !isThinkingMessage(msg)) {
           const regenBtn = makeSmallButton("regen-msg", "重新回答", "↻", msg);
           regenBtn.addEventListener("click", () => regenerateMsg(msg));
@@ -499,6 +505,20 @@
         sending = false;
         sendBtn.disabled = false;
       }
+    }
+
+    async function resendMsg(msg) {
+      if (sending || !msg || msg.role !== "user") return;
+      const text = (msg.content || "").trim();
+      if (!text) return;
+      if (!confirm("确定重新发送这条消息吗？这条消息以及之后的回复会被删除。")) return;
+
+      if (msg.id) {
+        await api("DELETE", "/api/conversations/" + conversationId + "/messages/" + msg.id + "/after");
+      }
+
+      promptEl.value = text;
+      await send();
     }
 
     async function loadProfiles() {
