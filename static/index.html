@@ -2482,8 +2482,8 @@
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.2s;
-      -webkit-backdrop-filter: blur(6px) saturate(0.95);
-      backdrop-filter: blur(6px) saturate(0.95);
+      will-change: opacity;
+      contain: paint;
     }
 
     .drawer-overlay.open {
@@ -2499,20 +2499,23 @@
       width: min(90vw, 370px);
       background:
         linear-gradient(180deg, rgba(255,255,255,0.064), rgba(255,255,255,0.024)),
-        rgba(36, 35, 31, 0.78);
+        rgba(36, 35, 31, 0.98);
       z-index: 90;
-      transform: translateX(-105%);
+      transform: translate3d(-105%, 0, 0);
       transition: transform 0.22s;
       padding: 14px 12px 24px;
       overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
       border-right: 1px solid rgba(255,255,255,0.115);
-      box-shadow: 18px 0 52px rgba(0,0,0,0.38), inset -1px 0 0 rgba(255,255,255,0.055);
-      -webkit-backdrop-filter: var(--glass-blur-lg);
-      backdrop-filter: var(--glass-blur-lg);
+      box-shadow: 10px 0 28px rgba(0,0,0,0.32), inset -1px 0 0 rgba(255,255,255,0.055);
+      will-change: transform;
+      contain: layout paint style;
+      backface-visibility: hidden;
     }
 
     .drawer.open {
-      transform: translateX(0);
+      transform: translate3d(0, 0, 0);
     }
 
     .drawer-head {
@@ -2560,11 +2563,9 @@
       border-radius: 16px;
       background:
         linear-gradient(180deg, rgba(255,255,255,0.060), rgba(255,255,255,0.024)),
-        rgba(255,255,255,0.038);
+        rgba(48, 46, 41, 0.92);
       border: 1px solid rgba(255,255,255,0.085);
-      box-shadow: 0 10px 26px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.06);
-      -webkit-backdrop-filter: var(--glass-blur-sm);
-      backdrop-filter: var(--glass-blur-sm);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
     }
 
     .section-title {
@@ -2608,7 +2609,7 @@
       text-align: left;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 14px;
-      transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+      transition: background .16s ease, border-color .16s ease, color .16s ease;
     }
 
     .session-item.active, .model-choice.active {
@@ -2701,10 +2702,8 @@
       border: 1px solid var(--glass-border);
       background:
         linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.022)),
-        rgba(24, 23, 20, 0.76);
-      -webkit-backdrop-filter: blur(14px) saturate(1.06);
-      backdrop-filter: blur(14px) saturate(1.06);
-      box-shadow: 0 12px 30px rgba(0,0,0,0.42), var(--glass-highlight);
+        rgba(24, 23, 20, 0.98);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.34), var(--glass-highlight);
     }
 
     .session-menu[hidden] {
@@ -2742,6 +2741,8 @@
     .session-list {
       max-height: min(42vh, 360px);
       overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
       padding-right: 2px;
       margin-bottom: 9px;
     }
@@ -3489,14 +3490,7 @@
         backdrop-filter: blur(14px) saturate(1.06);
       }
 
-      html:not([data-theme="light"]) .drawer {
-        -webkit-backdrop-filter: blur(14px) saturate(1.06);
-        backdrop-filter: blur(14px) saturate(1.06);
-      }
-
-      html:not([data-theme="light"]) .section,
       html:not([data-theme="light"]) .source-chip,
-      html:not([data-theme="light"]) .session-menu,
       html:not([data-theme="light"]) .conversation-search-panel {
         -webkit-backdrop-filter: blur(8px) saturate(1.04);
         backdrop-filter: blur(8px) saturate(1.04);
@@ -5453,6 +5447,8 @@
     let loadSeq = 0;
     let renderMessagesJob = 0;
     let lastRenderedMsgKey = "";
+    let lastRenderedSessionsKey = "";
+    let renderSessionsJob = 0;
     let webSearchEnabled = false;
     let activeStreamController = null;
     let pendingJumpMessageId = "";
@@ -8767,6 +8763,7 @@
 
     async function switchConversation(conversation) {
       activeConversationId = conversation.id;
+      invalidateSessionsRender();
       closeDrawer();
       chatList.innerHTML = '<div class="empty">加载对话中...</div>';
       topTitle.textContent = conversation.title || "Claude Web";
@@ -8880,6 +8877,7 @@
       };
       if (targetConversation.id !== activeConversationId) {
         activeConversationId = targetConversation.id;
+        invalidateSessionsRender();
         localStorage.setItem("active_conversation", activeConversationId);
         topTitle.textContent = targetConversation.title || "Claude Web";
         await loadMessages();
@@ -8891,18 +8889,25 @@
     }
 
     function renderSessions() {
-      sessionList.innerHTML = "";
       const keyword = (sessionSearch.value || "").trim().toLowerCase();
       const visibleConversations = conversations.filter(c => {
         if (!keyword) return true;
         return (c.title || "新对话").toLowerCase().includes(keyword);
       });
+      const sessionsKey = keyword + "|" + activeConversationId + "|" + visibleConversations
+        .map(c => [c.id, c.title || "", c.is_pinned ? 1 : 0].join("\u001f"))
+        .join("\u001e");
+      if (sessionsKey === lastRenderedSessionsKey) return;
+      lastRenderedSessionsKey = sessionsKey;
+
+      sessionList.innerHTML = "";
 
       if (!visibleConversations.length) {
         sessionList.innerHTML = '<div class="session-empty">没有匹配的对话</div>';
         return;
       }
 
+      const fragment = document.createDocumentFragment();
       visibleConversations.forEach(c => {
         const row = document.createElement("div");
         row.className = "session-row";
@@ -8992,7 +8997,20 @@
         row.appendChild(pin);
         row.appendChild(more);
         row.appendChild(menu);
-        sessionList.appendChild(row);
+        fragment.appendChild(row);
+      });
+      sessionList.appendChild(fragment);
+    }
+
+    function invalidateSessionsRender() {
+      lastRenderedSessionsKey = "";
+    }
+
+    function scheduleRenderSessions() {
+      if (renderSessionsJob) return;
+      renderSessionsJob = requestAnimationFrame(() => {
+        renderSessionsJob = 0;
+        renderSessions();
       });
     }
 
@@ -9084,7 +9102,8 @@
       });
     }
 
-    function pauseAutoScrollByUser() {
+    function pauseAutoScrollByUser(e) {
+      if (drawer.classList.contains("open") && e && drawer.contains(e.target)) return;
       const now = performance.now();
       if (now - lastUserScrollPauseAt < 120) return;
       lastUserScrollPauseAt = now;
@@ -9136,7 +9155,8 @@
     }, { passive: true });
 
     // 只有用户停止交互后，并且重新回到底部附近，才恢复自动跟随
-    window.addEventListener("scroll", () => {
+    window.addEventListener("scroll", (e) => {
+      if (drawer.classList.contains("open") && drawer.contains(e.target)) return;
       maybeResumeAutoScroll();
     }, { passive: true });
 
@@ -9153,20 +9173,24 @@
     async function loadConversations() {
       const d = await api("GET", "/api/conversations");
       conversations = d.conversations || [];
+      invalidateSessionsRender();
 
       if (!conversations.length) {
         const c = await api("POST", "/api/conversations", { title: "新对话" });
         activeConversationId = c.id;
+        invalidateSessionsRender();
         return loadConversations();
       }
 
       const savedConversationId = localStorage.getItem("active_conversation");
       if (!activeConversationId && savedConversationId && conversations.find(c => c.id === savedConversationId)) {
         activeConversationId = savedConversationId;
+        invalidateSessionsRender();
       }
 
       if (!activeConversationId || !conversations.find(c => c.id === activeConversationId)) {
         activeConversationId = conversations[0].id;
+        invalidateSessionsRender();
       }
 
       localStorage.setItem("active_conversation", activeConversationId);
@@ -9224,6 +9248,7 @@
         const c = await api("POST", "/api/conversations", { title: "新对话" });
         activeConversationId = c.id;
         conversations.unshift({ id: c.id, title: "新对话", created_at: Date.now(), updated_at: Date.now(), is_pinned: 0 });
+        invalidateSessionsRender();
         localStorage.setItem("active_conversation", activeConversationId);
       }
 
@@ -9446,11 +9471,17 @@
     }
 
     function openDrawer() {
+      if (drawer.classList.contains("open")) return;
       drawer.classList.add("open");
       overlay.classList.add("open");
     }
 
     function closeDrawer() {
+      if (!drawer.classList.contains("open")) return;
+      if (renderSessionsJob) {
+        cancelAnimationFrame(renderSessionsJob);
+        renderSessionsJob = 0;
+      }
       drawer.classList.remove("open");
       overlay.classList.remove("open");
     }
@@ -9487,6 +9518,7 @@
       await api("DELETE", `/api/conversations/${conversation.id}`);
       if (conversation.id === activeConversationId) {
         activeConversationId = null;
+        invalidateSessionsRender();
       }
       await loadConversations();
     }
@@ -9494,11 +9526,11 @@
     $("openDrawer").onclick = openDrawer;
     $("closeDrawer").onclick = closeDrawer;
     overlay.onclick = closeDrawer;
-    sessionSearch.oninput = renderSessions;
-
+    sessionSearch.oninput = scheduleRenderSessions;
     $("newConvBtn").onclick = async () => {
       const c = await api("POST", "/api/conversations", { title: "新对话" });
       activeConversationId = c.id;
+      invalidateSessionsRender();
       await loadConversations();
       closeDrawer();
     };
@@ -9848,15 +9880,11 @@
 
     async function initPage() {
       const seq = ++loadSeq;
-      chatList.innerHTML = '<div class="empty">加载中...</div>';
+      chatList.innerHTML = "";
       const fallbackTimer = setTimeout(() => {
-        if (seq === loadSeq && chatList.textContent.includes("加载中")) {
-          if (isLocalAndroidRuntime) {
-            showLoadStatus("正在连接本地服务，首次启动可能需要更久...");
-          } else {
+        if (seq === loadSeq && !isLocalAndroidRuntime) {
             showLoadError("页面初始化超时，请点击重试");
           }
-        }
       }, 8000);
 
       try {
@@ -9864,15 +9892,12 @@
           chatList.innerHTML = '<div class="empty">请先登录</div>';
           return;
         }
-        showLoadStatus("正在加载接入商配置...");
         await loadProfiles();
-        showLoadStatus("正在加载系统提示词...");
         await loadSystemPrompts();
         if (seq !== loadSeq) return;
         restoreModel();
         loadProviderModels();
         setModelChoicesCollapsed(localStorage.getItem("model_choices_collapsed") !== "0");
-        showLoadStatus("正在加载本地会话...");
         await loadConversations();
       } catch (e) {
         if (seq === loadSeq) showLoadError(e.message || String(e));

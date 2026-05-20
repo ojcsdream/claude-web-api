@@ -2182,6 +2182,13 @@ def _add_default_claude_web_search_tool(body: dict) -> dict:
     return body
 
 
+def _add_anthropic_system_prompt(body: dict, system_text: str) -> dict:
+    system_text = (system_text or "").strip()
+    if system_text:
+        body["system"] = system_text
+    return body
+
+
 def _extract_response_output_text(data: dict) -> str:
     if not isinstance(data, dict):
         return ""
@@ -2260,11 +2267,8 @@ def call_direct_text_api(
         )
 
     url = build_api_url(base_url, "/v1/messages")
-    messages = []
     system_text = _split_system_prompt(system_prompt)
-    if system_text:
-        messages.append({"role": "system", "content": system_text})
-    messages.append({"role": "user", "content": prompt})
+    messages = [{"role": "user", "content": prompt}]
     body = {
         "model": model,
         "max_tokens": max_tokens,
@@ -2272,6 +2276,7 @@ def call_direct_text_api(
         "messages": messages,
         "stream": False,
     }
+    _add_anthropic_system_prompt(body, system_text)
     _add_default_claude_web_search_tool(body)
     req = urllib.request.Request(
         url,
@@ -3125,11 +3130,8 @@ def stream_direct_api_text(
 
     # Anthropic-compatible / Claude-compatible
     url = build_api_url(base_url, "/v1/messages")
-    messages = []
     system_text = _split_system_prompt(system_prompt)
-    if system_text:
-        messages.append({"role": "system", "content": system_text})
-    messages.append({"role": "user", "content": prompt})
+    messages = [{"role": "user", "content": prompt}]
     body = {
         "model": model,
         "max_tokens": 4096,
@@ -3137,6 +3139,7 @@ def stream_direct_api_text(
         "messages": messages,
         "stream": True,
     }
+    _add_anthropic_system_prompt(body, system_text)
     _add_default_claude_web_search_tool(body)
     headers = {
         "Content-Type": "application/json",
@@ -3512,10 +3515,7 @@ def stream_direct_vision_api_text(
         return
 
     url = build_api_url(base_url, "/v1/messages")
-    messages = []
-    if system_text:
-        messages.append({"role": "system", "content": system_text})
-    messages.append({"role": "user", "content": anthropic_content})
+    messages = [{"role": "user", "content": anthropic_content}]
     body = {
         "model": model,
         "max_tokens": 4096,
@@ -3523,6 +3523,7 @@ def stream_direct_vision_api_text(
         "messages": messages,
         "stream": True,
     }
+    _add_anthropic_system_prompt(body, system_text)
     _add_default_claude_web_search_tool(body)
     req = urllib.request.Request(
         url,
@@ -3668,16 +3669,14 @@ def call_direct_vision_api(
             raise RuntimeError("OpenAI视觉接口失败: " + (err or str(e)))
 
     # Anthropic compatible
-    messages = []
-    if system_text:
-        messages.append({"role": "system", "content": system_text})
-    messages.append({"role": "user", "content": anthropic_content})
+    messages = [{"role": "user", "content": anthropic_content}]
     body = {
         "model": model,
         "max_tokens": 4096,
         "temperature": MODEL_TEMPERATURE,
         "messages": messages
     }
+    _add_anthropic_system_prompt(body, system_text)
     _add_default_claude_web_search_tool(body)
 
     url = base_url + "/v1/messages"
