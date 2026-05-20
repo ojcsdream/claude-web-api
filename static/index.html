@@ -823,6 +823,14 @@
       border-color: rgba(255, 139, 124, 0.18);
     }
 
+    body.font-scale-small .bubble {
+      font-size: 14px;
+    }
+
+    body.font-scale-large .bubble {
+      font-size: 17px;
+    }
+
     html[data-theme="light"] .settings-field input,
     html[data-theme="light"] .settings-field select,
     html[data-theme="light"] .settings-toggle {
@@ -1323,24 +1331,29 @@
     }
 
     .msg-wrap.sent-message-enter {
-      animation: messageSendUp 0.86s cubic-bezier(.16, 1, .3, 1) both;
+      animation: messageSendUp 1.04s cubic-bezier(.16, 1, .3, 1) both;
       transform-origin: right bottom;
       will-change: opacity, transform, filter;
     }
 
     .msg-wrap.sent-message-enter .bubble {
-      animation: messageBubbleSettle 0.96s cubic-bezier(.16, 1, .3, 1) both;
+      animation: messageBubbleSettle 1.08s cubic-bezier(.16, 1, .3, 1) both;
     }
 
     @keyframes messageSendUp {
       0% {
         opacity: 0;
-        transform: translate3d(0, 54px, 0) scale(0.982);
-        filter: blur(8px);
+        transform: translate3d(0, 74px, 0) scale(0.976);
+        filter: blur(10px);
       }
-      58% {
+      34% {
+        opacity: 0.82;
+        transform: translate3d(0, 14px, 0) scale(0.992);
+        filter: blur(3px);
+      }
+      68% {
         opacity: 1;
-        transform: translate3d(0, -4px, 0) scale(1.002);
+        transform: translate3d(0, -10px, 0) scale(1.004);
         filter: blur(0);
       }
       100% {
@@ -1353,9 +1366,14 @@
     @keyframes messageBubbleSettle {
       0% {
         box-shadow: 0 18px 36px rgba(0,0,0,0.18), var(--glass-highlight);
+        transform: translate3d(0, 10px, 0);
+      }
+      62% {
+        transform: translate3d(0, -3px, 0);
       }
       100% {
         box-shadow: var(--glass-shadow-md), var(--glass-highlight);
+        transform: translate3d(0, 0, 0);
       }
     }
 
@@ -1889,11 +1907,12 @@
       min-height: 32px;
       opacity: 0.38;
       padding: 2px 0;
-      transition: opacity .16s ease;
+      transition: opacity .16s ease, transform .16s ease;
     }
 
     .msg-wrap:hover .msg-actions {
       opacity: 0.92;
+      transform: translateY(-1px);
     }
 
     .msg-wrap.user .msg-actions {
@@ -1906,8 +1925,8 @@
     }
 
     .small-btn {
-      width: 20px;
-      height: 20px;
+      width: 28px;
+      height: 28px;
       border-radius: 999px;
       border: 1px solid rgba(255,255,255,0.06);
       background: rgba(255,255,255,0.03);
@@ -1925,6 +1944,25 @@
       background: rgba(255,255,255,0.06);
       border-color: rgba(255,255,255,0.10);
       color: #e8dece;
+    }
+
+    .small-btn:focus-visible,
+    .message-fold-btn:focus-visible,
+    .version-toggle-btn:focus-visible {
+      outline: 2px solid rgba(226, 111, 85, 0.58);
+      outline-offset: 2px;
+    }
+
+    .small-btn.resend-msg {
+      color: #d9c5ad;
+      background: rgba(226,111,85,0.055);
+      border-color: rgba(226,111,85,0.16);
+    }
+
+    .small-btn.resend-msg:hover {
+      color: #ffe2cc;
+      background: rgba(226,111,85,0.12);
+      border-color: rgba(226,111,85,0.34);
     }
 
     .small-btn:active {
@@ -2535,11 +2573,11 @@
     }
 
     .send-btn.send-launch::after {
-      animation: sendLaunchRipple 0.78s cubic-bezier(.16, 1, .3, 1);
+      animation: sendLaunchRipple 0.9s cubic-bezier(.16, 1, .3, 1);
     }
 
     .send-btn.send-launch .send-arrow {
-      animation: sendArrowLift 0.78s cubic-bezier(.16, 1, .3, 1);
+      animation: sendArrowLift 0.9s cubic-bezier(.16, 1, .3, 1);
     }
 
     .stop-icon {
@@ -2573,9 +2611,17 @@
         opacity: 1;
         transform: translateY(-0.5px) scale(1);
       }
-      45% {
+      24% {
+        opacity: 1;
+        transform: translateY(-7px) scale(1.04);
+      }
+      54% {
         opacity: 0;
-        transform: translateY(-13px) scale(0.9);
+        transform: translateY(-21px) scale(0.86);
+      }
+      55% {
+        opacity: 0;
+        transform: translateY(13px) scale(0.9);
       }
       100% {
         opacity: 1;
@@ -5397,6 +5443,9 @@
               <input id="settingsUserId" readonly />
             </div>
           </div>
+          <div class="settings-stat-row"><span>活跃登录设备</span><strong id="settingsActiveSessionCount">-</strong></div>
+          <div class="settings-stat-row"><span>对话总数</span><strong id="settingsConversationCount">-</strong></div>
+          <div class="settings-stat-row"><span>接入商 / 系统提示词</span><strong id="settingsConfigCount">-</strong></div>
           <div class="settings-actions end">
             <button id="settingsSaveProfileBtn" class="settings-btn primary" type="button">保存资料</button>
           </div>
@@ -5447,6 +5496,14 @@
                 <option value="light">日间</option>
               </select>
             </div>
+            <div class="settings-field">
+              <label for="settingsFontScaleSelect">消息字号</label>
+              <select id="settingsFontScaleSelect">
+                <option value="normal">标准</option>
+                <option value="small">紧凑</option>
+                <option value="large">放大</option>
+              </select>
+            </div>
           </div>
           <div class="settings-toggle-row">
             <div>
@@ -5454,6 +5511,20 @@
               <div class="settings-note">新渲染的长消息会自动折叠，便于手机端浏览。</div>
             </div>
             <input id="settingsCompactLongMessages" class="settings-toggle" type="checkbox" />
+          </div>
+          <div class="settings-toggle-row">
+            <div>
+              <div>默认联网搜索</div>
+              <div class="settings-note">每次发送都会默认携带联网搜索意图，仍可用输入框旁按钮临时关闭。</div>
+            </div>
+            <input id="settingsDefaultWebSearch" class="settings-toggle" type="checkbox" />
+          </div>
+          <div class="settings-toggle-row">
+            <div>
+              <div>Enter 直接发送</div>
+              <div class="settings-note">开启后 Enter 发送，Shift + Enter 换行；关闭后 Enter 只换行。</div>
+            </div>
+            <input id="settingsEnterToSend" class="settings-toggle" type="checkbox" />
           </div>
           <div class="settings-actions end">
             <button id="settingsSavePrefsBtn" class="settings-btn primary" type="button">保存偏好</button>
@@ -5474,6 +5545,7 @@
             <button id="settingsExportBtn" class="settings-btn" type="button">导出当前对话</button>
             <button id="settingsClearDraftBtn" class="settings-btn" type="button">清空输入和附件</button>
             <button id="settingsClearCacheBtn" class="settings-btn" type="button">清理本地缓存</button>
+            <button id="settingsLogoutOtherSessionsBtn" class="settings-btn" type="button">退出其他设备</button>
             <button id="settingsDeleteConversationBtn" class="settings-btn danger" type="button">删除当前对话</button>
             <button id="settingsLogoutBtn" class="settings-btn danger" type="button">退出登录</button>
           </div>
@@ -5583,14 +5655,21 @@
     const settingsChangePasswordBtn = $("settingsChangePasswordBtn");
     const settingsPasswordStatus = $("settingsPasswordStatus");
     const settingsThemeSelect = $("settingsThemeSelect");
+    const settingsFontScaleSelect = $("settingsFontScaleSelect");
     const settingsCompactLongMessages = $("settingsCompactLongMessages");
+    const settingsDefaultWebSearch = $("settingsDefaultWebSearch");
+    const settingsEnterToSend = $("settingsEnterToSend");
     const settingsSavePrefsBtn = $("settingsSavePrefsBtn");
     const settingsPrefsStatus = $("settingsPrefsStatus");
+    const settingsActiveSessionCount = $("settingsActiveSessionCount");
+    const settingsConversationCount = $("settingsConversationCount");
+    const settingsConfigCount = $("settingsConfigCount");
     const settingsLocalStorageCount = $("settingsLocalStorageCount");
     const settingsMessageCount = $("settingsMessageCount");
     const settingsExportBtn = $("settingsExportBtn");
     const settingsClearDraftBtn = $("settingsClearDraftBtn");
     const settingsClearCacheBtn = $("settingsClearCacheBtn");
+    const settingsLogoutOtherSessionsBtn = $("settingsLogoutOtherSessionsBtn");
     const settingsDeleteConversationBtn = $("settingsDeleteConversationBtn");
     const settingsLogoutBtn = $("settingsLogoutBtn");
     const settingsDataStatus = $("settingsDataStatus");
@@ -5613,7 +5692,7 @@
     let lastRenderedMsgKey = "";
     let lastRenderedSessionsKey = "";
     let renderSessionsJob = 0;
-    let webSearchEnabled = false;
+    let webSearchEnabled = null;
     let activeStreamController = null;
     let pendingJumpMessageId = "";
     let pendingSearchKeyword = "";
@@ -5628,8 +5707,14 @@
 
     const THEME_STORAGE_KEY = "claude_web_theme";
     const COMPACT_LONG_MESSAGES_KEY = "claude_web_compact_long_messages";
+    const DEFAULT_WEB_SEARCH_KEY = "claude_web_default_web_search";
+    const ENTER_TO_SEND_KEY = "claude_web_enter_to_send";
+    const FONT_SCALE_KEY = "claude_web_font_scale";
     let currentTheme = localStorage.getItem(THEME_STORAGE_KEY) || "dark";
     let compactLongMessages = localStorage.getItem(COMPACT_LONG_MESSAGES_KEY) === "1";
+    let defaultWebSearch = localStorage.getItem(DEFAULT_WEB_SEARCH_KEY) === "1";
+    let enterToSend = localStorage.getItem(ENTER_TO_SEND_KEY) === "1";
+    let fontScale = localStorage.getItem(FONT_SCALE_KEY) || "normal";
 
     function applyTheme(theme) {
       currentTheme = theme === "light" ? "light" : "dark";
@@ -5642,6 +5727,12 @@
         themeToggle.setAttribute("aria-label", isLight ? "切换夜间模式" : "切换日间模式");
         themeToggle.title = isLight ? "切换夜间模式" : "切换日间模式";
       }
+    }
+
+    function applyFontScale(scale) {
+      fontScale = ["small", "large"].includes(scale) ? scale : "normal";
+      document.body.classList.toggle("font-scale-small", fontScale === "small");
+      document.body.classList.toggle("font-scale-large", fontScale === "large");
     }
 
     function formatDateTime(ms) {
@@ -5662,6 +5753,7 @@
     }
 
     applyTheme(currentTheme);
+    applyFontScale(fontScale);
 
     if (themeToggle) {
       themeToggle.addEventListener("click", () => {
@@ -5697,8 +5789,9 @@
 
     function renderWebSearchButton() {
       if (!webSearchBtn) return;
-      webSearchBtn.classList.toggle("active", webSearchEnabled);
-      webSearchBtn.title = webSearchEnabled ? "本条消息将强制联网搜索" : "强制联网搜索";
+      const active = webSearchEnabled === null ? defaultWebSearch : webSearchEnabled;
+      webSearchBtn.classList.toggle("active", active);
+      webSearchBtn.title = active ? "本条消息将联网搜索" : "强制联网搜索";
     }
 
     function renderSendButtonState() {
@@ -5888,7 +5981,10 @@
       if (settingsProfileName) settingsProfileName.textContent = currentUser ? (currentUser.username || "用户") : "未登录";
       if (settingsProfileMeta) settingsProfileMeta.textContent = currentUser ? ((currentUser.email || "未设置邮箱") + " · " + (formatDateTime(currentUser.created_at) || "未知时间")) : "账户、安全、偏好和数据";
       if (settingsThemeSelect) settingsThemeSelect.value = currentTheme;
+      if (settingsFontScaleSelect) settingsFontScaleSelect.value = fontScale;
       if (settingsCompactLongMessages) settingsCompactLongMessages.checked = compactLongMessages;
+      if (settingsDefaultWebSearch) settingsDefaultWebSearch.checked = defaultWebSearch;
+      if (settingsEnterToSend) settingsEnterToSend.checked = enterToSend;
       if (settingsLocalStorageCount) settingsLocalStorageCount.textContent = String(localStorage.length || 0);
       if (settingsMessageCount) settingsMessageCount.textContent = String((messages || []).length);
       setStatus(settingsProfileStatus, "");
@@ -5897,8 +5993,26 @@
       setStatus(settingsDataStatus, "");
     }
 
+    async function loadAccountSummary() {
+      if (settingsActiveSessionCount) settingsActiveSessionCount.textContent = "...";
+      if (settingsConversationCount) settingsConversationCount.textContent = "...";
+      if (settingsConfigCount) settingsConfigCount.textContent = "...";
+      try {
+        const data = await api("GET", "/api/auth/account-summary");
+        const summary = data.summary || {};
+        if (settingsActiveSessionCount) settingsActiveSessionCount.textContent = String(summary.active_sessions || 0);
+        if (settingsConversationCount) settingsConversationCount.textContent = `${summary.conversations || 0} / ${summary.messages || 0}`;
+        if (settingsConfigCount) settingsConfigCount.textContent = `${summary.api_profiles || 0} / ${summary.system_prompts || 0}`;
+      } catch (_) {
+        if (settingsActiveSessionCount) settingsActiveSessionCount.textContent = "-";
+        if (settingsConversationCount) settingsConversationCount.textContent = "-";
+        if (settingsConfigCount) settingsConfigCount.textContent = "-";
+      }
+    }
+
     function openSettings() {
       populateSettings();
+      loadAccountSummary();
       if (settingsBackdrop) {
         settingsBackdrop.classList.add("open");
         settingsBackdrop.setAttribute("aria-hidden", "false");
@@ -6002,14 +6116,37 @@
 
     function saveSettingsPreferences() {
       const nextTheme = settingsThemeSelect ? settingsThemeSelect.value : currentTheme;
+      const nextFontScale = settingsFontScaleSelect ? settingsFontScaleSelect.value : fontScale;
       compactLongMessages = !!(settingsCompactLongMessages && settingsCompactLongMessages.checked);
+      defaultWebSearch = !!(settingsDefaultWebSearch && settingsDefaultWebSearch.checked);
+      enterToSend = !!(settingsEnterToSend && settingsEnterToSend.checked);
       localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
       localStorage.setItem(COMPACT_LONG_MESSAGES_KEY, compactLongMessages ? "1" : "0");
+      localStorage.setItem(DEFAULT_WEB_SEARCH_KEY, defaultWebSearch ? "1" : "0");
+      localStorage.setItem(ENTER_TO_SEND_KEY, enterToSend ? "1" : "0");
+      localStorage.setItem(FONT_SCALE_KEY, nextFontScale);
       applyTheme(nextTheme);
+      applyFontScale(nextFontScale);
       lastRenderedMsgKey = "";
       renderMessages();
+      renderWebSearchButton();
       populateSettings();
       setStatus(settingsPrefsStatus, "偏好已保存", "good");
+    }
+
+    async function logoutOtherSessionsFromSettings() {
+      if (!settingsLogoutOtherSessionsBtn) return;
+      settingsLogoutOtherSessionsBtn.disabled = true;
+      setStatus(settingsDataStatus, "正在退出其他设备...");
+      try {
+        const data = await api("POST", "/api/auth/logout-other-sessions");
+        await loadAccountSummary();
+        setStatus(settingsDataStatus, `已退出 ${data.closed_sessions || 0} 个其他登录设备`, "good");
+      } catch (e) {
+        setStatus(settingsDataStatus, e.message || String(e), "error");
+      } finally {
+        settingsLogoutOtherSessionsBtn.disabled = false;
+      }
     }
 
     async function logoutCurrentUser() {
@@ -6291,6 +6428,7 @@
     if (settingsSendPasswordCodeBtn) settingsSendPasswordCodeBtn.onclick = sendSettingsPasswordCode;
     if (settingsSavePrefsBtn) settingsSavePrefsBtn.onclick = saveSettingsPreferences;
     if (settingsLogoutBtn) settingsLogoutBtn.onclick = logoutCurrentUser;
+    if (settingsLogoutOtherSessionsBtn) settingsLogoutOtherSessionsBtn.onclick = logoutOtherSessionsFromSettings;
     if (settingsExportBtn) {
       settingsExportBtn.onclick = () => {
         if (!activeConversationId) {
@@ -9518,8 +9656,8 @@
       const protocol = apiProtocol.value || "claude";
       const systemPrompt = activeSystemPromptText();
       setModel(model);
-      const useWebSearch = webSearchEnabled === true;
-      webSearchEnabled = false;
+      const useWebSearch = webSearchEnabled === null ? defaultWebSearch : webSearchEnabled;
+      webSearchEnabled = null;
       renderWebSearchButton();
       activeStreamController = new AbortController();
 
@@ -9941,19 +10079,19 @@
 
     sendBtn.onclick = sendPrompt;
 
-    // 输入框回车只换行，不发送消息。
-    // 发送消息只通过右侧发送按钮触发。
     promptEl.addEventListener("input", updateWelcomeInputState);
 
     promptEl.onkeydown = e => {
-      if (e.key === "Enter") {
-        return;
+      if (e.key === "Enter" && enterToSend && !e.shiftKey) {
+        e.preventDefault();
+        sendPrompt();
       }
     };
 
     if (webSearchBtn) {
       webSearchBtn.onclick = () => {
-        webSearchEnabled = !webSearchEnabled;
+        const active = webSearchEnabled === null ? defaultWebSearch : webSearchEnabled;
+        webSearchEnabled = !active;
         renderWebSearchButton();
       };
     }

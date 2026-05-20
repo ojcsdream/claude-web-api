@@ -38,7 +38,10 @@
       font-weight: 700;
       border: 0;
     }
-    button:disabled { opacity: .55; }
+    button:disabled {
+      opacity: .55;
+      cursor: wait;
+    }
     .wrap {
       max-width: 860px;
       margin: 0 auto;
@@ -79,6 +82,11 @@
       flex-shrink: 0;
       opacity: 0.6;
       padding-top: 2px;
+      transition: opacity .16s ease, transform .16s ease;
+    }
+    .msg:hover .msg-actions {
+      opacity: 0.96;
+      transform: translateY(-1px);
     }
     .small-btn {
       min-width: 28px;
@@ -95,6 +103,21 @@
     .small-btn:active {
       transform: scale(0.94);
       background: rgba(255,255,255,0.14);
+    }
+    .small-btn:focus-visible,
+    .version-toggle-btn:focus-visible {
+      outline: 2px solid rgba(226,111,85,0.58);
+      outline-offset: 2px;
+    }
+    .small-btn.resend-msg {
+      color: #d9c5ad;
+      background: rgba(226,111,85,0.06);
+      border-color: rgba(226,111,85,0.18);
+    }
+    .small-btn.resend-msg:hover {
+      color: #ffe2cc;
+      background: rgba(226,111,85,0.13);
+      border-color: rgba(226,111,85,0.34);
     }
     .small-btn.copied {
       color: #a0c8a0;
@@ -231,6 +254,7 @@
     let messages = [];
     let conversationId = localStorage.getItem("lite_conversation") || "";
     let sending = false;
+    let creatingConversation = false;
     let streamController = null;
 
     function status(text) {
@@ -630,11 +654,25 @@
     }
 
     $("newBtn").onclick = async () => {
-      const data = await api("POST", "/api/conversations", { title: "Lite 对话" });
-      conversationId = data.id;
-      localStorage.setItem("lite_conversation", conversationId);
-      await loadMessages();
-      status("新对话已创建");
+      const newBtn = $("newBtn");
+      if (creatingConversation) return;
+      creatingConversation = true;
+      newBtn.disabled = true;
+      newBtn.textContent = "新建中...";
+
+      try {
+        const data = await api("POST", "/api/conversations", { title: "Lite 对话" });
+        conversationId = data.id;
+        localStorage.setItem("lite_conversation", conversationId);
+        await loadMessages();
+        status("新对话已创建");
+      } catch (e) {
+        status("新建对话失败：" + e.message);
+      } finally {
+        creatingConversation = false;
+        newBtn.disabled = false;
+        newBtn.textContent = "新对话";
+      }
     };
     sendBtn.onclick = send;
     promptEl.addEventListener("keydown", e => {
