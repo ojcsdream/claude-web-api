@@ -10,6 +10,10 @@ from schemas import ApiProfileBody, MessageItem, SystemPromptBody
 
 BASE_DIR = Path(os.environ.get("CLAUDE_WEB_BASE_DIR") or Path(__file__).resolve().parent)
 DB_PATH = Path(os.environ.get("CLAUDE_WEB_DB_PATH") or (BASE_DIR / "chat_multi.db"))
+SINGLE_USER_ID = os.environ.get("CLAUDE_WEB_SINGLE_USER_ID", "").strip()
+SINGLE_USERNAME = os.environ.get("CLAUDE_WEB_SINGLE_USERNAME", "local").strip() or "local"
+SINGLE_EMAIL = os.environ.get("CLAUDE_WEB_SINGLE_EMAIL", "").strip()
+SINGLE_PASSWORD_HASH = os.environ.get("CLAUDE_WEB_SINGLE_PASSWORD_HASH", "!").strip() or "!"
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -22,6 +26,60 @@ def add_column_if_missing(cur, table: str, column: str, definition: str):
         cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     except sqlite3.OperationalError:
         pass
+
+
+def _pick_single_user_row(cur):
+    if SINGLE_USER_ID:
+        row = cur.execute(
+            "SELECT id, username, email, password_hash, created_at FROM users WHERE id=?",
+            (SINGLE_USER_ID,),
+        ).fetchone()
+        if row:
+            return row
+    row = cur.execute(
+        """
+        SELECT users.id, users.username, users.email, users.password_hash, users.created_at
+        FROM users
+        LEFT JOIN conversations ON conversations.user_id = users.id
+        GROUP BY users.id
+        ORDER BY COUNT(conversations.id) DESC, users.created_at ASC
+        LIMIT 1
+        """
+    ).fetchone()
+    if row:
+        return row
+    return None
+
+
+def ensure_single_user_data(cur):
+    row = _pick_single_user_row(cur)
+    if row:
+        single_user_id = row[0]
+    else:
+        single_user_id = SINGLE_USER_ID or new_id()
+        cur.execute(
+            "INSERT INTO users (id, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+            (single_user_id, SINGLE_USERNAME, SINGLE_EMAIL, SINGLE_PASSWORD_HASH, now_ms()),
+        )
+
+    cur.execute("UPDATE conversations SET user_id=? WHERE user_id IS NULL OR user_id<>?", (single_user_id, single_user_id))
+    cur.execute("UPDATE api_profiles SET user_id=? WHERE user_id IS NULL OR user_id<>?", (single_user_id, single_user_id))
+    cur.execute("UPDATE system_prompts SET user_id=? WHERE user_id IS NULL OR user_id<>?", (single_user_id, single_user_id))
+    return single_user_id
+
+
+def db_get_single_user_auth():
+    conn = get_conn()
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    single_user_id = ensure_single_user_data(cur)
+    conn.commit()
+    row = cur.execute(
+        "SELECT id, username, email, password_hash, created_at FROM users WHERE id=?",
+        (single_user_id,),
+    ).fetchone()
+    conn.close()
+    return row
 
 
 def init_db():
@@ -137,6 +195,7 @@ def init_db():
 
     cur.execute("CREATE INDEX IF NOT EXISTS idx_system_prompts_user_updated ON system_prompts(user_id, updated_at)")
 
+    ensure_single_user_data(cur)
     conn.commit()
     conn.close()
 

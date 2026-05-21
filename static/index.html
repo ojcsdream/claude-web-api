@@ -6150,20 +6150,9 @@
     }
 
     async function logoutCurrentUser() {
-      await api("POST", "/api/auth/logout").catch(() => {});
-      currentUser = null;
-      localStorage.removeItem("active_conversation");
-      localStorage.removeItem("active_profile");
-      activeConversationId = null;
-      activeProfileId = "";
-      messages = [];
-      conversations = [];
-      profiles = [];
-      renderProfiles();
-      chatList.innerHTML = '<div class="empty">请先登录</div>';
-      closeSettings();
-      showAuthScreen();
+      return;
     }
+
 
     function clearUiCache() {
       const keepTheme = localStorage.getItem(THEME_STORAGE_KEY) || currentTheme;

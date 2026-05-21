@@ -44,6 +44,7 @@ from db import (
     db_get_messages,
     db_get_messages_before_id,
     db_get_regenerate_history,
+    db_get_single_user_auth,
     db_get_user_auth_by_id,
     db_list_api_profiles,
     db_list_system_prompts,
@@ -124,6 +125,16 @@ EMAIL_CODE_TTL_MS = 1000 * 60 * 10
 EMAIL_CODE_RESEND_COOLDOWN_MS = 1000 * 60
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 AUTH_LOGIN_RESEND_COOLDOWN_MS = 1000 * 10
+SINGLE_USER_ID = os.environ.get("CLAUDE_WEB_SINGLE_USER_ID", "").strip()
+SINGLE_USERNAME = os.environ.get("CLAUDE_WEB_SINGLE_USERNAME", "local").strip() or "local"
+SINGLE_EMAIL = os.environ.get("CLAUDE_WEB_SINGLE_EMAIL", "").strip()
+
+
+def get_single_user():
+    row = db_get_single_user_auth()
+    if row:
+        return dict(row)
+    raise HTTPException(status_code=500, detail="单用户初始化失败")
 
 
 def normalize_username(username: str) -> str:
@@ -213,12 +224,7 @@ def send_verification_email(email: str, code: str):
 
 
 def require_current_user(cw_multi_session: str = Cookie(default="")):
-    if not cw_multi_session:
-        raise HTTPException(status_code=401, detail="请先登录")
-    row = db_get_session_user(cw_multi_session)
-    if not row:
-        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
-    return dict(row)
+    return get_single_user()
 
 
 def require_conversation_owner(conversation_id: str, user_id: str):
@@ -228,7 +234,7 @@ def require_conversation_owner(conversation_id: str, user_id: str):
 
 @app.get("/api/auth/me")
 def auth_me(user=Depends(require_current_user)):
-    return {"ok": True, "user": public_user(user)}
+    return {"ok": True, "user": public_user(user), "single_user_mode": True}
 
 
 def validate_username_or_raise(username: str):
