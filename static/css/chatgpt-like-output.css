@@ -1,13 +1,16 @@
 .chatgpt-like-cursor {
   display: inline-block;
-  margin-left: 2px;
+  width: 0.16em;
+  height: 1.02em;
+  margin-left: 0.08em;
   line-height: 1;
-  color: currentColor;
-  opacity: 0.9;
+  color: rgba(255, 246, 220, 0.78);
+  opacity: 0.72;
   transform-origin: center bottom;
   animation:
-    chatgpt-like-cursor-blink 1.22s ease-in-out infinite,
-    chatgpt-like-cursor-glow 2.8s ease-in-out infinite;
+    chatgpt-like-cursor-blink 1.5s ease-in-out infinite,
+    chatgpt-like-cursor-glow 3.2s ease-in-out infinite,
+    chatgpt-like-cursor-float 2.1s ease-in-out infinite;
 }
 
 @keyframes chatgpt-like-cursor-blink {
@@ -30,75 +33,111 @@
   }
 }
 
+@keyframes chatgpt-like-cursor-float {
+  0%, 100% {
+    transform: translateY(0) scaleY(1);
+  }
+  50% {
+    transform: translateY(-0.03em) scaleY(1.03);
+  }
+}
+
 .chatgpt-like-token,
 .flowtoken-token {
   display: inline-block;
   animation:
-    chatgpt-like-token-rise 920ms cubic-bezier(0.14, 1, 0.3, 1) both,
-    chatgpt-like-token-focus 820ms cubic-bezier(0.22, 1, 0.36, 1) both,
-    chatgpt-like-token-glow 1080ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay:
-    var(--chatgpt-like-token-delay, var(--flowtoken-delay, 0ms)),
-    var(--chatgpt-like-token-delay, var(--flowtoken-delay, 0ms)),
-    var(--chatgpt-like-token-delay, var(--flowtoken-delay, 0ms));
-  will-change: opacity, transform, filter, text-shadow;
+    chatgpt-like-token-soft-fade 260ms linear both,
+    chatgpt-like-token-soft-bloom 620ms ease-out both;
+  will-change: opacity, filter, text-shadow;
   transform-origin: 50% 85%;
 }
 
-@keyframes chatgpt-like-token-rise {
-  0% {
+.flowtoken-diff-token {
+  display: inline;
+  white-space: pre-wrap;
+}
+
+@keyframes ft-blurAndSharpen {
+  from {
+    filter: blur(5px);
     opacity: 0;
-    transform: translate3d(0, 0.38em, 0) scale(0.985);
   }
-  34% {
-    opacity: 0.66;
-    transform: translate3d(0, -0.024em, 0) scale(1.003);
+  to {
+    filter: blur(0);
+    opacity: 1;
   }
-  70% {
-    opacity: 0.985;
-    transform: translate3d(0, 0.014em, 0) scale(1.001);
+}
+
+@keyframes ft-slideUp {
+  from {
+    transform: translateY(10%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes chatgpt-like-token-soft-fade {
+  0% {
+    opacity: 0.12;
   }
   100% {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
-@keyframes chatgpt-like-token-focus {
+@keyframes chatgpt-like-token-soft-bloom {
   0% {
-    filter: blur(2.5px) saturate(1.08);
+    filter: blur(2px) brightness(1.08);
+    text-shadow: 0 0 0 rgba(255, 246, 220, 0);
   }
-  46% {
-    filter: blur(0.6px) saturate(1.02);
-  }
-  100% {
-    filter: blur(0) saturate(1);
-  }
-}
-
-@keyframes chatgpt-like-token-glow {
-  0% {
-    text-shadow: 0 0 0 rgba(230, 220, 202, 0);
-  }
-  30% {
+  45% {
+    filter: blur(0.5px) brightness(1.02);
     text-shadow:
-      0 0 6px rgba(255, 246, 220, 0.18),
-      0 0 12px rgba(177, 149, 96, 0.12),
-      0 0 18px rgba(255, 214, 142, 0.055);
+      0 0 6px rgba(255, 246, 220, 0.16),
+      0 0 12px rgba(177, 149, 96, 0.08);
   }
   100% {
-    text-shadow: 0 0 0 rgba(230, 220, 202, 0);
+    filter: blur(0) brightness(1);
+    text-shadow: 0 0 0 rgba(255, 246, 220, 0);
   }
 }
 
 .chatgpt-like-streaming {
+  position: relative;
+  overflow: hidden;
   animation:
-    chatgpt-like-streaming-breath 4.4s ease-in-out infinite,
-    chatgpt-like-streaming-presence 1.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+    chatgpt-like-streaming-presence 220ms linear both,
+    chatgpt-like-streaming-aura 2.4s ease-in-out infinite;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 246, 220, 0.035),
+    0 0 22px rgba(255, 246, 220, 0.045);
+}
+
+.chatgpt-like-streaming::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    rgba(255, 246, 220, 0) 0%,
+    rgba(255, 246, 220, 0.02) 45%,
+    rgba(255, 246, 220, 0.06) 50%,
+    rgba(255, 246, 220, 0.02) 55%,
+    rgba(255, 246, 220, 0) 100%
+  );
+  transform: translateX(-120%);
+  animation: chatgpt-like-streaming-sheen 2.8s ease-in-out infinite;
 }
 
 .chatgpt-like-streaming .stream-active {
-  animation: chatgpt-like-stream-active-settle 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation:
+    chatgpt-like-stream-active-settle 260ms ease-out both,
+    chatgpt-like-stream-active-breathe 1.8s ease-in-out infinite,
+    chatgpt-like-stream-active-fadeup 420ms ease-out both;
   transform-origin: left bottom;
 }
 
@@ -106,48 +145,66 @@
   filter: drop-shadow(0 0 6px rgba(255, 246, 220, 0.2));
 }
 
-@keyframes chatgpt-like-streaming-breath {
-  0%, 100% {
-    text-shadow: 0 0 0 rgba(255, 246, 220, 0);
+@keyframes chatgpt-like-streaming-presence {
+  0% {
+    opacity: 0.975;
   }
-  42% {
-    text-shadow: 0 0 9px rgba(255, 246, 220, 0.06);
-  }
-  68% {
-    text-shadow: 0 0 3px rgba(255, 246, 220, 0.022);
+  100% {
+    opacity: 1;
   }
 }
 
-@keyframes chatgpt-like-streaming-presence {
-  0% {
-    filter: saturate(1);
+@keyframes chatgpt-like-streaming-aura {
+  0%, 100% {
+    filter: saturate(1) brightness(1);
   }
-  40% {
-    filter: saturate(1.04);
+  50% {
+    filter: saturate(1.018) brightness(1.012);
   }
-  68% {
-    filter: saturate(1.015);
+}
+
+@keyframes chatgpt-like-streaming-sheen {
+  0%, 62% {
+    transform: translateX(-120%);
+    opacity: 0;
   }
-  100% {
-    filter: saturate(1);
+  70% {
+    opacity: 1;
+  }
+  88%, 100% {
+    transform: translateX(120%);
+    opacity: 0;
   }
 }
 
 @keyframes chatgpt-like-stream-active-settle {
   0% {
-    opacity: 0.9;
-    filter: blur(1.35px);
-    transform: translate3d(0, 0.12em, 0);
-  }
-  48% {
-    opacity: 1;
-    filter: blur(0.45px);
-    transform: translate3d(0, -0.014em, 0);
+    opacity: 0.82;
+    transform: translate3d(0, 0.08em, 0);
   }
   100% {
     opacity: 1;
-    filter: blur(0);
     transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes chatgpt-like-stream-active-breathe {
+  0%, 100% {
+    text-shadow: 0 0 0 rgba(255, 246, 220, 0);
+  }
+  50% {
+    text-shadow: 0 0 8px rgba(255, 246, 220, 0.06);
+  }
+}
+
+@keyframes chatgpt-like-stream-active-fadeup {
+  0% {
+    opacity: 0.78;
+    transform: translateY(0.08em);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
