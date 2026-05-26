@@ -52,6 +52,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+  <script defer src="/static/js/stream-output-renderer.js"></script>
   <script defer src="/static/js/chatgpt-like-output.js"></script>
 
   <style>
@@ -2075,19 +2076,19 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      animation: thinkingTextBreath 4.8s ease-in-out infinite;
+      animation: thinkingTextBreath 2.6s ease-in-out infinite;
     }
 
     .thinking-status::before {
       content: "";
-      width: 12px;
-      height: 12px;
+      width: 14px;
+      height: 14px;
       border-radius: 999px;
       background:
         radial-gradient(circle at 38% 34%, rgba(255, 255, 255, 0.96), rgba(234, 230, 222, 0.74) 42%, rgba(174, 168, 158, 0.34) 70%);
-      box-shadow: 0 0 0 0 rgba(232, 226, 216, 0.16), 0 0 18px rgba(232, 226, 216, 0.18);
+      box-shadow: 0 0 0 0 rgba(232, 226, 216, 0.22), 0 0 24px rgba(232, 226, 216, 0.3);
       flex: 0 0 auto;
-      animation: thinkingDotBreath 4.2s cubic-bezier(.45, 0, .25, 1) infinite;
+      animation: thinkingDotBreath 1.55s cubic-bezier(.45, 0, .25, 1) infinite;
       will-change: transform, opacity;
     }
 
@@ -2191,7 +2192,7 @@
       font-style: italic;
       font-weight: 520;
       letter-spacing: 0.015em;
-      animation: thinkingWordGlow 4.8s cubic-bezier(.45, 0, .25, 1) infinite;
+      animation: thinkingWordGlow 2.8s cubic-bezier(.45, 0, .25, 1) infinite;
       will-change: opacity;
     }
 
@@ -2224,28 +2225,28 @@
 
     @keyframes thinkingDotBreath {
       0%, 100% {
-        transform: scale(0.76);
-        opacity: 0.46;
+        transform: scale(0.72);
+        opacity: 0.42;
       }
-      42% {
-        transform: scale(1.08);
-        opacity: 0.9;
+      38% {
+        transform: scale(1.18);
+        opacity: 1;
       }
-      68% {
-        transform: scale(0.94);
-        opacity: 0.62;
+      66% {
+        transform: scale(0.9);
+        opacity: 0.72;
       }
     }
 
     @keyframes thinkingWordGlow {
-      0%, 100% { opacity: 0.5; color: #999188; }
-      44% { opacity: 0.9; color: #d4ccbf; }
-      72% { opacity: 0.66; color: #b7aea3; }
+      0%, 100% { opacity: 0.48; color: #999188; }
+      40% { opacity: 1; color: #e2d8c9; }
+      72% { opacity: 0.72; color: #c1b7aa; }
     }
 
     @keyframes thinkingTextBreath {
-      0%, 100% { opacity: 0.72; }
-      48% { opacity: 0.94; }
+      0%, 100% { opacity: 0.66; }
+      48% { opacity: 1; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -2924,6 +2925,26 @@
       margin-bottom: 9px;
     }
 
+    @keyframes new-conv-spin { to { transform: rotate(360deg); } }
+    .new-conv-icon.loading {
+      pointer-events: none;
+      opacity: 0.7;
+    }
+    .new-conv-icon.loading::after {
+      content: '';
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: new-conv-spin 0.6s linear infinite;
+      vertical-align: middle;
+    }
+    .new-conv-icon.loading .btn-label {
+      display: none;
+    }
+
     .new-conv-icon {
       width: 42px;
       min-height: 38px;
@@ -2990,6 +3011,22 @@
       background: rgba(255,255,255,0.035);
       border-radius: 10px;
       padding: 9px;
+      transition: background-color 0.24s ease, border-color 0.24s ease, box-shadow 0.24s ease, transform 0.24s ease;
+    }
+
+    .system-prompt-item:hover {
+      border-color: rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05);
+    }
+
+    .system-prompt-item:active {
+      transform: translateY(1px);
+    }
+
+    .system-prompt-item.active {
+      background: rgba(240, 223, 189, 0.09);
+      border-color: rgba(240, 223, 189, 0.24);
+      box-shadow: 0 10px 24px rgba(38, 28, 18, 0.12);
     }
 
     .system-prompt-row {
@@ -3016,11 +3053,13 @@
       max-height: 38px;
       overflow: hidden;
       cursor: pointer;
+      transition: max-height 0.22s ease, color 0.22s ease, opacity 0.22s ease;
     }
 
     .system-prompt-preview.open {
       max-height: none;
       white-space: pre-wrap;
+      color: #cfc6b8;
     }
 
     .switch-btn {
@@ -3031,6 +3070,8 @@
       background: rgba(255,255,255,0.13);
       padding: 3px;
       cursor: pointer;
+      transition: background-color 0.24s ease, box-shadow 0.24s ease, transform 0.16s ease;
+      will-change: transform;
     }
 
     .switch-btn::after {
@@ -3040,16 +3081,42 @@
       height: 20px;
       border-radius: 999px;
       background: #a9a197;
-      transition: transform 0.18s, background 0.18s;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 6px 12px rgba(0, 0, 0, 0.14);
+      transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.24s ease, box-shadow 0.24s ease;
+      will-change: transform;
     }
 
     .switch-btn.on {
       background: rgba(238, 221, 190, 0.24);
+      box-shadow: inset 0 0 0 1px rgba(240, 223, 189, 0.14);
     }
 
     .switch-btn.on::after {
       transform: translateX(20px);
       background: #f0dfbd;
+      box-shadow: 0 2px 4px rgba(90, 61, 28, 0.2), 0 8px 16px rgba(90, 61, 28, 0.14);
+    }
+
+    .switch-btn:active {
+      transform: scale(0.96);
+    }
+
+    .switch-btn.pending {
+      pointer-events: none;
+      opacity: 0.92;
+      box-shadow: 0 0 0 3px rgba(240, 223, 189, 0.08);
+    }
+
+    .switch-btn.pending::after {
+      transition-duration: 0.3s;
+    }
+
+    .switch-btn.pending.on::after {
+      transform: translateX(20px) scale(1.04);
+    }
+
+    .switch-btn.pending:not(.on)::after {
+      transform: translateX(0) scale(0.96);
     }
 
     .system-prompt-actions {
@@ -4342,6 +4409,26 @@
     border-color: rgba(255, 194, 104, 0.46) !important;
     color: #fff0cf !important;
   }
+
+  html[data-theme="light"] .msg-nav-float-btn {
+    background: rgba(250, 246, 238, 0.78);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: rgba(80, 70, 55, 0.6);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  }
+  html[data-theme="light"] .msg-nav-float-btn:active {
+    background: rgba(235, 228, 214, 0.94);
+    border-color: rgba(0, 0, 0, 0.16);
+    color: rgba(40, 32, 20, 0.88);
+  }
+  @media (hover: hover) {
+    html[data-theme="light"] .msg-nav-float-btn:hover {
+      background: rgba(240, 234, 220, 0.92);
+      border-color: rgba(0, 0, 0, 0.16);
+      color: rgba(40, 32, 20, 0.85);
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.1);
+    }
+  }
 </style>
 
 <style id="math-and-rich-text-style">
@@ -4584,6 +4671,10 @@
     --welcome-card-width: 372px;
     --welcome-hero-top: clamp(132px, 22vh, 180px);
     --welcome-composer-offset: 98px;
+  }
+
+  body.welcome-mode .msg-nav-float {
+    display: none !important;
   }
 
   body.welcome-mode .topbar {
@@ -4895,6 +4986,93 @@
 
   body.welcome-mode.has-input .voice-icon {
     display: none;
+  }
+
+  .msg-nav-float {
+    position: fixed;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    z-index: 30;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 1;
+    transition: opacity 0.38s ease;
+  }
+
+  .msg-nav-float.nav-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+  }
+
+  .msg-nav-float-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    border: 1px solid rgba(232, 220, 200, 0.14);
+    background: rgba(28, 24, 20, 0.82);
+    color: rgba(220, 210, 190, 0.78);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .msg-nav-float-btn svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+    opacity: 0.75;
+    transition: opacity 0.2s ease;
+  }
+
+  .msg-nav-float-btn:active {
+    background: rgba(42, 38, 32, 0.94);
+    border-color: rgba(232, 220, 200, 0.24);
+    color: rgba(255, 248, 232, 0.95);
+    transform: scale(0.94);
+  }
+
+  .msg-nav-float-btn:active svg {
+    opacity: 1;
+  }
+
+  @media (hover: hover) {
+    .msg-nav-float-btn:hover {
+      background: rgba(42, 38, 32, 0.92);
+      border-color: rgba(232, 220, 200, 0.22);
+      color: rgba(255, 248, 232, 0.92);
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+    }
+
+    .msg-nav-float-btn:hover svg {
+      opacity: 1;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .msg-nav-float {
+      right: 12px;
+      gap: 12px;
+    }
+
+    .msg-nav-float-btn {
+      width: 36px;
+      height: 36px;
+    }
+
+    .msg-nav-float-btn svg {
+      width: 15px;
+      height: 15px;
+    }
   }
 
   @keyframes welcomeComposerIn {
@@ -5350,7 +5528,7 @@
 
       <div class="toolbar">
         <label id="plusBtn" class="plus-btn" for="fileInput" role="button" tabindex="0" aria-label="上传文件">+</label>
-        <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf" />
+        <input id="fileInput" type="file" multiple accept=".txt,.md,.py,.js,.ts,.json,.log,.yaml,.yml,.toml,.csv,.xml,.html,.css,.c,.cpp,.h,.java,.go,.rs,.php,.sh,.sql,.ini,.conf,.env,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.ods,.odp,.rtf" />
         <button id="modelPill" class="model-pill">Opus 4.7⌄</button>
         <button id="webSearchBtn" class="web-search-btn" type="button" title="强制联网搜索">⌕</button>
         <button id="sendBtn" class="send-btn" aria-label="发送消息">
@@ -5366,6 +5544,15 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <div class="msg-nav-float" id="msgNavFloat">
+    <button class="msg-nav-float-btn" id="navPrevFloatBtn" type="button" aria-label="上一条消息" title="上一条消息">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+    </button>
+    <button class="msg-nav-float-btn" id="navNextFloatBtn" type="button" aria-label="下一条消息" title="下一条消息">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
   </div>
 
   <div id="codePreviewBackdrop" class="code-preview-backdrop" aria-hidden="true">
@@ -5712,7 +5899,8 @@
     const FONT_SCALE_KEY = "claude_web_font_scale";
     let currentTheme = localStorage.getItem(THEME_STORAGE_KEY) || "dark";
     let compactLongMessages = localStorage.getItem(COMPACT_LONG_MESSAGES_KEY) === "1";
-    let defaultWebSearch = localStorage.getItem(DEFAULT_WEB_SEARCH_KEY) === "1";
+    let defaultWebSearch = localStorage.getItem(DEFAULT_WEB_SEARCH_KEY);
+    defaultWebSearch = defaultWebSearch === null ? true : defaultWebSearch === "1";
     let enterToSend = localStorage.getItem(ENTER_TO_SEND_KEY) === "1";
     let fontScale = localStorage.getItem(FONT_SCALE_KEY) || "normal";
 
@@ -6478,7 +6666,7 @@
 
       systemPrompts.forEach(item => {
         const wrap = document.createElement("div");
-        wrap.className = "system-prompt-item";
+        wrap.className = "system-prompt-item" + (item.enabled ? " active" : "");
 
         const row = document.createElement("div");
         row.className = "system-prompt-row";
@@ -6492,12 +6680,27 @@
         toggle.className = "switch-btn" + (item.enabled ? " on" : "");
         toggle.title = item.enabled ? "关闭系统提示词" : "开启系统提示词";
         toggle.onclick = async () => {
-          await api("POST", `/api/system-prompts/${item.id}/enabled`, {
-            title: item.title || "系统提示词",
-            content: item.content || "",
-            enabled: !item.enabled
-          });
-          await loadSystemPrompts();
+          const nextEnabled = !item.enabled;
+          wrap.classList.toggle("active", nextEnabled);
+          toggle.classList.toggle("on", nextEnabled);
+          toggle.classList.add("pending");
+          toggle.title = nextEnabled ? "关闭系统提示词" : "开启系统提示词";
+          try {
+            await api("POST", `/api/system-prompts/${item.id}/enabled`, {
+              title: item.title || "系统提示词",
+              content: item.content || "",
+              enabled: nextEnabled
+            });
+            item.enabled = nextEnabled;
+            await loadSystemPrompts();
+          } catch (err) {
+            wrap.classList.toggle("active", item.enabled);
+            toggle.classList.toggle("on", item.enabled);
+            toggle.title = item.enabled ? "关闭系统提示词" : "开启系统提示词";
+            throw err;
+          } finally {
+            toggle.classList.remove("pending");
+          }
         };
 
         const edit = document.createElement("button");
@@ -6522,6 +6725,7 @@
     }
 
     async function loadSystemPrompts() {
+      const scrollTop = systemPromptList ? systemPromptList.scrollTop : 0;
       const data = await api("GET", "/api/system-prompts");
       systemPrompts = data.prompts || [];
       if (!systemPrompts.find(p => p.id === activeSystemPromptId)) {
@@ -6529,6 +6733,7 @@
         activeSystemPromptId = enabled ? enabled.id : (systemPrompts[0] ? systemPrompts[0].id : "");
       }
       renderSystemPrompts();
+      if (systemPromptList) systemPromptList.scrollTop = scrollTop;
     }
 
     function openSystemPromptEditor(item = null) {
@@ -6947,7 +7152,18 @@
 
     function splitStableStreamingMarkdown(text) {
       const src = String(text || "");
-      const splitAt = [findLastUnclosedMathDelimiter(src), findLastUnclosedInlineMarkdown(src)]
+      let inlineCode = -1;
+      const fenceStart = findLastUnclosedFence(src);
+      const scanEnd = fenceStart === -1 ? src.length : fenceStart;
+      const codeRanges = getClosedFenceRanges(src, scanEnd);
+
+      for (let i = 0; i < scanEnd; i += 1) {
+        if (isInsideRanges(i, codeRanges)) continue;
+        if (src[i] !== "`" || src.startsWith("```", i)) continue;
+        inlineCode = inlineCode === -1 ? i : -1;
+      }
+
+      const splitAt = [findLastUnclosedMathDelimiter(src), inlineCode]
         .filter(pos => pos >= 0)
         .sort((a, b) => a - b)[0];
       if (splitAt === undefined) {
@@ -7559,7 +7775,9 @@
     }
 
     const STREAM_STATUS_RE = /\[\[STATUS:([a-z_]+)\]\]/gi;
-    const STREAM_SOURCES_RE = /\[\[SOURCES:([\s\S]*?)\]\]/gi;
+    const STREAM_SOURCES_RE = /\[\[SOURCES:([\s\S]*?)\]\]\]/gi;
+    const STREAM_PARTIAL_MARKER_RE = /\[\[(?:STATUS|SOURCES):?[\s\S]*$/i;
+    const STREAM_REGENERATE_DEBUG_RE = /^【重新回答｜视觉直连｜图片数:\s*\d+｜模型:\s*[^｜]+｜接入商:\s*[^】]+】\s*(?:\n\s*)*/;
     const STATUS_LABELS = {
       parsing: "网页解析中",
       planning_search: "规划搜索中",
@@ -7897,20 +8115,29 @@
 
     function stripStreamingStatusMarkers(text) {
       const nextStatuses = [];
-      const withoutSources = String(text || "").replace(STREAM_SOURCES_RE, (_, raw) => {
-        try {
-          const parsed = JSON.parse(raw);
-          activeStreamingSources = Array.isArray(parsed) ? parsed : [];
-        } catch (e) {}
-        return "";
-      });
+      let withoutSources = String(text || "");
+      const sourceMarker = "[[SOURCES:";
+      const sourceIndex = withoutSources.indexOf(sourceMarker);
+      if (sourceIndex !== -1) {
+        const sourceEnd = withoutSources.indexOf("]]]", sourceIndex + sourceMarker.length);
+        if (sourceEnd !== -1) {
+          const raw = withoutSources.slice(sourceIndex + sourceMarker.length, sourceEnd + 1);
+          try {
+            const parsed = JSON.parse(raw);
+            activeStreamingSources = Array.isArray(parsed) ? parsed : [];
+          } catch (e) {}
+          withoutSources = withoutSources.slice(0, sourceIndex) + withoutSources.slice(sourceEnd + 3);
+        } else {
+          withoutSources = withoutSources.slice(0, sourceIndex);
+        }
+      }
       const cleaned = withoutSources.replace(STREAM_STATUS_RE, (_, name) => {
         const key = String(name || "").trim().toLowerCase();
         if (key && !nextStatuses.includes(key)) nextStatuses.push(key);
         return "";
-      });
+      }).replace(STREAM_PARTIAL_MARKER_RE, "").replace(STREAM_REGENERATE_DEBUG_RE, "");
       activeToolStatuses = nextStatuses;
-      return cleaned.replace(/^\s+/, "");
+      return cleaned.replace(/^\s+/, "").replace(/\s+$/, "");
     }
 
     function injectCitationMarkers(root, sources) {
@@ -8391,6 +8618,39 @@
     let streamingMathTypesetQueued = false;
     let streamingFinalFlushPending = false;
     let pendingSentMessageAnimationKey = "";
+    let streamingContextKey = "";
+    let streamOutputRenderer = null;
+    let thinkingVisibleUntil = 0;
+
+    function getStreamingOutputContextKey() {
+      const userId = currentUser && currentUser.id ? String(currentUser.id) : "guest";
+      const conversationId = activeConversationId ? String(activeConversationId) : "none";
+      return userId + "|" + conversationId;
+    }
+
+    function ensureStreamOutputRenderer() {
+      const nextKey = getStreamingOutputContextKey();
+      if (!window.CodexStreamOutput || typeof window.CodexStreamOutput.createRenderer !== "function") return null;
+      if (!streamOutputRenderer) {
+        streamOutputRenderer = window.CodexStreamOutput.createRenderer({
+          getContextKey: () => getStreamingOutputContextKey(),
+          queueStreamingMathTypeset: queueStreamingMathTypesetLight
+        });
+      }
+      streamingContextKey = nextKey;
+      return streamOutputRenderer;
+    }
+
+    function syncStreamingOutputContext() {
+      const nextKey = getStreamingOutputContextKey();
+      if (nextKey !== streamingContextKey) {
+        streamingContextKey = nextKey;
+        if (streamOutputRenderer && typeof streamOutputRenderer.reset === "function") {
+          streamOutputRenderer.reset(nextKey);
+        }
+      }
+      return ensureStreamOutputRenderer();
+    }
     function getLastAssistantBubble() {
       const assistantWraps = chatList.querySelectorAll(".msg-wrap.assistant");
       if (!assistantWraps.length) return null;
@@ -8410,10 +8670,11 @@
       return `<div class="streaming-plain-text">${escapeHtml(text || "")}</div>`;
     }
 
-    const FLOWTOKEN_RECENT_CHARS = 220;
-    const FLOWTOKEN_MAX_DELAY = 160;
-    const FLOWTOKEN_TOKEN_DELAY = 22;
-    const STREAM_STABLE_MIN_ACTIVE_CHARS = 44;
+    const FLOWTOKEN_RECENT_CHARS = 140;
+    const FLOWTOKEN_MAX_DELAY = 120;
+    const FLOWTOKEN_TOKEN_DELAY = 16;
+    const STREAM_STABLE_MIN_ACTIVE_CHARS = 32;
+    const STREAM_ACTIVE_TAIL_CHARS = 160;
 
     function findStableStreamingCut(text) {
       const src = String(text || "");
@@ -8446,21 +8707,49 @@
       return cut;
     }
 
+    function findStreamingActiveTailStart(text) {
+      const src = String(text || "");
+      if (src.length <= STREAM_ACTIVE_TAIL_CHARS) return 0;
+
+      const preferredStart = Math.max(0, src.length - STREAM_ACTIVE_TAIL_CHARS);
+      const codeRanges = getClosedFenceRanges(src, src.length);
+      const boundaryPatterns = [
+        /\n\n+(?=\S)/g,
+        /\n(?=#{1,6}\s)/g,
+        /\n(?=(?:[-*+]|\d+\.)\s)/g,
+        /\n(?=>\s)/g,
+        /[.!?。！？]["')\]]?\s+(?=\S)/g
+      ];
+      let best = preferredStart;
+
+      boundaryPatterns.forEach(pattern => {
+        let match;
+        while ((match = pattern.exec(src))) {
+          if (isInsideRanges(match.index, codeRanges)) continue;
+          const candidate = match.index + match[0].length;
+          if (candidate >= preferredStart - 96 && candidate <= preferredStart + 120) {
+            best = candidate;
+          }
+        }
+      });
+
+      return Math.max(0, Math.min(src.length, best));
+    }
+
     function renderStreamingMarkdownSegmented(text, animateFrom = 0) {
       const src = String(text || "");
-      const stableCut = findStableStreamingCut(src);
-      const stable = stableCut > 0 ? src.slice(0, stableCut) : "";
-      const active = stableCut > 0 ? src.slice(stableCut) : src;
-      let html = stable ? `<div class="stream-stable">${renderMarkdown(stable)}</div>` : "";
-      let activeHtml = renderStreamingMarkdown(active);
+      const split = splitStableStreamingMarkdown(src);
+      const stableBase = split.stable || "";
+      const activeTailStart = findStreamingActiveTailStart(stableBase);
+      const stableSource = stableBase.slice(0, activeTailStart);
+      const activeSource = stableBase.slice(activeTailStart) + (split.pending || "");
+      const stableHtml = stableSource ? renderMarkdown(stableSource) : "";
+      const activeHtml = activeSource ? renderStreamingMarkdown(activeSource) : "";
 
-      if (activeHtml) {
-        const activeAnimateFrom = Math.max(0, animateFrom - stable.length);
-        activeHtml = applyFlowTokenTypewriter(activeHtml, active, activeAnimateFrom);
-        html += `<div class="stream-active">${activeHtml}</div>`;
-      }
-
-      return html;
+      return [
+        stableHtml ? `<div class="stream-stable">${stableHtml}</div>` : "",
+        activeHtml ? `<div class="stream-active"><div class="stream-active-inner">${activeHtml}</div></div>` : ""
+      ].join("");
     }
 
     function shouldSkipFlowTokenNode(node) {
@@ -8479,10 +8768,7 @@
 
         const span = document.createElement("span");
         span.className = "chatgpt-like-token";
-        span.style.setProperty(
-          "--chatgpt-like-token-delay",
-          Math.min(FLOWTOKEN_MAX_DELAY, tokenState.index * FLOWTOKEN_TOKEN_DELAY) + "ms"
-        );
+        span.style.setProperty("--chatgpt-like-token-delay", Math.min(FLOWTOKEN_MAX_DELAY, tokenState.index * FLOWTOKEN_TOKEN_DELAY) + "ms");
         span.textContent = part;
         tokenState.index += 1;
         fragment.appendChild(span);
@@ -8501,9 +8787,7 @@
       const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT, {
         acceptNode(node) {
           if (shouldSkipFlowTokenNode(node)) return NodeFilter.FILTER_REJECT;
-          return (node.nodeValue || "").trim()
-            ? NodeFilter.FILTER_ACCEPT
-            : NodeFilter.FILTER_SKIP;
+          return (node.nodeValue || "").trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
         }
       });
       const nodes = [];
@@ -8532,15 +8816,28 @@
     }
 
     function buildAssistantBubbleHtml(text, sources, finalRender, showCaret, animateFrom = null) {
-      let contentHtml = finalRender
-        ? renderMarkdown(text)
-        : renderStreamingMarkdownSegmented(text, animateFrom);
-      let html = (finalRender ? "" : renderThinkingHtml()) + renderToolStatusesHtml() + contentHtml;
+      const cleanText = String(text || "");
+      const hasActiveToolStatuses = typeof activeToolStatuses !== "undefined" && Array.isArray(activeToolStatuses) && activeToolStatuses.length > 0;
+      const visibleUntil = typeof thinkingVisibleUntil === "number" ? thinkingVisibleUntil : 0;
+      const keepThinkingVisible = !finalRender && Date.now() < visibleUntil;
+      const showThinkingPanel = !finalRender && (
+        hasActiveToolStatuses
+        || keepThinkingVisible
+        || !cleanText.trim()
+        || cleanText.trim() === "思考中..."
+        || cleanText.trim().length < 240
+      );
+      const contentHtml = finalRender
+        ? renderMarkdown(cleanText)
+        : (typeof renderStreamingMarkdownSegmented === "function"
+          ? renderStreamingMarkdownSegmented(cleanText, animateFrom)
+          : renderStreamingMarkdown(cleanText));
+      let html = (showThinkingPanel ? renderThinkingHtml() : "") + renderToolStatusesHtml() + contentHtml;
       html += renderSourcesStrip(sources);
-      if (showCaret && text.trim() && text.trim() !== "思考中...") {
+      if (showCaret && cleanText.trim() && cleanText.trim() !== "思考中...") {
         html += '<span class="chatgpt-like-cursor">▍</span>';
       }
-      if (!finalRender && text.trim() && text.trim() !== "思考中...") {
+      if (!finalRender && cleanText.trim() && cleanText.trim() !== "思考中...") {
         html += '<div class="answer-meta stream-meta-placeholder" aria-hidden="true">streaming</div>';
       }
       return html;
@@ -8559,7 +8856,10 @@
 
     function commitAssistantBubbleHtml(bubble, html, sources, finalRender) {
       if (!bubble) return;
-      bubble.classList.toggle("chatgpt-like-streaming", !finalRender);
+      if (bubble.classList && typeof bubble.classList.toggle === "function") {
+        bubble.classList.toggle("chatgpt-like-streaming", !finalRender);
+        bubble.classList.toggle("codex-streaming-output", !finalRender);
+      }
       if (bubble.innerHTML === html) {
         prepareAssistantBubbleDom(bubble, sources, finalRender);
         return;
@@ -8623,6 +8923,7 @@
 
     function renderAssistantContentIntoBubble(bubble, content, finalRender = false, showCaret = false, animateFrom = null) {
       if (!bubble) return false;
+      const renderer = syncStreamingOutputContext();
 
       const text = stripStreamingStatusMarkers(content || "");
       const lastAssistantMsg = getLastAssistantMessage();
@@ -8637,39 +8938,22 @@
         return true;
       }
 
-      // 保存当前滚动位置和页面高度
-      const scrollBefore = getScrollTop();
-      const heightBefore = getPageHeight();
-      const wasNearBottom = isNearBottom(AUTO_SCROLL_THRESHOLD);
+      if (renderer && typeof renderer.render === "function") {
+        renderer.render(bubble, text, {
+          finalRender,
+          showCaret,
+          animateFrom,
+          sources
+        });
+        return true;
+      }
 
       const html = buildAssistantBubbleHtml(text, sources, finalRender, showCaret, animateFrom);
-      const needsBufferedMath = finalRender && hasRenderableMathInHtml(html);
-      let committedNow = false;
-
-      if (needsBufferedMath) {
-        renderAssistantBubbleBuffered(bubble, text, sources, finalRender, showCaret, animateFrom);
-      } else {
-        commitAssistantBubbleHtml(bubble, html, sources, finalRender);
-        if (!finalRender) {
-          revealPendingMathSources(bubble);
-          queueStreamingMathTypesetLight(bubble, text.length);
-        }
-        committedNow = true;
+      commitAssistantBubbleHtml(bubble, html, sources, finalRender);
+      if (!finalRender) {
+        revealPendingMathSources(bubble);
+        queueStreamingMathTypesetLight(bubble, text.length);
       }
-
-      // 渲染后，如果用户不在底部且内容高度变化了，保持滚动位置
-      const heightAfter = getPageHeight();
-      const heightDiff = heightAfter - heightBefore;
-
-      if (committedNow && !wasNearBottom && heightDiff > 0 && Math.abs(heightDiff) > 5) {
-        requestAnimationFrame(() => {
-          window.scrollTo({
-            top: scrollBefore,
-            behavior: 'auto'
-          });
-        });
-      }
-
       return true;
     }
 
@@ -8819,12 +9103,12 @@
     }
 
     function getTypewriterBurstSize(remaining) {
-      if (remaining > 1800) return 28;
-      if (remaining > 900) return 20;
-      if (remaining > 480) return 14;
-      if (remaining > 220) return 9;
-      if (remaining > 80) return 5;
-      return 2;
+      if (remaining > 2400) return 34;
+      if (remaining > 1400) return 28;
+      if (remaining > 800) return 22;
+      if (remaining > 360) return 16;
+      if (remaining > 120) return 10;
+      return 3;
     }
 
     function getNextTypewriterSlice() {
@@ -8876,13 +9160,13 @@
       const chunk = source.slice(start, end);
       const last = chunk[chunk.length - 1] || "";
 
-      let delay = 12;
-      if (isLineBreak(last)) delay = 10;
-      else if (isWhitespace(last)) delay = 8;
-      else if (isCjkChar(last)) delay = 12;
-      else if (isAsciiWordChar(last)) delay = 12;
-      else if (isSoftPunctuation(last)) delay = 16;
-      else if (isHardPunctuation(last)) delay = 22;
+      let delay = 7;
+      if (isLineBreak(last)) delay = 5;
+      else if (isWhitespace(last)) delay = 4;
+      else if (isCjkChar(last)) delay = 7;
+      else if (isAsciiWordChar(last)) delay = 7;
+      else if (isSoftPunctuation(last)) delay = 9;
+      else if (isHardPunctuation(last)) delay = 12;
 
       return {
         nextText: source.slice(0, end),
@@ -8913,41 +9197,7 @@
     }
 
     function ensureStreamingTypewriter() {
-      if (!isAssistantTyping) {
-        isAssistantTyping = true;
-      }
-
-      if (streamingTextController) return;
-      if (window.ChatGPTLikeOutput && typeof window.ChatGPTLikeOutput.createStreamingText === "function") {
-        streamingTextController = window.ChatGPTLikeOutput.createStreamingText({
-          enabled: true,
-          minDelay: 10,
-          maxDelay: 170,
-          resetKey: streamingScheduleSeq,
-          onUpdate(displayContent, state) {
-            streamingDisplayContentPending = displayContent;
-            streamingDisplayAnimateFromPending = streamingDisplayContent.length;
-            if (streamingDisplayRaf) return;
-            streamingDisplayRaf = requestAnimationFrame(() => {
-              streamingDisplayRaf = 0;
-              const nextDisplayContent = streamingDisplayContentPending;
-              const previousLength = streamingDisplayAnimateFromPending;
-              streamingDisplayContent = nextDisplayContent;
-              updateLastAssistantBubble(nextDisplayContent, false, isAssistantTyping, previousLength);
-              if (state.done && isAssistantTyping && streamingTargetContent.length === nextDisplayContent.length) {
-                followBottomDuringStreaming();
-                if (streamingFinalFlushPending) {
-                  completeStreamingAssistantFinalFrame();
-                }
-              }
-            });
-          }
-        });
-        return;
-      }
-
-      if (streamingTypewriterTimer) return;
-      streamingTypewriterTimer = setTimeout(tickStreamingTypewriter, 0);
+      isAssistantTyping = true;
     }
 
     function beginStreamingAssistantMessage() {
@@ -8970,6 +9220,7 @@
       activeStreamingSources = [];
       streamingFinalFlushPending = false;
       lastStreamingRenderTime = 0;
+      thinkingVisibleUntil = Date.now() + 900;
       ensureThinkingMotion();
     }
 
@@ -8980,12 +9231,10 @@
         messages[messages.length - 1].content = text;
       }
       ensureStreamingTypewriter();
-      if (streamingTextController) {
-        streamingTextController.setContent(streamingTargetContent, {
-          enabled: true,
-          resetKey: streamingScheduleSeq
-        });
+      if (!text || text.trim().length < 240) {
+        thinkingVisibleUntil = Math.max(thinkingVisibleUntil, Date.now() + 320);
       }
+      updateLastAssistantBubble(text, false, true, 0);
     }
 
     function completeStreamingAssistantFinalFrame() {
@@ -9005,7 +9254,7 @@
         streamingTextController = null;
       }
 
-      updateLastAssistantBubble(text, false, false, text.length);
+      updateLastAssistantBubble(text, true, false, text.length);
       requestAnimationFrame(() => {
         finalizeLastAssistantBubbleInPlace();
       });
@@ -9065,26 +9314,12 @@
       if (messages.length && messages[messages.length - 1].role === "assistant") {
         messages[messages.length - 1].content = text;
       }
-
-      if (streamingTextController && streamingDisplayContent.length < text.length) {
-        streamingFinalFlushPending = true;
-        isAssistantTyping = true;
-        streamingTextController.setContent(text, {
-          enabled: true,
-          resetKey: activeStreamingSeq
-        });
-        return;
-      }
-
       streamingDisplayContent = text;
       streamingDisplayContentPending = text;
       streamingDisplayAnimateFromPending = text.length;
-      if (streamingTextController) {
-        streamingTextController.dispose();
-        streamingTextController = null;
-      }
+      thinkingVisibleUntil = 0;
       stopStreamingTypewriter(false);
-      updateLastAssistantBubble(text, false, false, text.length);
+      updateLastAssistantBubble(text, true, false, text.length);
       requestAnimationFrame(() => {
         finalizeLastAssistantBubbleInPlace();
       });
@@ -9419,6 +9654,44 @@
       return pageHeight - (scrollTop + viewportHeight) <= threshold;
     }
 
+    function scrollToPrevMessage() {
+      const wraps = Array.from(chatList.querySelectorAll(".msg-wrap"));
+      if (!wraps.length) return;
+      const viewTop = window.scrollY;
+      let target = null;
+      for (let i = wraps.length - 1; i >= 0; i--) {
+        const rect = wraps[i].getBoundingClientRect();
+        const top = rect.top + window.scrollY;
+        if (top < viewTop - 4) { target = wraps[i]; break; }
+      }
+      if (!target) target = wraps[0];
+      scrollToMessageElement(target);
+    }
+
+    function scrollToNextMessage() {
+      const wraps = Array.from(chatList.querySelectorAll(".msg-wrap"));
+      if (!wraps.length) return;
+      const viewTop = window.scrollY;
+      let target = null;
+      for (let i = 0; i < wraps.length; i++) {
+        const rect = wraps[i].getBoundingClientRect();
+        const top = rect.top + window.scrollY;
+        if (top > viewTop + 4) { target = wraps[i]; break; }
+      }
+      if (!target) target = wraps[wraps.length - 1];
+      scrollToMessageElement(target);
+    }
+
+    function scrollToMessageElement(wrap) {
+      if (!wrap) return;
+      wrap.classList.add("search-jump-highlight");
+      const topBar = document.querySelector(".topbar");
+      const offset = topBar ? topBar.offsetHeight + 10 : 10;
+      const y = wrap.getBoundingClientRect().top + window.scrollY - offset;
+      window.scrollTo({ top: y, behavior: "smooth" });
+      setTimeout(() => wrap.classList.remove("search-jump-highlight"), 1800);
+    }
+
     function scrollToBottomIfNeeded(force = false) {
       if (!force && !autoScrollEnabled) return;
 
@@ -9510,6 +9783,32 @@
     window.addEventListener("scroll", (e) => {
       if (drawer.classList.contains("open") && drawer.contains(e.target)) return;
       maybeResumeAutoScroll();
+    }, { passive: true });
+
+    const navPrevFloatBtn = $("navPrevFloatBtn");
+    const navNextFloatBtn = $("navNextFloatBtn");
+    const msgNavFloat = $("msgNavFloat");
+
+    if (navPrevFloatBtn) {
+      navPrevFloatBtn.addEventListener("click", () => {
+        scrollToPrevMessage();
+      });
+    }
+    if (navNextFloatBtn) {
+      navNextFloatBtn.addEventListener("click", () => {
+        scrollToNextMessage();
+      });
+    }
+
+    let navScrollTimer = 0;
+    window.addEventListener("scroll", () => {
+      if (msgNavFloat && !msgNavFloat.classList.contains("nav-hidden")) {
+        msgNavFloat.classList.add("nav-hidden");
+      }
+      clearTimeout(navScrollTimer);
+      navScrollTimer = setTimeout(() => {
+        if (msgNavFloat) msgNavFloat.classList.remove("nav-hidden");
+      }, 420);
     }, { passive: true });
 
 
@@ -9773,10 +10072,16 @@
       await sendPrompt();
     }
 
-    async function regenerateFrom(idx) {
-      const msg = messages[idx];
+    async function regenerateFrom(messageIdOrIdx) {
+      const idx = typeof messageIdOrIdx === "string"
+        ? findMsgIdxById(messageIdOrIdx)
+        : Number(messageIdOrIdx);
+      const msg = idx >= 0 ? messages[idx] : null;
       if (!msg || msg.role !== "assistant" || !msg.id) return;
       if (!confirm("确定重新回答吗？旧回复将保留并可随时查看。")) return;
+      const useWebSearch = webSearchEnabled === null ? defaultWebSearch : webSearchEnabled;
+      webSearchEnabled = null;
+      renderWebSearchButton();
 
       sending = true;
       renderSendButtonState();
@@ -9810,10 +10115,22 @@
             api_protocol: apiProtocol.value || "claude",
             api_profile_name: providerName(),
             system_prompt: activeSystemPromptText(),
-            web_search: webSearchEnabled,
-            web_search_explicit: webSearchEnabled
+            web_search: useWebSearch,
+            web_search_explicit: useWebSearch
           })
         });
+
+        if (!resp.ok) {
+          const errorText = await resp.text().catch(() => "");
+          throw new Error(`HTTP ${resp.status}: ${errorText || resp.statusText}`);
+        }
+
+        if (!resp.body || !resp.body.getReader) {
+          const textBody = await resp.text().catch(() => "");
+          messages[messages.length - 1].content = textBody || "响应为空";
+          flushStreamingAssistantUpdate(true);
+          return;
+        }
 
         const reader = resp.body.getReader();
         const decoder = new TextDecoder("utf-8");
@@ -9903,11 +10220,22 @@
     overlay.onclick = closeDrawer;
     sessionSearch.oninput = scheduleRenderSessions;
     $("newConvBtn").onclick = async () => {
-      const c = await api("POST", "/api/conversations", { title: "新对话" });
-      activeConversationId = c.id;
-      invalidateSessionsRender();
-      await loadConversations();
-      closeDrawer();
+      const btn = $("newConvBtn");
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.classList.add('loading');
+      try {
+        const c = await api("POST", "/api/conversations", { title: "新对话" });
+        activeConversationId = c.id;
+        invalidateSessionsRender();
+        await loadConversations();
+        closeDrawer();
+      } catch (e) {
+        console.error(e);
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('loading');
+      }
     };
 
     shareBtn.onclick = exportActiveConversation;
@@ -10219,7 +10547,7 @@
       const regen = e.target.closest(".regen-msg");
       if (regen) {
         const found = findMessageByButton(regen);
-        if (found.idx >= 0) return regenerateFrom(found.idx);
+        if (found.msg && getMessageId(found.msg)) return regenerateFrom(getMessageId(found.msg));
         return;
       }
 
