@@ -9011,6 +9011,13 @@
       const bubble = getLastAssistantBubble();
       if (!bubble) return false;
 
+      if (bubble.querySelector("pre")) {
+        bubble.classList.remove("chatgpt-like-streaming");
+        bubble.classList.remove("chatgpt-like-finalizing");
+        settleScrollToBottomAfterStreaming();
+        return true;
+      }
+
       const heightBefore = bubble.offsetHeight;
       if (heightBefore > 0) {
         bubble.style.minHeight = heightBefore + "px";
