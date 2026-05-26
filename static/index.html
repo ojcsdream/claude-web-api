@@ -6692,7 +6692,6 @@
               enabled: nextEnabled
             });
             item.enabled = nextEnabled;
-            await loadSystemPrompts();
           } catch (err) {
             wrap.classList.toggle("active", item.enabled);
             toggle.classList.toggle("on", item.enabled);
@@ -6725,7 +6724,6 @@
     }
 
     async function loadSystemPrompts() {
-      const scrollTop = systemPromptList ? systemPromptList.scrollTop : 0;
       const data = await api("GET", "/api/system-prompts");
       systemPrompts = data.prompts || [];
       if (!systemPrompts.find(p => p.id === activeSystemPromptId)) {
@@ -6733,7 +6731,6 @@
         activeSystemPromptId = enabled ? enabled.id : (systemPrompts[0] ? systemPrompts[0].id : "");
       }
       renderSystemPrompts();
-      if (systemPromptList) systemPromptList.scrollTop = scrollTop;
     }
 
     function openSystemPromptEditor(item = null) {
