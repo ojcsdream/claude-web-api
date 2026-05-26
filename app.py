@@ -1046,7 +1046,7 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
             body.api_profile_name or "",
             system_prompt=body.system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-            use_web_search=True if protocol == "responses" else bool(should_search and not observation),
+            use_web_search=bool(protocol == "responses" and body.web_search),
         )
 
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
@@ -1665,7 +1665,7 @@ async def chat_upload_stream(
                     protocol,
                     system_prompt=system_prompt,
                     file_items=responses_file_items if protocol == "responses" else None,
-                    use_web_search=True if protocol == "responses" else bool(should_search and not search_observation),
+                    use_web_search=bool(protocol == "responses" and web_search),
                 ):
                     full += chunk
                     yield chunk
@@ -1772,7 +1772,7 @@ async def chat_upload_stream(
                     api_model or DEFAULT_MODEL,
                     system_prompt=system_prompt,
                     max_output_tokens=4096,
-                    use_web_search=True if protocol == "responses" else bool(should_search and not search_observation),
+                    use_web_search=bool(protocol == "responses" and web_search),
                     input_payload=input_payload,
                 ):
                     full += chunk
@@ -1808,7 +1808,7 @@ async def chat_upload_stream(
             api_profile_name or "",
             system_prompt=system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-            use_web_search=True if protocol == "responses" else bool(should_search and not search_observation),
+            use_web_search=bool(protocol == "responses" and web_search),
         )
 
     return StreamingResponse(

@@ -1,8 +1,9 @@
 (function () {
   "use strict";
 
-  const DEFAULT_MIN_DELAY = 10;
-  const DEFAULT_MAX_DELAY = 170;
+  const DEFAULT_MIN_DELAY = 8;
+  const DEFAULT_MAX_DELAY = 24;
+  const FRAME_MS = 16;
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -29,43 +30,14 @@
   }
 
   function getStepAndDelay(remaining, minDelay, maxDelay) {
-    if (remaining > 2400) return { minStep: 54, maxStep: 118, delay: minDelay };
-    if (remaining > 1400) return { minStep: 40, maxStep: 92, delay: minDelay + 4 };
-    if (remaining > 800) return { minStep: 28, maxStep: 70, delay: minDelay + 10 };
-    if (remaining > 420) return { minStep: 18, maxStep: 48, delay: minDelay + 20 };
-    if (remaining > 180) return { minStep: 11, maxStep: 30, delay: minDelay + 34 };
-    if (remaining > 70) return { minStep: 6, maxStep: 17, delay: minDelay + 54 };
-    if (remaining > 28) return { minStep: 3, maxStep: 9, delay: minDelay + 76 };
-    return { minStep: 1, maxStep: 4, delay: maxDelay };
-  }
-
-  function breathingJitter(emittedLength, remaining) {
-    const slowWave = Math.sin(emittedLength / 23) * 9;
-    const fastWave = Math.sin(emittedLength / 9) * 4;
-    const randomness = (Math.random() - 0.5) * (remaining > 600 ? 8 : 14);
-    return slowWave + fastWave + randomness;
-  }
-
-  function getCadenceDelay(baseDelay, emittedLength, lastChar, remaining, minDelay, maxDelay) {
-    let delay = baseDelay;
-    const wave = emittedLength % 23;
-    if (wave === 0) delay += 28;
-    else if (wave === 8) delay += 16;
-    else if (wave === 15) delay += 8;
-
-    if (lastChar === "\n") delay += 14;
-    else if (isHardPunctuation(lastChar)) delay += 48;
-    else if (isSoftPunctuation(lastChar)) delay += 22;
-    else if (isWhitespace(lastChar)) delay += 6;
-
-    if (lastChar !== "\n") {
-      if (remaining < 220) delay += 8;
-      if (remaining < 90) delay += 14;
-      if (remaining < 35) delay += 22;
-    }
-    delay += breathingJitter(emittedLength, remaining);
-
-    return clamp(delay, minDelay, maxDelay);
+    if (remaining > 2600) return { minStep: 14, maxStep: 28, cps: 1500, frameMs: minDelay };
+    if (remaining > 1500) return { minStep: 12, maxStep: 24, cps: 1240, frameMs: minDelay + 1 };
+    if (remaining > 900) return { minStep: 10, maxStep: 20, cps: 980, frameMs: minDelay + 2 };
+    if (remaining > 480) return { minStep: 8, maxStep: 16, cps: 720, frameMs: minDelay + 4 };
+    if (remaining > 220) return { minStep: 6, maxStep: 12, cps: 500, frameMs: minDelay + 6 };
+    if (remaining > 90) return { minStep: 4, maxStep: 8, cps: 320, frameMs: minDelay + 8 };
+    if (remaining > 32) return { minStep: 2, maxStep: 5, cps: 190, frameMs: minDelay + 10 };
+    return { minStep: 1, maxStep: 3, cps: 120, frameMs: maxDelay };
   }
 
   function consumeWhitespace(source, end) {
@@ -87,8 +59,7 @@
     }
 
     while (end < minEnd) {
-      const ch = source[end];
-      if (ch === "\n") return end + 1;
+      if (source[end] === "\n") return end + 1;
       end += 1;
     }
 
@@ -100,8 +71,7 @@
       if (isHardPunctuation(prev)) return consumeWhitespace(source, end);
       if (isSoftPunctuation(prev) && end - start >= timing.minStep + 4) return consumeWhitespace(source, end);
       if (isWhitespace(ch) && end - start >= timing.minStep + 6) return consumeWhitespace(source, end + 1);
-      if (isCjkChar(ch) && end - start >= timing.minStep + 8 && /[，、。！？：；]/.test(source[end - 1] || "")) return end;
-
+      if (isCjkChar(ch) && /[，、。！？：；]/.test(prev) && end - start >= timing.minStep + 6) return end;
       end += 1;
     }
 
@@ -120,6 +90,9 @@
       this.resetKey = options.resetKey;
       this.onUpdate = typeof options.onUpdate === "function" ? options.onUpdate : function () {};
       this.timer = null;
+      this.timerKind = "";
+      this.carry = 0;
+      this.lastFrameAt = 0;
       this.disposed = false;
     }
 
@@ -137,6 +110,8 @@
 
       if (shouldReset) {
         this.displayContent = "";
+        this.carry = 0;
+        this.lastFrameAt = 0;
         this.emit(false);
       }
 
@@ -155,6 +130,8 @@
       this.content = String(content || "");
       this.displayContent = "";
       this.resetKey = resetKey;
+      this.carry = 0;
+      this.lastFrameAt = 0;
       this.emit(false);
       if (this.content && this.enabled) this.schedule(0);
     }
@@ -163,6 +140,8 @@
       if (this.disposed) return;
       this.clearTimer();
       this.displayContent = this.content;
+      this.carry = 0;
+      this.lastFrameAt = 0;
       this.emit(true);
     }
 
@@ -176,21 +155,53 @@
     }
 
     clearTimer() {
-      if (this.timer) {
+      if (!this.timer) return;
+      if (this.timerKind === "raf" && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(this.timer);
+      } else {
         clearTimeout(this.timer);
-        this.timer = null;
       }
+      this.timer = null;
+      this.timerKind = "";
     }
 
     schedule(delay) {
       if (this.timer || this.disposed) return;
+      const wait = Math.max(0, Number(delay) || 0);
+
+      if (typeof requestAnimationFrame === "function") {
+        if (wait > 0) {
+          this.timerKind = "timeout";
+          this.timer = setTimeout(() => {
+            this.timer = null;
+            this.timerKind = "";
+            this.scheduleFrame();
+          }, wait);
+          return;
+        }
+        this.scheduleFrame();
+        return;
+      }
+
+      this.timerKind = "timeout";
       this.timer = setTimeout(() => {
         this.timer = null;
-        this.tick();
-      }, delay);
+        this.timerKind = "";
+        this.tick(Date.now());
+      }, wait || FRAME_MS);
     }
 
-    tick() {
+    scheduleFrame() {
+      if (this.timer || this.disposed) return;
+      this.timerKind = "raf";
+      this.timer = requestAnimationFrame((timestamp) => {
+        this.timer = null;
+        this.timerKind = "";
+        this.tick(timestamp);
+      });
+    }
+
+    tick(timestamp) {
       if (this.disposed || !this.enabled) return;
       const remaining = this.content.length - this.displayContent.length;
       if (remaining <= 0) {
@@ -199,15 +210,30 @@
       }
 
       const timing = getStepAndDelay(remaining, this.minDelay, this.maxDelay);
+      const now = timestamp || Date.now();
+      const deltaMs = this.lastFrameAt > 0 ? clamp(now - this.lastFrameAt, 8, 34) : FRAME_MS;
+      this.lastFrameAt = now;
+      this.carry += (timing.cps * deltaMs) / 1000;
+
+      if (this.carry < 1) {
+        this.schedule(timing.frameMs);
+        return;
+      }
+
       const start = this.displayContent.length;
-      const end = findNaturalEnd(this.content, start, timing);
+      const budget = Math.max(1, Math.floor(this.carry));
+      const boundedTiming = {
+        minStep: Math.max(1, Math.min(timing.maxStep, Math.max(timing.minStep, Math.floor(budget * 0.55)))),
+        maxStep: Math.max(timing.minStep, Math.min(56, Math.max(timing.maxStep, budget)))
+      };
+      const end = findNaturalEnd(this.content, start, boundedTiming);
+      const advanced = Math.max(1, end - start);
+      this.carry = Math.max(0, this.carry - advanced);
       this.displayContent = this.content.slice(0, end);
       this.emit(this.displayContent.length >= this.content.length);
 
       if (this.displayContent.length < this.content.length) {
-        const lastChar = this.displayContent[this.displayContent.length - 1] || "";
-        const delay = getCadenceDelay(timing.delay, this.displayContent.length, lastChar, this.content.length - this.displayContent.length, this.minDelay, this.maxDelay);
-        this.schedule(delay);
+        this.schedule(timing.frameMs);
       }
     }
 

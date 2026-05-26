@@ -617,9 +617,16 @@ def db_delete_system_prompt(prompt_id: str, user_id: str = ""):
 
 def db_set_system_prompt_enabled(prompt_id: str, enabled: bool, user_id: str = ""):
     conn = get_conn()
-    conn.execute(
+    cur = conn.cursor()
+    ts = now_ms()
+    if enabled:
+        cur.execute(
+            "UPDATE system_prompts SET enabled=0, updated_at=? WHERE user_id=? AND id<>? AND enabled<>0",
+            (ts, user_id, prompt_id),
+        )
+    cur.execute(
         "UPDATE system_prompts SET enabled=?, updated_at=? WHERE id=? AND user_id=?",
-        (1 if enabled else 0, now_ms(), prompt_id, user_id),
+        (1 if enabled else 0, ts, prompt_id, user_id),
     )
     conn.commit()
     conn.close()

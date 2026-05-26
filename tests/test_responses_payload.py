@@ -49,7 +49,7 @@ class _FakeResponse:
 
 
 class ResponsesPayloadTest(unittest.TestCase):
-    def test_plain_responses_input_without_default_tools(self):
+    def test_plain_responses_input_uses_default_web_search_tool(self):
         captured = {}
 
         def fake_urlopen(request, timeout=0):
@@ -67,10 +67,10 @@ class ResponsesPayloadTest(unittest.TestCase):
 
         self.assertEqual(result, "ok")
         self.assertEqual(captured["body"]["input"], prompt)
-        self.assertNotIn("tools", captured["body"])
-        self.assertNotIn("tool_choice", captured["body"])
+        self.assertEqual(captured["body"]["tools"], [{"type": "web_search"}])
+        self.assertEqual(captured["body"]["tool_choice"], "auto")
 
-    def test_github_url_stays_in_responses_input_without_default_tools(self):
+    def test_github_url_stays_in_responses_input_with_default_web_search_tool(self):
         captured = {}
 
         def fake_urlopen(request, timeout=0):
@@ -88,10 +88,10 @@ class ResponsesPayloadTest(unittest.TestCase):
 
         self.assertEqual(result, "ok")
         self.assertEqual(captured["body"]["input"], prompt)
-        self.assertNotIn("tools", captured["body"])
-        self.assertNotIn("tool_choice", captured["body"])
+        self.assertEqual(captured["body"]["tools"], [{"type": "web_search"}])
+        self.assertEqual(captured["body"]["tool_choice"], "auto")
 
-    def test_web_search_tool_is_only_added_when_requested(self):
+    def test_web_search_tool_can_be_disabled_explicitly(self):
         captured = {}
 
         def fake_urlopen(request, timeout=0):
@@ -104,11 +104,11 @@ class ResponsesPayloadTest(unittest.TestCase):
                 "https://api.openai.com",
                 "test-token",
                 api_model="gpt-5.5",
-                use_web_search=True,
+                use_web_search=False,
             )
 
-        self.assertEqual(captured["body"]["tools"], [{"type": "web_search"}])
-        self.assertEqual(captured["body"]["tool_choice"], "auto")
+        self.assertNotIn("tools", captured["body"])
+        self.assertNotIn("tool_choice", captured["body"])
 
     def test_responses_system_prompt_uses_instructions_field(self):
         captured = {}
@@ -146,14 +146,14 @@ class ResponsesPayloadTest(unittest.TestCase):
                 "test-token",
                 api_model="gpt-5.5",
                 system_prompt="只输出 JSON",
-                use_web_search=True,
+                use_web_search=False,
             ))
 
         self.assertEqual("".join(chunks), "ok")
         self.assertEqual(captured["body"]["instructions"], "只输出 JSON")
         self.assertEqual(captured["body"]["input"], "你好")
         self.assertTrue(captured["body"]["stream"])
-        self.assertEqual(captured["body"]["tools"], [{"type": "web_search"}])
+        self.assertNotIn("tools", captured["body"])
 
     def test_responses_input_payload_includes_images_and_files(self):
         with patch.object(services, "_file_data_url", lambda path, media_type="": f"data:{media_type or 'text/plain'};base64,xxx"):

@@ -488,6 +488,11 @@
       if (!confirm("确定重新回答吗？旧回复将保留并可随时查看。")) return;
 
       const p = profiles.find(x => x.id === profileEl.value) || {};
+      const useWebSearch = typeof webSearchEnabled === "boolean"
+        ? webSearchEnabled
+        : (typeof defaultWebSearch === "boolean" ? defaultWebSearch : true);
+      if (typeof webSearchEnabled !== "undefined") webSearchEnabled = null;
+      if (typeof renderWebSearchButton === "function") renderWebSearchButton();
 
       sending = true;
       sendBtn.disabled = true;
@@ -504,7 +509,9 @@
             api_base_url: p.base_url || "",
             api_auth_token: p.auth_token || "",
             api_model: p.model || "claude-opus-4-7",
-            api_profile_name: p.name || ""
+            api_profile_name: p.name || "",
+            web_search: useWebSearch,
+            web_search_explicit: useWebSearch
           })
         });
 
@@ -537,12 +544,19 @@
       if (!text) return;
       if (!confirm("确定重新发送这条消息吗？这条消息以及之后的回复会被删除。")) return;
 
-      if (msg.id) {
-        await api("DELETE", "/api/conversations/" + conversationId + "/messages/" + msg.id + "/after");
-      }
+      try {
+        if (msg.id) {
+          await api("DELETE", "/api/conversations/" + conversationId + "/messages/" + msg.id + "/after");
+          await loadMessages();
+        }
 
-      promptEl.value = text;
-      await send();
+        // 重发固定为纯文本，避免误带上此前选择但未清空的附件
+        clearFiles();
+        promptEl.value = text;
+        await send();
+      } catch (e) {
+        status("重新发送失败：" + e.message);
+      }
     }
 
     async function loadProfiles() {

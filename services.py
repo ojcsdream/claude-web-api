@@ -24,6 +24,8 @@ PLANNER_CACHE = {}
 PAGE_CACHE = {}
 TAVILY_CLIENT = None
 GITHUB_SOURCE_CACHE = {}
+STREAM_REQUEST_TIMEOUT = int(os.environ.get("CLAUDE_WEB_STREAM_TIMEOUT", "90") or "90")
+VISION_STREAM_TIMEOUT = int(os.environ.get("CLAUDE_WEB_VISION_STREAM_TIMEOUT", "120") or "120")
 GITHUB_SOURCE_MAX_CHARS = int(os.environ.get("GITHUB_SOURCE_MAX_CHARS", "200000") or "200000")
 GITHUB_OBSERVATION_MAX_CHARS = int(os.environ.get("GITHUB_OBSERVATION_MAX_CHARS", "180000") or "180000")
 GITHUB_RAW_MAX_BYTES = int(os.environ.get("GITHUB_RAW_MAX_BYTES", str(2 * 1024 * 1024)) or str(2 * 1024 * 1024))
@@ -273,7 +275,7 @@ def patched_getaddrinfo_for_host(hostname: str, ips: list[str]):
         socket.getaddrinfo = original_getaddrinfo
 
 
-def resilient_urlopen(req, timeout=300):
+def resilient_urlopen(req, timeout=STREAM_REQUEST_TIMEOUT):
     import time
     import urllib.request
 
@@ -2373,7 +2375,7 @@ def call_direct_responses_api(
     system_prompt: str = "",
     max_output_tokens: int = 900,
     search_context_size: str = "low",
-    use_web_search: bool = False,
+    use_web_search: bool | None = None,
     input_payload=None,
 ) -> str:
     import urllib.request
@@ -2388,6 +2390,7 @@ def call_direct_responses_api(
         raise RuntimeError("缺少 API Key")
 
     url = build_api_url(base_url, "/v1/responses")
+    use_web_search = True if use_web_search is None else bool(use_web_search)
     body = {
         "model": model,
         "instructions": _split_system_prompt(system_prompt) or None,
@@ -2410,7 +2413,7 @@ def call_direct_responses_api(
         method="POST",
     )
     try:
-        with resilient_urlopen(req, timeout=300) as resp:
+        with resilient_urlopen(req, timeout=STREAM_REQUEST_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="ignore"))
         return _extract_response_output_text(data) or "(responses 接口无输出)"
     except urllib.error.HTTPError as e:
@@ -2426,7 +2429,7 @@ def stream_direct_responses_api_text(
     system_prompt: str = "",
     max_output_tokens: int = 4096,
     search_context_size: str = "low",
-    use_web_search: bool = False,
+    use_web_search: bool | None = None,
     input_payload=None,
 ):
     import urllib.request
@@ -2443,6 +2446,7 @@ def stream_direct_responses_api_text(
         return
 
     url = build_api_url(base_url, "/v1/responses")
+    use_web_search = True if use_web_search is None else bool(use_web_search)
     body = {
         "model": model,
         "instructions": _split_system_prompt(system_prompt) or None,
@@ -2466,7 +2470,7 @@ def stream_direct_responses_api_text(
         method="POST",
     )
     try:
-        with resilient_urlopen(req, timeout=300) as resp:
+        with resilient_urlopen(req, timeout=STREAM_REQUEST_TIMEOUT) as resp:
             event_name = ""
             data_lines = []
             def flush_event():
@@ -3063,7 +3067,7 @@ def stream_direct_api_text(
         )
 
         try:
-            with resilient_urlopen(req, timeout=300) as resp:
+            with resilient_urlopen(req, timeout=STREAM_REQUEST_TIMEOUT) as resp:
                 for raw in resp:
                     line = raw.decode("utf-8", errors="ignore").strip()
                     if not line:
@@ -3158,7 +3162,7 @@ def stream_direct_api_text(
     )
 
     try:
-        with resilient_urlopen(req, timeout=300) as resp:
+        with resilient_urlopen(req, timeout=STREAM_REQUEST_TIMEOUT) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", errors="ignore").strip()
                 if not line:
@@ -3492,7 +3496,7 @@ def stream_direct_vision_api_text(
         )
 
         try:
-            with resilient_urlopen(req, timeout=300) as resp:
+            with resilient_urlopen(req, timeout=STREAM_REQUEST_TIMEOUT) as resp:
                 for raw in resp:
                     line = raw.decode("utf-8", errors="ignore").strip()
                     if not line or not line.startswith("data:"):
@@ -3539,7 +3543,7 @@ def stream_direct_vision_api_text(
     )
 
     try:
-        with resilient_urlopen(req, timeout=300) as resp:
+        with resilient_urlopen(req, timeout=STREAM_REQUEST_TIMEOUT) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", errors="ignore").strip()
                 if not line or not line.startswith("data:"):
@@ -3654,7 +3658,7 @@ def call_direct_vision_api(
         )
 
         try:
-            with resilient_urlopen(req, timeout=180) as resp:
+            with resilient_urlopen(req, timeout=VISION_STREAM_TIMEOUT) as resp:
                 data = json.loads(resp.read().decode("utf-8", errors="ignore"))
 
             return (
@@ -3694,7 +3698,7 @@ def call_direct_vision_api(
     )
 
     try:
-        with resilient_urlopen(req, timeout=180) as resp:
+        with resilient_urlopen(req, timeout=VISION_STREAM_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="ignore"))
 
         parts = []
@@ -3728,6 +3732,23 @@ def load_uploaded_text_from_path(local_path: str) -> str:
         raw = raw[:1024 * 1024]
 
     return raw.decode("utf-8", errors="ignore").strip()
+
+
+def is_responses_native_document(filename: str) -> bool:
+    suffix = Path(filename or "").suffix.lower()
+    return suffix in {
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".ppt",
+        ".pptx",
+        ".xls",
+        ".xlsx",
+        ".odt",
+        ".ods",
+        ".odp",
+        ".rtf",
+    }
 
 
 async def save_uploaded_file_dual_paths(file: UploadFile) -> tuple[str, str, str]:
