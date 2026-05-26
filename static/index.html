@@ -9651,32 +9651,77 @@
       return pageHeight - (scrollTop + viewportHeight) <= threshold;
     }
 
-    function scrollToPrevMessage() {
+    function getMessageNavigationGroups() {
       const wraps = Array.from(chatList.querySelectorAll(".msg-wrap"));
-      if (!wraps.length) return;
-      const viewTop = window.scrollY;
-      let target = null;
-      for (let i = wraps.length - 1; i >= 0; i--) {
-        const rect = wraps[i].getBoundingClientRect();
-        const top = rect.top + window.scrollY;
-        if (top < viewTop - 4) { target = wraps[i]; break; }
-      }
-      if (!target) target = wraps[0];
-      scrollToMessageElement(target);
+      const groups = [];
+      let currentGroup = null;
+
+      wraps.forEach((wrap) => {
+        const isUser = wrap.classList.contains("user");
+        if (isUser || !currentGroup) {
+          currentGroup = {
+            anchor: isUser ? wrap : null,
+            wraps: []
+          };
+          groups.push(currentGroup);
+        }
+        currentGroup.wraps.push(wrap);
+        if (!currentGroup.anchor) currentGroup.anchor = wrap;
+      });
+
+      return groups.filter(group => group.anchor && group.wraps.length);
+    }
+
+    function getCurrentMessageGroupIndex(groups) {
+      if (!groups.length) return -1;
+
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const topBar = document.querySelector(".topbar");
+      const topOffset = (topBar ? topBar.offsetHeight : 0) + 16;
+      const focusLine = Math.min(topOffset + Math.max(viewportHeight * 0.18, 48), viewportHeight - 24);
+
+      let bestIndex = 0;
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      groups.forEach((group, index) => {
+        let groupTop = Number.POSITIVE_INFINITY;
+        let groupBottom = Number.NEGATIVE_INFINITY;
+
+        group.wraps.forEach((wrap) => {
+          const rect = wrap.getBoundingClientRect();
+          groupTop = Math.min(groupTop, rect.top);
+          groupBottom = Math.max(groupBottom, rect.bottom);
+        });
+
+        const distance = focusLine < groupTop
+          ? groupTop - focusLine
+          : focusLine > groupBottom
+            ? focusLine - groupBottom
+            : 0;
+
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = index;
+        }
+      });
+
+      return bestIndex;
+    }
+
+    function scrollToPrevMessage() {
+      const groups = getMessageNavigationGroups();
+      if (!groups.length) return;
+      const currentIndex = getCurrentMessageGroupIndex(groups);
+      const targetIndex = currentIndex <= 0 ? 0 : currentIndex - 1;
+      scrollToMessageElement(groups[targetIndex].anchor);
     }
 
     function scrollToNextMessage() {
-      const wraps = Array.from(chatList.querySelectorAll(".msg-wrap"));
-      if (!wraps.length) return;
-      const viewTop = window.scrollY;
-      let target = null;
-      for (let i = 0; i < wraps.length; i++) {
-        const rect = wraps[i].getBoundingClientRect();
-        const top = rect.top + window.scrollY;
-        if (top > viewTop + 4) { target = wraps[i]; break; }
-      }
-      if (!target) target = wraps[wraps.length - 1];
-      scrollToMessageElement(target);
+      const groups = getMessageNavigationGroups();
+      if (!groups.length) return;
+      const currentIndex = getCurrentMessageGroupIndex(groups);
+      const targetIndex = currentIndex < 0 ? 0 : Math.min(groups.length - 1, currentIndex + 1);
+      scrollToMessageElement(groups[targetIndex].anchor);
     }
 
     function scrollToMessageElement(wrap) {
