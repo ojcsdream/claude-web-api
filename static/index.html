@@ -8993,6 +8993,22 @@
       });
     }
 
+    function settleScrollToBottomAfterStreaming() {
+      if (!autoScrollEnabled || userScrollActive) return;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const targetScroll = getPageHeight();
+          const currentScroll = getScrollTop();
+          if (Math.abs(targetScroll - currentScroll) > 2) {
+            window.scrollTo({
+              top: targetScroll,
+              behavior: "auto"
+            });
+          }
+        });
+      });
+    }
+
     function finalizeLastAssistantBubbleInPlace() {
       const bubble = getLastAssistantBubble();
       if (!bubble) return false;
@@ -9252,9 +9268,7 @@
       }
 
       updateLastAssistantBubble(text, true, false, text.length);
-      requestAnimationFrame(() => {
-        finalizeLastAssistantBubbleInPlace();
-      });
+      settleScrollToBottomAfterStreaming();
     }
 
     function setThinkingContextFromInput(text, files, options = {}) {
@@ -9302,7 +9316,6 @@
     }
 
     function flushStreamingAssistantUpdate(finalRender = true) {
-      const activeStreamingSeq = streamingScheduleSeq;
       streamingScheduleSeq += 1;
       streamingRenderQueued = false;
       const text = pendingStreamingContent || streamingTargetContent || (messages.length ? (messages[messages.length - 1].content || "") : "");
@@ -9317,9 +9330,7 @@
       thinkingVisibleUntil = 0;
       stopStreamingTypewriter(false);
       updateLastAssistantBubble(text, true, false, text.length);
-      requestAnimationFrame(() => {
-        finalizeLastAssistantBubbleInPlace();
-      });
+      settleScrollToBottomAfterStreaming();
     }
 
     function showLoadError(message) {

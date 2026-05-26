@@ -349,6 +349,7 @@
         rawText: "",
         repairedText: "",
         blocks: [],
+        blockOffsets: [],
         blockNodes: [],
         lastRenderedCharCount: 0,
         lastFullSyncAt: 0
@@ -467,12 +468,39 @@
       bubble.classList.toggle("codex-streaming-output", !finalRender);
     }
 
-    function renderBlockHtml(block, index, blocks, animateFrom, finalRender) {
-      const previousLength = blocks.slice(0, index).join("").length;
+    function renderBlockHtml(block, index, blockOffsets, animateFrom, finalRender) {
+      const previousLength = blockOffsets[index] || 0;
       const localAnimateFrom = animateFrom === null || animateFrom === undefined
         ? null
         : Math.max(0, Number(animateFrom) - previousLength);
       return buildAssistantContentHtml(block, state.sources, !!finalRender, localAnimateFrom);
+    }
+
+    function syncBlockNodesInPlace(bubble, nextNodes) {
+      if (typeof bubble.insertBefore !== "function" || typeof bubble.appendChild !== "function" || typeof bubble.removeChild !== "function") {
+        if (typeof bubble.replaceChildren === "function") {
+          bubble.replaceChildren(...nextNodes);
+        } else {
+          bubble.innerHTML = nextNodes.map(node => node.outerHTML || node.innerHTML || "").join("");
+        }
+        return;
+      }
+
+      let cursor = bubble.firstChild;
+      nextNodes.forEach(node => {
+        if (node.parentNode === bubble) {
+          if (node !== cursor) bubble.insertBefore(node, cursor || null);
+        } else {
+          bubble.insertBefore(node, cursor || null);
+        }
+        cursor = node.nextSibling;
+      });
+
+      while (cursor) {
+        const next = cursor.nextSibling;
+        bubble.removeChild(cursor);
+        cursor = next;
+      }
     }
 
     function renderBlocksIntoBubble(bubble, text, renderOptions = {}) {
@@ -486,6 +514,7 @@
       const sources = Array.isArray(renderOptions.sources) ? renderOptions.sources : [];
       const repaired = repairStreamingMarkdown(text);
       const blocks = splitStreamingMarkdownBlocks(repaired);
+      const blockOffsets = new Array(blocks.length);
       const now = Date.now();
       const shouldForceFullSync = false;
 
@@ -502,23 +531,22 @@
       const fragment = document.createDocumentFragment ? document.createDocumentFragment() : null;
       const nextNodes = [];
       const max = blocks.length;
+      let offset = 0;
       for (let i = 0; i < max; i += 1) {
         const block = blocks[i];
+        blockOffsets[i] = offset;
+        offset += block.length;
         const existing = state.blockNodes[i];
         const canReuse = existing && state.blocks[i] === block && !shouldForceFullSync;
         const node = canReuse ? existing : makeBlockNode(i);
         if (!canReuse) {
-          node.innerHTML = renderBlockHtml(block, i, blocks, animateFrom, finalRender);
+          node.innerHTML = renderBlockHtml(block, i, blockOffsets, animateFrom, finalRender);
         }
         nextNodes.push(node);
         if (!canReuse && fragment) fragment.appendChild(node);
       }
 
-      if (typeof bubble.replaceChildren === "function") {
-        bubble.replaceChildren(...nextNodes);
-      } else {
-        bubble.innerHTML = nextNodes.map(node => node.innerHTML || "").join("");
-      }
+      syncBlockNodesInPlace(bubble, nextNodes);
 
       if (showCaret && text.trim() && text.trim() !== "思考中...") {
         const caret = document.createElement("span");
@@ -534,11 +562,14 @@
       state.rawText = text;
       state.repairedText = repaired;
       state.blocks = blocks;
+      state.blockOffsets = blockOffsets;
       state.blockNodes = nextNodes;
       state.lastRenderedCharCount = repaired.length;
 
-      prepareAssistantBubbleDom(bubble, sources, finalRender);
-      if (hasRenderableMathInHtml(bubble.innerHTML) || hasRenderableMathInHtml(text)) {
+      if (finalRender) {
+        prepareAssistantBubbleDom(bubble, sources, finalRender);
+      }
+      if (hasRenderableMathInHtml(repaired) || hasRenderableMathInHtml(text)) {
         revealPendingMathSources(bubble);
         if (
           now - state.lastTypesetAt >= STREAMING_TYPESAT_MIN_INTERVAL
@@ -550,6 +581,9 @@
             queueStreamingMathTypeset(bubble, text.length);
           }
         }
+      }
+      if (!finalRender) {
+        prepareAssistantBubbleDom(bubble, sources, finalRender);
       }
 
       return Promise.resolve(!disposed && currentSeq === seq && currentToken === renderToken && nextKey === contextKey);
@@ -599,8 +633,8 @@
       const isLongStream = state.targetText.length >= LONG_STREAM_TEXT_LENGTH;
       const boundedTiming = isLongStream
         ? {
-            minStep: Math.max(1, Math.min(8, Math.max(2, Math.floor(budget * 0.35)))),
-            maxStep: Math.max(4, Math.min(18, Math.max(8, budget)))
+            minStep: Math.max(2, Math.min(14, Math.max(timing.minStep, Math.floor(budget * 0.55)))),
+            maxStep: Math.max(10, Math.min(40, Math.max(timing.maxStep, budget)))
           }
         : {
             minStep: Math.max(1, Math.min(timing.maxStep, Math.max(timing.minStep, Math.floor(budget * 0.55)))),
@@ -619,7 +653,7 @@
         sources: state.sources
       }).finally(() => {
         if (state.displayText.length < state.targetText.length) {
-          scheduleNextFrame(isLongStream ? Math.max(timing.frameMs, 18) : timing.frameMs);
+          scheduleNextFrame(timing.frameMs);
         }
       });
     }
@@ -651,15 +685,6 @@
         state.displayText = nextText;
         state.carry = 0;
         state.lastFrameAt = 0;
-        const repairedFinalText = repairStreamingMarkdown(nextText);
-        if (repairedFinalText === nextText) {
-          return renderBlocksIntoBubble(bubbleRef, nextText, {
-            finalRender: true,
-            showCaret: false,
-            animateFrom,
-            sources
-          });
-        }
         return renderHtmlIntoBubble(bubbleRef, nextText, {
           finalRender: true,
           showCaret: false,
@@ -672,11 +697,6 @@
         const initialTiming = getStepAndDelay(nextText.length, DEFAULT_MIN_DELAY, DEFAULT_MAX_DELAY);
         const end = findNaturalEnd(nextText, 0, initialTiming);
         state.displayText = nextText.slice(0, end);
-      }
-
-      if (state.targetText.length >= LONG_STREAM_TEXT_LENGTH && state.displayText.length > LONG_STREAM_REVEAL_CHARS) {
-        const revealTarget = Math.max(0, state.displayText.length - LONG_STREAM_REVEAL_CHARS);
-        state.displayText = state.targetText.slice(0, revealTarget);
       }
 
       const previousLength = Math.max(0, Math.min(state.displayText.length, nextText.length));
