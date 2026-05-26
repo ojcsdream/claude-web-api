@@ -9213,16 +9213,14 @@
     function settleScrollToBottomAfterStreaming() {
       if (!autoScrollEnabled || userScrollActive) return;
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const targetScroll = getPageHeight();
-          const currentScroll = getScrollTop();
-          if (Math.abs(targetScroll - currentScroll) > 2) {
-            window.scrollTo({
-              top: targetScroll,
-              behavior: "auto"
-            });
-          }
-        });
+        const targetScroll = getPageHeight();
+        const currentScroll = getScrollTop();
+        if (Math.abs(targetScroll - currentScroll) > 2) {
+          window.scrollTo({
+            top: targetScroll,
+            behavior: "auto"
+          });
+        }
       });
     }
 
@@ -9247,18 +9245,14 @@
 
       const finish = () => {
         if (!bubble.isConnected) return;
-        enhanceRichText(bubble);
-        enhanceCodeBlocks(bubble);
         applyMessageCollapse(bubble.closest(".msg-wrap"), true);
         if (hasRenderableMath(bubble)) {
           queueMathTypeset(bubble, { latestOnly: true, preserveScroll: true, timeout: 1200 });
         }
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (!bubble.isConnected) return;
-            bubble.classList.remove("chatgpt-like-finalizing");
-            bubble.style.minHeight = "";
-          });
+          if (!bubble.isConnected) return;
+          bubble.classList.remove("chatgpt-like-finalizing");
+          bubble.style.minHeight = "";
         });
       };
 
