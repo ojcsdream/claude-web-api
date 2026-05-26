@@ -82,6 +82,7 @@ from services import (
     build_fallback_search_queries,
     enhance_prompt_with_url_fetch,
     extract_urls_from_text,
+    is_responses_native_document,
     looks_like_search_request,
     load_uploaded_text_from_path,
     run_search_tool_round,
@@ -1045,7 +1046,7 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
             body.api_profile_name or "",
             system_prompt=body.system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-            use_web_search=bool(protocol == "responses" and should_search and not observation),
+            use_web_search=True if protocol == "responses" else bool(should_search and not observation),
         )
 
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
@@ -1213,23 +1214,44 @@ def regenerate_from_stream(body: ChatBody, user=Depends(require_current_user)):
             _cid = cid
 
             def gen_vision():
-                debug = (
-                    f"【重新回答｜视觉直连｜图片数: {len(local_image_paths)}"
-                    f"｜模型: {_api_model}"
-                    f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
-                )
-                yield debug
-
-                yield from stream_direct_vision_and_save(
-                    _cid,
-                    vision_prompt,
-                    local_image_paths,
-                    _api_base_url,
-                    _api_auth_token,
-                    _api_model,
-                    _api_profile_name,
-                    system_prompt=body.system_prompt,
-                )
+                prefix = f"正在分析 {len(local_image_paths)} 张图片...\n\n"
+                yield prefix
+                full = ""
+                try:
+                    for chunk in stream_direct_vision_api_text(
+                        vision_prompt,
+                        local_image_paths,
+                        _api_base_url,
+                        _api_auth_token,
+                        _api_model,
+                        system_prompt=body.system_prompt,
+                    ):
+                        full += chunk
+                        yield chunk
+                    token_count = estimate_round_tokens(vision_prompt, full, image_count=len(local_image_paths))
+                    db_add_message(
+                        _cid,
+                        "assistant",
+                        full,
+                        model=_api_model,
+                        provider_name=_api_profile_name,
+                        token_count=token_count,
+                    )
+                except Exception as e:
+                    error_msg = (
+                        "【视觉接口调用失败】\n\n"
+                        + str(e)
+                        + "\n\n这说明当前接入商或模型可能不支持图片视觉输入，"
+                        + "或者它的视觉接口格式不是 OpenAI/Anthropic 标准格式。"
+                    )
+                    db_add_message(
+                        _cid,
+                        "assistant",
+                        error_msg,
+                        model=_api_model,
+                        provider_name=_api_profile_name,
+                    )
+                    yield error_msg
 
             return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
@@ -1257,7 +1279,7 @@ def regenerate_from_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_model,
                 body.api_protocol or "",
                 body.system_prompt,
-                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search") and not sources),
+                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(plan.get("should_search") and not sources),
             )
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
@@ -1278,7 +1300,7 @@ def regenerate_from_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_profile_name,
                 system_prompt=body.system_prompt,
                 sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search") and not sources),
+                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(plan.get("should_search") and not sources),
             )
 
     return StreamingResponse(gen_stream(), media_type="text/plain; charset=utf-8")
@@ -1340,23 +1362,44 @@ def regenerate_stream(body: ChatBody, user=Depends(require_current_user)):
         _cid = cid
 
         def gen_vision():
-            debug = (
-                f"【重新回答｜视觉上下文｜图片数: {len(last_user_images)}"
-                f"｜模型: {_api_model}"
-                f"｜接入商: {_api_profile_name or _api_base_url}】\n\n"
-            )
-            yield debug
-
-            yield from stream_direct_vision_and_save(
-                _cid,
-                vision_prompt,
-                last_user_images,
-                _api_base_url,
-                _api_auth_token,
-                _api_model,
-                _api_profile_name,
-                system_prompt=body.system_prompt,
-            )
+            prefix = f"正在分析 {len(last_user_images)} 张图片...\n\n"
+            yield prefix
+            full = ""
+            try:
+                for chunk in stream_direct_vision_api_text(
+                    vision_prompt,
+                    last_user_images,
+                    _api_base_url,
+                    _api_auth_token,
+                    _api_model,
+                    system_prompt=body.system_prompt,
+                ):
+                    full += chunk
+                    yield chunk
+                token_count = estimate_round_tokens(vision_prompt, full, image_count=len(last_user_images))
+                db_add_message(
+                    _cid,
+                    "assistant",
+                    full,
+                    model=_api_model,
+                    provider_name=_api_profile_name,
+                    token_count=token_count,
+                )
+            except Exception as e:
+                error_msg = (
+                    "【视觉接口调用失败】\n\n"
+                    + str(e)
+                    + "\n\n这说明当前接入商或模型可能不支持图片视觉输入，"
+                    + "或者它的视觉接口格式不是 OpenAI/Anthropic 标准格式。"
+                )
+                db_add_message(
+                    _cid,
+                    "assistant",
+                    error_msg,
+                    model=_api_model,
+                    provider_name=_api_profile_name,
+                )
+                yield error_msg
 
         return StreamingResponse(gen_vision(), media_type="text/plain; charset=utf-8")
 
@@ -1384,7 +1427,7 @@ def regenerate_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_model,
                 body.api_protocol or "",
                 body.system_prompt,
-                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search") and not sources),
+                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(plan.get("should_search") and not sources),
             )
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
@@ -1405,7 +1448,7 @@ def regenerate_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_profile_name,
                 system_prompt=body.system_prompt,
                 sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-                use_web_search=bool((body.api_protocol or "").strip().lower() == "responses" and plan.get("should_search") and not sources),
+                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(plan.get("should_search") and not sources),
             )
 
     return StreamingResponse(gen_regen(), media_type="text/plain; charset=utf-8")
@@ -1435,6 +1478,7 @@ async def chat_upload_stream(
 
     text_files = []
     image_files = []
+    document_files = []
 
     all_names = []
     web_image_paths = []
@@ -1466,15 +1510,22 @@ async def chat_upload_stream(
                 local_image_paths.append(local_path)
             else:
                 original, local_path, web_path = await save_uploaded_file_dual_paths(file)
-                text = load_uploaded_text_from_path(local_path)
-                if not text:
-                    text = "(文件为空，或不是可直接按 UTF-8 读取的文本文件)"
-                text_files.append({
-                    "name": original,
-                    "text": text,
-                    "local_path": local_path,
-                    "web_path": web_path,
-                })
+                if protocol == "responses" and is_responses_native_document(original):
+                    document_files.append({
+                        "name": original,
+                        "local_path": local_path,
+                        "web_path": web_path,
+                    })
+                else:
+                    text = load_uploaded_text_from_path(local_path)
+                    if not text:
+                        text = "(文件为空，或不是可直接按 UTF-8 读取的文本文件)"
+                    text_files.append({
+                        "name": original,
+                        "text": text,
+                        "local_path": local_path,
+                        "web_path": web_path,
+                    })
                 all_names.append(original)
         except HTTPException:
             raise
@@ -1499,6 +1550,10 @@ async def chat_upload_stream(
             file_context_parts.append(item["text"])
             file_context_parts.append("")
         file_context_db = "\n".join(file_context_parts).strip()
+    elif document_files and protocol == "responses":
+        file_context_db = "\n".join(
+            [f"文件名: {item['name']}\n本地文件路径: {item['local_path']}" for item in document_files]
+        ).strip()
 
     # 先保存用户消息，让网页里能看到图片，也让后续上下文能读取附件
     db_add_message(
@@ -1551,7 +1606,7 @@ async def chat_upload_stream(
             "name": item["name"],
             "local_path": item["local_path"],
         }
-        for item in text_files
+        for item in (text_files + document_files)
     ]
 
     # 有图片时，强制走 base64 视觉 API
@@ -1581,12 +1636,16 @@ async def chat_upload_stream(
         vision_prompt_parts.append("")
         vision_prompt_parts.append("用户问题：" + user_prompt)
 
-        if text_files:
+        if text_files or document_files:
             vision_prompt_parts.append("")
-            vision_prompt_parts.append("用户还上传了以下文本文件，可作为辅助信息：")
+            vision_prompt_parts.append("用户还上传了以下附件，可作为辅助信息：")
             for item in text_files:
                 vision_prompt_parts.append(f"文件名: {item['name']}")
                 vision_prompt_parts.append(item["text"])
+                vision_prompt_parts.append("")
+            for item in document_files:
+                vision_prompt_parts.append(f"文件名: {item['name']}")
+                vision_prompt_parts.append("这是当前上传的文档附件；如模型支持，请直接读取附件内容。")
                 vision_prompt_parts.append("")
 
         vision_prompt = "\n".join(vision_prompt_parts)
@@ -1606,7 +1665,7 @@ async def chat_upload_stream(
                     protocol,
                     system_prompt=system_prompt,
                     file_items=responses_file_items if protocol == "responses" else None,
-                    use_web_search=bool(protocol == "responses" and should_search and not search_observation),
+                    use_web_search=True if protocol == "responses" else bool(should_search and not search_observation),
                 ):
                     full += chunk
                     yield chunk
@@ -1671,6 +1730,12 @@ async def chat_upload_stream(
             extra_parts.append("文件内容：")
             extra_parts.append(item["text"])
             extra_parts.append("")
+    if document_files and protocol == "responses":
+        extra_parts.append("用户还上传了以下文档附件，请直接读取这些附件内容后回答：")
+        extra_parts.append("")
+        for item in document_files:
+            extra_parts.append(f"文件名: {item['name']}")
+        extra_parts.append("")
 
     final_user_prompt = "\n".join(extra_parts).strip()
     if final_user_prompt:
@@ -1690,10 +1755,10 @@ async def chat_upload_stream(
         prompt=final_user_prompt,
     )
 
-    if protocol == "responses" and text_files:
+    if protocol == "responses" and (text_files or document_files):
         def gen_responses_file_upload():
             yield from iter_search_status_lines(should_search, sources)
-            yield f"正在读取 {len(text_files)} 个附件...\n\n"
+            yield f"正在读取 {len(text_files) + len(document_files)} 个附件...\n\n"
             full = ""
             try:
                 input_payload = build_responses_input_payload(
@@ -1707,7 +1772,7 @@ async def chat_upload_stream(
                     api_model or DEFAULT_MODEL,
                     system_prompt=system_prompt,
                     max_output_tokens=4096,
-                    use_web_search=bool(should_search and not search_observation),
+                    use_web_search=True if protocol == "responses" else bool(should_search and not search_observation),
                     input_payload=input_payload,
                 ):
                     full += chunk
@@ -1743,7 +1808,7 @@ async def chat_upload_stream(
             api_profile_name or "",
             system_prompt=system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-            use_web_search=bool(protocol == "responses" and should_search and not search_observation),
+            use_web_search=True if protocol == "responses" else bool(should_search and not search_observation),
         )
 
     return StreamingResponse(
