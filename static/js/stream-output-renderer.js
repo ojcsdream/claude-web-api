@@ -2,8 +2,8 @@
   "use strict";
 
   const FRAME_MS = 16;
-  const DEFAULT_MIN_DELAY = 10;
-  const DEFAULT_MAX_DELAY = 26;
+  const DEFAULT_MIN_DELAY = 8;
+  const DEFAULT_MAX_DELAY = 22;
   const STREAMING_TYPESAT_MIN_INTERVAL = 420;
   const STREAMING_TYPESAT_MIN_DELTA = 96;
   const FORCE_FULL_SYNC_MS = 900;
