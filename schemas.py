@@ -75,6 +75,7 @@ class AuthBody(BaseModel):
 class UserProfileUpdateBody(BaseModel):
     username: str = ""
     email: str = ""
+    email_change_code: str = ""
 
 
 class PasswordChangeBody(BaseModel):

@@ -48,18 +48,38 @@ class UserSettingsApiTest(unittest.TestCase):
 
         response = client.patch(
             "/api/auth/me",
-            json={"username": "alice_new", "email": "alice_new@example.com"},
+            json={"username": "alice_new", "email": "alice@example.com"},
         )
 
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()
         self.assertIs(data["ok"], True)
         self.assertEqual(data["user"]["username"], "alice_new")
-        self.assertEqual(data["user"]["email"], "alice_new@example.com")
+        self.assertEqual(data["user"]["email"], "alice@example.com")
 
         me = client.get("/api/auth/me")
         self.assertEqual(me.status_code, 200)
         self.assertEqual(me.json()["user"]["username"], "alice_new")
+
+    def test_update_current_user_email_requires_new_email_code(self):
+        client = TestClient(self.app_module.app)
+        user = register(client)
+        import db
+
+        response = client.patch(
+            "/api/auth/me",
+            json={"username": "alice", "email": "alice_new@example.com"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("修改邮箱需要先验证新邮箱", response.json()["detail"])
+
+        db.db_save_email_verification_code("alice_new@example.com", "change_email", "112233", db.now_ms() + 60_000)
+        response = client.patch(
+            "/api/auth/me",
+            json={"username": "alice", "email": "alice_new@example.com", "email_change_code": "112233"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["user"]["email"], "alice_new@example.com")
 
     def test_update_current_user_rejects_duplicate_email(self):
         client_one = TestClient(self.app_module.app)

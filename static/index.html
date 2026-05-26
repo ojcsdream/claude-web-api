@@ -756,6 +756,28 @@
       line-height: 1.45;
     }
 
+    .settings-inline-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .settings-inline-row input {
+      flex: 1;
+      min-width: 0;
+      width: auto;
+    }
+    .settings-inline-row .settings-btn {
+      white-space: nowrap;
+      padding: 8px 14px;
+      flex-shrink: 0;
+    }
+    .settings-value-text {
+      flex: 1;
+      color: var(--ui-text);
+      padding: 8px 0;
+      word-break: break-all;
+    }
+
     .settings-inline-note {
       display: flex;
       gap: 9px;
@@ -5617,9 +5639,24 @@
               <label for="settingsUsername">用户名</label>
               <input id="settingsUsername" autocomplete="username" />
             </div>
-            <div class="settings-field">
-              <label for="settingsEmail">邮箱</label>
-              <input id="settingsEmail" type="email" autocomplete="email" />
+            <div class="settings-field" id="settingsEmailField">
+              <label>邮箱</label>
+              <div id="settingsEmailDisplay">
+                <input id="settingsEmailReadonly" type="email" readonly autocomplete="email" />
+                <button id="settingsEmailEditBtn" class="settings-btn secondary" type="button" style="margin-top:8px">编辑</button>
+              </div>
+              <div id="settingsEmailEditArea" style="display:none">
+                <input id="settingsEmail" type="email" autocomplete="email" />
+                <button id="settingsSendEmailCodeBtn" class="settings-btn" type="button" style="width:100%; margin-top:8px">发送验证码</button>
+                <div id="settingsEmailCodeRow" style="display:none; margin-top:8px">
+                  <input id="settingsEmailCode" inputmode="numeric" autocomplete="one-time-code" placeholder="输入6位验证码" />
+                  <button id="settingsEmailConfirmBtn" class="settings-btn primary" type="button" style="width:100%; margin-top:8px">确定</button>
+                </div>
+                <div id="settingsEmailCodeStatus" class="settings-status"></div>
+                <div style="display:flex; gap:8px; margin-top:8px; justify-content:flex-end">
+                  <button id="settingsEmailCancelBtn" class="settings-btn secondary" type="button">取消</button>
+                </div>
+              </div>
             </div>
             <div class="settings-field">
               <label for="settingsCreatedAt">创建时间</label>
@@ -5830,7 +5867,18 @@
     const settingsProfileName = $("settingsProfileName");
     const settingsProfileMeta = $("settingsProfileMeta");
     const settingsUsername = $("settingsUsername");
+    const settingsEmailField = $("settingsEmailField");
+    const settingsEmailDisplay = $("settingsEmailDisplay");
+    const settingsEmailReadonly = $("settingsEmailReadonly");
+    const settingsEmailEditBtn = $("settingsEmailEditBtn");
+    const settingsEmailEditArea = $("settingsEmailEditArea");
     const settingsEmail = $("settingsEmail");
+    const settingsEmailCancelBtn = $("settingsEmailCancelBtn");
+    const settingsEmailCodeRow = $("settingsEmailCodeRow");
+    const settingsEmailCode = $("settingsEmailCode");
+    const settingsEmailConfirmBtn = $("settingsEmailConfirmBtn");
+    const settingsSendEmailCodeBtn = $("settingsSendEmailCodeBtn");
+    const settingsEmailCodeStatus = $("settingsEmailCodeStatus");
     const settingsCreatedAt = $("settingsCreatedAt");
     const settingsUserId = $("settingsUserId");
     const settingsSaveProfileBtn = $("settingsSaveProfileBtn");
@@ -5891,6 +5939,7 @@
     let authMode = "login";
     let authCodeCooldownTimer = null;
     let settingsPasswordCodeCooldownTimer = null;
+    let emailEditTimer = null;
 
     const THEME_STORAGE_KEY = "claude_web_theme";
     const COMPACT_LONG_MESSAGES_KEY = "claude_web_compact_long_messages";
@@ -5938,6 +5987,18 @@
       el.textContent = message || "";
       el.classList.toggle("good", kind === "good");
       el.classList.toggle("error", kind === "error");
+    }
+
+    function emailEditSaveState(email, codeSent) {
+      try { sessionStorage.setItem("email_edit", JSON.stringify({ email, codeSent })); } catch (_) {}
+    }
+
+    function emailEditLoadState() {
+      try { return JSON.parse(sessionStorage.getItem("email_edit")); } catch (_) { return null; }
+    }
+
+    function emailEditClearState() {
+      try { sessionStorage.removeItem("email_edit"); } catch (_) {}
     }
 
     applyTheme(currentTheme);
@@ -6161,7 +6222,33 @@
 
     function populateSettings() {
       if (settingsUsername) settingsUsername.value = currentUser ? (currentUser.username || "") : "";
-      if (settingsEmail) settingsEmail.value = currentUser ? (currentUser.email || "") : "";
+      const savedEdit = emailEditLoadState();
+      if (savedEdit && savedEdit.email) {
+        if (settingsEmailDisplay) settingsEmailDisplay.style.display = "none";
+        if (settingsEmailReadonly) settingsEmailReadonly.value = currentUser ? (currentUser.email || "") : "";
+        if (settingsEmailEditArea) settingsEmailEditArea.style.display = "";
+        if (settingsEmail) settingsEmail.value = savedEdit.email;
+        if (settingsEmailCodeRow) settingsEmailCodeRow.style.display = savedEdit.codeSent ? "" : "none";
+        if (settingsEmailCode) settingsEmailCode.value = "";
+        if (settingsSendEmailCodeBtn) {
+          settingsSendEmailCodeBtn.disabled = savedEdit.codeSent;
+          settingsSendEmailCodeBtn.textContent = savedEdit.codeSent ? "重新发送" : "发送验证码";
+        }
+        if (settingsEmailConfirmBtn) settingsEmailConfirmBtn.disabled = false;
+        setStatus(settingsEmailCodeStatus, "", "");
+        if (emailEditTimer) { clearInterval(emailEditTimer); emailEditTimer = null; }
+      } else {
+        if (settingsEmailDisplay) settingsEmailDisplay.style.display = "";
+        if (settingsEmailReadonly) settingsEmailReadonly.value = currentUser ? (currentUser.email || "") : "";
+        if (settingsEmailEditArea) settingsEmailEditArea.style.display = "none";
+        if (settingsEmail) settingsEmail.value = currentUser ? (currentUser.email || "") : "";
+        if (settingsEmailCodeRow) settingsEmailCodeRow.style.display = "none";
+        if (settingsEmailCode) settingsEmailCode.value = "";
+        if (settingsSendEmailCodeBtn) { settingsSendEmailCodeBtn.disabled = false; settingsSendEmailCodeBtn.textContent = "发送验证码"; }
+        if (settingsEmailConfirmBtn) settingsEmailConfirmBtn.disabled = false;
+        setStatus(settingsEmailCodeStatus, "", "");
+        if (emailEditTimer) { clearInterval(emailEditTimer); emailEditTimer = null; }
+      }
       if (settingsCreatedAt) settingsCreatedAt.value = currentUser ? formatDateTime(currentUser.created_at) : "";
       if (settingsUserId) settingsUserId.value = currentUser ? (currentUser.id || "") : "";
       if (settingsSubtitle) settingsSubtitle.textContent = currentUser ? `已登录：${currentUser.username || currentUser.email || "用户"}` : "账户、安全、偏好和数据";
@@ -6227,15 +6314,69 @@
       settingsSaveProfileBtn.disabled = true;
       setStatus(settingsProfileStatus, "正在保存...");
       try {
-        const data = await api("PATCH", "/api/auth/me", { username, email });
+        const body = { username, email };
+        const origEmail = currentUser ? (currentUser.email || "") : "";
+        if (email !== origEmail) {
+          const code = settingsEmailCode ? settingsEmailCode.value.trim() : "";
+          if (!code) {
+            setStatus(settingsProfileStatus, "修改邮箱需要验证，请先点击「发送验证码」获取验证码", "error");
+            setStatus(settingsEmailCodeStatus, "请输入验证码", "error");
+            settingsSaveProfileBtn.disabled = false;
+            return;
+          }
+          body.email_change_code = code;
+        }
+        const data = await api("PATCH", "/api/auth/me", body);
         currentUser = data.user || currentUser;
         if (authUserLabel) authUserLabel.textContent = currentUser ? currentUser.username : "";
+        emailEditClearState();
         populateSettings();
         setStatus(settingsProfileStatus, "资料已保存", "good");
+        setStatus(settingsEmailCodeStatus, "修改成功", "good");
       } catch (e) {
         setStatus(settingsProfileStatus, e.message || String(e), "error");
+        setStatus(settingsEmailCodeStatus, e.message || String(e), "error");
       } finally {
         settingsSaveProfileBtn.disabled = false;
+      }
+    }
+
+    async function sendSettingsEmailCode() {
+      const newEmail = settingsEmail ? settingsEmail.value.trim() : "";
+      if (!newEmail) {
+        setStatus(settingsEmailCodeStatus, "请先输入新邮箱地址", "error");
+        return;
+      }
+      settingsSendEmailCodeBtn.disabled = true;
+      setStatus(settingsEmailCodeStatus, "正在发送验证码...");
+      try {
+        await api("POST", "/api/auth/send-email-code", { email: newEmail });
+        setStatus(settingsEmailCodeStatus, "验证码已发送到新邮箱", "good");
+        if (settingsEmailCodeRow) settingsEmailCodeRow.style.display = "";
+        if (settingsEmailCode) {
+          settingsEmailCode.value = "";
+          settingsEmailCode.focus();
+        }
+        emailEditSaveState(newEmail, true);
+        if (emailEditTimer) clearInterval(emailEditTimer);
+        let sec = 60;
+        settingsSendEmailCodeBtn.textContent = `重新发送(${sec}s)`;
+        emailEditTimer = setInterval(() => {
+          sec -= 1;
+          if (sec <= 0) {
+            clearInterval(emailEditTimer);
+            emailEditTimer = null;
+            if (settingsSendEmailCodeBtn) {
+              settingsSendEmailCodeBtn.textContent = "发送验证码";
+              settingsSendEmailCodeBtn.disabled = false;
+            }
+          } else if (settingsSendEmailCodeBtn) {
+            settingsSendEmailCodeBtn.textContent = `重新发送(${sec}s)`;
+          }
+        }, 1000);
+      } catch (e) {
+        setStatus(settingsEmailCodeStatus, e.message || String(e), "error");
+        settingsSendEmailCodeBtn.disabled = false;
       }
     }
 
@@ -6338,7 +6479,33 @@
     }
 
     async function logoutCurrentUser() {
-      return;
+      const trigger = this instanceof HTMLElement ? this : null;
+      if (trigger) trigger.disabled = true;
+      if (settingsLogoutBtn) settingsLogoutBtn.disabled = true;
+      if (authLogoutBtn) authLogoutBtn.disabled = true;
+      setStatus(settingsDataStatus, "正在退出登录...");
+      try {
+        await api("POST", "/api/auth/logout");
+      } catch (_) {
+      } finally {
+        currentUser = null;
+        if (authUserLabel) authUserLabel.textContent = "";
+        localStorage.removeItem("active_conversation");
+        localStorage.removeItem("active_profile");
+        activeConversationId = null;
+        activeProfileId = "";
+        messages = [];
+        conversations = [];
+        profiles = [];
+        closeSettings();
+        closeDrawer();
+        showAuthScreen();
+        chatList.innerHTML = '<div class="empty">请先登录</div>';
+        await initPage();
+        if (settingsLogoutBtn) settingsLogoutBtn.disabled = false;
+        if (authLogoutBtn) authLogoutBtn.disabled = false;
+        if (trigger && trigger !== settingsLogoutBtn && trigger !== authLogoutBtn) trigger.disabled = false;
+      }
     }
 
 
@@ -6603,6 +6770,56 @@
     if (settingsSaveProfileBtn) settingsSaveProfileBtn.onclick = saveSettingsProfile;
     if (settingsChangePasswordBtn) settingsChangePasswordBtn.onclick = changeSettingsPassword;
     if (settingsSendPasswordCodeBtn) settingsSendPasswordCodeBtn.onclick = sendSettingsPasswordCode;
+    if (settingsSendEmailCodeBtn) settingsSendEmailCodeBtn.onclick = sendSettingsEmailCode;
+    if (settingsEmailEditBtn) {
+      settingsEmailEditBtn.onclick = () => {
+        if (!settingsEmailDisplay || !settingsEmailEditArea) return;
+        settingsEmailDisplay.style.display = "none";
+        settingsEmailEditArea.style.display = "";
+        if (settingsEmail) {
+          settingsEmail.value = currentUser ? (currentUser.email || "") : "";
+          settingsEmail.focus();
+        }
+        if (settingsEmailCodeRow) settingsEmailCodeRow.style.display = "none";
+        if (settingsEmailCode) settingsEmailCode.value = "";
+        if (settingsSendEmailCodeBtn) {
+          settingsSendEmailCodeBtn.disabled = false;
+          settingsSendEmailCodeBtn.textContent = "发送验证码";
+        }
+        if (settingsEmailConfirmBtn) settingsEmailConfirmBtn.disabled = false;
+        if (emailEditTimer) { clearInterval(emailEditTimer); emailEditTimer = null; }
+        setStatus(settingsEmailCodeStatus, "", "");
+        emailEditSaveState(currentUser ? (currentUser.email || "") : "", false);
+      };
+    }
+    if (settingsEmailConfirmBtn) {
+      settingsEmailConfirmBtn.onclick = async () => {
+        const code = settingsEmailCode ? settingsEmailCode.value.trim() : "";
+        if (!code) {
+          setStatus(settingsEmailCodeStatus, "请输入验证码", "error");
+          return;
+        }
+        settingsEmailConfirmBtn.disabled = true;
+        setStatus(settingsEmailCodeStatus, "正在验证...");
+        await saveSettingsProfile();
+        if (settingsEmailConfirmBtn && settingsEmailConfirmBtn.disabled) {
+          settingsEmailConfirmBtn.disabled = false;
+        }
+      };
+    }
+    if (settingsEmailCancelBtn) {
+      settingsEmailCancelBtn.onclick = () => {
+        if (!settingsEmailDisplay || !settingsEmailEditArea) return;
+        settingsEmailDisplay.style.display = "";
+        settingsEmailEditArea.style.display = "none";
+        if (settingsEmail) settingsEmail.value = currentUser ? (currentUser.email || "") : "";
+        if (settingsEmailCodeRow) settingsEmailCodeRow.style.display = "none";
+        if (settingsEmailCode) settingsEmailCode.value = "";
+        if (emailEditTimer) { clearInterval(emailEditTimer); emailEditTimer = null; }
+        setStatus(settingsEmailCodeStatus, "", "");
+        emailEditClearState();
+      };
+    }
     if (settingsSavePrefsBtn) settingsSavePrefsBtn.onclick = saveSettingsPreferences;
     if (settingsLogoutBtn) settingsLogoutBtn.onclick = logoutCurrentUser;
     if (settingsLogoutOtherSessionsBtn) settingsLogoutOtherSessionsBtn.onclick = logoutOtherSessionsFromSettings;

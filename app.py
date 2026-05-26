@@ -44,7 +44,6 @@ from db import (
     db_get_messages,
     db_get_messages_before_id,
     db_get_regenerate_history,
-    db_get_single_user_auth,
     db_get_user_auth_by_id,
     db_list_api_profiles,
     db_list_system_prompts,
@@ -126,16 +125,6 @@ EMAIL_CODE_TTL_MS = 1000 * 60 * 10
 EMAIL_CODE_RESEND_COOLDOWN_MS = 1000 * 60
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 AUTH_LOGIN_RESEND_COOLDOWN_MS = 1000 * 10
-SINGLE_USER_ID = os.environ.get("CLAUDE_WEB_SINGLE_USER_ID", "").strip()
-SINGLE_USERNAME = os.environ.get("CLAUDE_WEB_SINGLE_USERNAME", "local").strip() or "local"
-SINGLE_EMAIL = os.environ.get("CLAUDE_WEB_SINGLE_EMAIL", "").strip()
-
-
-def get_single_user():
-    row = db_get_single_user_auth()
-    if row:
-        return dict(row)
-    raise HTTPException(status_code=500, detail="单用户初始化失败")
 
 
 def normalize_username(username: str) -> str:
@@ -180,7 +169,12 @@ def set_auth_cookie(response: Response, token: str):
 
 
 def public_user(row):
-    return {"id": row["id"], "username": row["username"], "email": row["email"] if "email" in row.keys() else "", "created_at": row["created_at"]}
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "email": row["email"] if "email" in row.keys() else "",
+        "created_at": row["created_at"],
+    }
 
 
 def smtp_config():
@@ -225,7 +219,12 @@ def send_verification_email(email: str, code: str):
 
 
 def require_current_user(cw_multi_session: str = Cookie(default="")):
-    return get_single_user()
+    if not cw_multi_session:
+        raise HTTPException(status_code=401, detail="请先登录")
+    row = db_get_session_user(cw_multi_session)
+    if not row:
+        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+    return dict(row)
 
 
 def require_conversation_owner(conversation_id: str, user_id: str):
@@ -235,7 +234,7 @@ def require_conversation_owner(conversation_id: str, user_id: str):
 
 @app.get("/api/auth/me")
 def auth_me(user=Depends(require_current_user)):
-    return {"ok": True, "user": public_user(user), "single_user_mode": True}
+    return {"ok": True, "user": public_user(user), "single_user_mode": False}
 
 
 def validate_username_or_raise(username: str):
@@ -260,6 +259,15 @@ def auth_update_me(body: UserProfileUpdateBody, user=Depends(require_current_use
     existing_email = db_get_user_by_email(email)
     if existing_email and existing_email["id"] != user["id"]:
         raise HTTPException(status_code=409, detail="邮箱已被占用")
+
+    # 如果邮箱有变更，需要验证码确认
+    current_email = normalize_email(user.get("email") or "")
+    if email != current_email:
+        email_change_code = (body.email_change_code or "").strip()
+        if not email_change_code:
+            raise HTTPException(status_code=400, detail="修改邮箱需要先验证新邮箱，请输入新邮箱收到的验证码")
+        if not db_verify_email_code(email, "change_email", email_change_code):
+            raise HTTPException(status_code=400, detail="邮箱验证码不正确或已过期")
 
     updated = db_update_user_profile(user["id"], username, email)
     return {"ok": True, "user": public_user(updated)}
@@ -342,6 +350,31 @@ def auth_logout_other_sessions(cw_multi_session: str = Cookie(default=""), user=
     conn.close()
     db_delete_other_sessions_by_user(user["id"], cw_multi_session)
     return {"ok": True, "closed_sessions": int(row["total"] if row else 0)}
+
+
+@app.post("/api/auth/send-email-code")
+def auth_send_email_code(body: AuthBody, user=Depends(require_current_user)):
+    new_email = normalize_email(body.email)
+    if not EMAIL_RE.match(new_email):
+        raise HTTPException(status_code=400, detail="请输入有效邮箱")
+    current_email = normalize_email(user.get("email") or "")
+    if new_email == current_email:
+        raise HTTPException(status_code=400, detail="新邮箱和当前邮箱相同")
+    existing = db_get_user_by_email(new_email)
+    if existing and existing["id"] != user["id"]:
+        raise HTTPException(status_code=409, detail="该邮箱已被其他账号使用")
+
+    previous = db_get_email_verification_code(new_email, "change_email")
+    if previous and previous["created_at"]:
+        elapsed = int(time.time() * 1000) - int(previous["created_at"])
+        if elapsed < EMAIL_CODE_RESEND_COOLDOWN_MS:
+            wait_s = max(1, int((EMAIL_CODE_RESEND_COOLDOWN_MS - elapsed + 999) / 1000))
+            raise HTTPException(status_code=429, detail=f"请等待 {wait_s} 秒后再重新发送验证码")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    db_save_email_verification_code(new_email, "change_email", code, int(time.time() * 1000) + EMAIL_CODE_TTL_MS)
+    send_verification_email(new_email, code)
+    return {"ok": True, "message": "验证码已发送到新邮箱", "email": new_email}
 
 
 @app.post("/api/auth/send-code")
@@ -960,7 +993,6 @@ def echo(body: ChatBody, user=Depends(require_current_user)):
         cid = db_ensure_conversation(body.conversation_id, user_id=user["id"])
         history = db_get_messages(cid)
         final_prompt = build_chat_prompt(history, body.prompt)
-
         db_add_message(cid, "user", body.prompt)
         db_update_title_if_needed(cid, body.prompt, user["id"])
 
@@ -973,7 +1005,6 @@ def echo(body: ChatBody, user=Depends(require_current_user)):
             body.system_prompt,
         )).strip()
         db_add_message(cid, "assistant", reply, model=body.api_model or DEFAULT_MODEL, provider_name=body.api_profile_name or "")
-
         return {"ok": True, "conversation_id": cid, "reply": reply or "无输出"}
     except Exception as e:
         return {"ok": False, "reply": f"调用失败: {e}"}
@@ -991,7 +1022,11 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
 
     def gen():
         has_urls = bool(extract_urls_from_text(body.prompt))
-        search_intent = should_autonomous_search_with_context(body.prompt, history, force=body.web_search)
+        search_intent = should_autonomous_search_with_context(
+            body.prompt,
+            history,
+            force=body.web_search,
+        ) if (body.web_search and protocol != "responses") else False
         should_fetch_urls = has_urls and protocol != "responses"
         should_prepare_search = search_intent or should_fetch_urls
         yield "\n[[STATUS:thinking]]\n"
@@ -1046,7 +1081,7 @@ def chat_stream(body: ChatBody, user=Depends(require_current_user)):
             body.api_profile_name or "",
             system_prompt=body.system_prompt,
             sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-            use_web_search=bool(protocol == "responses" and body.web_search),
+            use_web_search=True if protocol == "responses" else bool(body.web_search and should_search and not observation),
         )
 
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
@@ -1101,7 +1136,7 @@ def _build_regenerate_prompt_with_search(
         last_user_prompt,
         context_messages,
         force=web_search,
-    )
+    ) if (web_search and protocol != "responses") else False
     should_fetch_urls = bool(extract_urls_from_text(last_user_prompt)) and protocol != "responses"
     if search_intent:
         if protocol == "responses":
@@ -1279,12 +1314,13 @@ def regenerate_from_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_model,
                 body.api_protocol or "",
                 body.system_prompt,
-                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(plan.get("should_search") and not sources),
+                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(body.web_search and plan.get("should_search") and not sources),
             )
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
                 (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
-                body.message_id, final_prompt, sources=json.dumps(sources, ensure_ascii=False) if sources else "",
+                body.message_id, final_prompt,
+                sources=json.dumps(sources, ensure_ascii=False) if sources else "",
             )
         return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
@@ -1300,7 +1336,7 @@ def regenerate_from_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_profile_name,
                 system_prompt=body.system_prompt,
                 sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(plan.get("should_search") and not sources),
+                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(body.web_search and plan.get("should_search") and not sources),
             )
 
     return StreamingResponse(gen_stream(), media_type="text/plain; charset=utf-8")
@@ -1427,12 +1463,13 @@ def regenerate_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_model,
                 body.api_protocol or "",
                 body.system_prompt,
-                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(plan.get("should_search") and not sources),
+                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(body.web_search and plan.get("should_search") and not sources),
             )
             yield from _stream_and_save_regenerated_answer(
                 inner, cid, _api_model,
                 (_api_profile_name + "｜直连流式") if _api_profile_name else "直连流式",
-                old_assistant_id, final_prompt, sources=json.dumps(sources, ensure_ascii=False) if sources else "",
+                old_assistant_id, final_prompt,
+                sources=json.dumps(sources, ensure_ascii=False) if sources else "",
             )
         return StreamingResponse(gen_direct(), media_type="text/plain; charset=utf-8")
 
@@ -1448,7 +1485,7 @@ def regenerate_stream(body: ChatBody, user=Depends(require_current_user)):
                 _api_profile_name,
                 system_prompt=body.system_prompt,
                 sources=json.dumps(sources, ensure_ascii=False) if sources else "",
-                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(plan.get("should_search") and not sources),
+                use_web_search=True if (body.api_protocol or "").strip().lower() == "responses" else bool(body.web_search and plan.get("should_search") and not sources),
             )
 
     return StreamingResponse(gen_regen(), media_type="text/plain; charset=utf-8")
@@ -1533,7 +1570,6 @@ async def chat_upload_stream(
             raise HTTPException(status_code=400, detail=str(e)) from e
 
     user_prompt = prompt.strip() or "请分析我上传的文件/图片。"
-
     file_names_str = ", ".join(all_names) if all_names else None
 
     image_preview_db = None
@@ -1573,7 +1609,7 @@ async def chat_upload_stream(
         user_prompt,
         history,
         force=web_search,
-    )
+    ) if (web_search and protocol != "responses") else False
     should_fetch_urls = bool(extract_urls_from_text(user_prompt)) and protocol != "responses"
     should_search = False
     if search_intent:
@@ -1687,7 +1723,6 @@ async def chat_upload_stream(
                     token_count=token_count,
                     sources=json.dumps(sources, ensure_ascii=False) if sources else "",
                 )
-
             except Exception as e:
                 final_answer = (
                     "【视觉接口调用失败】\n\n"
@@ -1711,7 +1746,6 @@ async def chat_upload_stream(
                     token_count=token_count,
                     sources=json.dumps(sources, ensure_ascii=False) if sources else "",
                 )
-
                 yield final_answer
 
         return StreamingResponse(
@@ -1772,7 +1806,7 @@ async def chat_upload_stream(
                     api_model or DEFAULT_MODEL,
                     system_prompt=system_prompt,
                     max_output_tokens=4096,
-                    use_web_search=bool(protocol == "responses" and web_search),
+                    use_web_search=bool(web_search),
                     input_payload=input_payload,
                 ):
                     full += chunk
@@ -1788,7 +1822,6 @@ async def chat_upload_stream(
                     token_count=token_count,
                     sources=json.dumps(sources, ensure_ascii=False) if sources else "",
                 )
-
         return StreamingResponse(
             gen_responses_file_upload(),
             media_type="text/plain; charset=utf-8",
