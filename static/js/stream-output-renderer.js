@@ -498,6 +498,10 @@
 
       while (cursor) {
         const next = cursor.nextSibling;
+        if (cursor.classList && (cursor.classList.contains("thinking") || cursor.classList.contains("tool-status"))) {
+          cursor = next;
+          continue;
+        }
         bubble.removeChild(cursor);
         cursor = next;
       }
@@ -546,7 +550,22 @@
         if (!canReuse && fragment) fragment.appendChild(node);
       }
 
+      const preservedNodes = [];
+      if (!finalRender && typeof bubble.querySelectorAll === "function" && typeof bubble.removeChild === "function") {
+        bubble.querySelectorAll(":scope > .thinking, :scope > .tool-status").forEach(node => {
+          preservedNodes.push(node);
+          bubble.removeChild(node);
+        });
+      }
+
       syncBlockNodesInPlace(bubble, nextNodes);
+
+      if (!finalRender && preservedNodes.length && typeof bubble.insertBefore === "function") {
+        const anchor = bubble.firstChild;
+        preservedNodes.forEach(node => {
+          bubble.insertBefore(node, anchor);
+        });
+      }
 
       if (showCaret && text.trim() && text.trim() !== "思考中...") {
         const caret = document.createElement("span");
