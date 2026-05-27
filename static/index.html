@@ -1999,6 +1999,32 @@
       padding: 5px 0 3px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif;
       color: #a9a39a;
+      transition: opacity .2s ease, filter .2s ease;
+    }
+
+    .thinking.thinking-muted {
+      opacity: 0.52;
+      filter: saturate(0.72);
+    }
+
+    .thinking.thinking-muted .thinking-status,
+    .thinking.thinking-muted .thinking-step.active,
+    .thinking.thinking-muted .thinking-step.current {
+      color: #8f887d;
+      animation: none;
+    }
+
+    .thinking.thinking-muted .thinking-status::before {
+      box-shadow: none;
+      animation: none;
+      opacity: 0.58;
+    }
+
+    .thinking.thinking-muted .thinking-step::before,
+    .thinking.thinking-muted .thinking-step.active::before,
+    .thinking.thinking-muted .thinking-step.current::before {
+      background: rgba(174, 170, 164, 0.32);
+      box-shadow: none;
     }
 
     .thinking-shell {
@@ -9034,19 +9060,22 @@
       const hasActiveToolStatuses = typeof activeToolStatuses !== "undefined" && Array.isArray(activeToolStatuses) && activeToolStatuses.length > 0;
       const visibleUntil = typeof thinkingVisibleUntil === "number" ? thinkingVisibleUntil : 0;
       const keepThinkingVisible = !finalRender && Date.now() < visibleUntil;
-      const showThinkingPanel = !finalRender && (
-        hasActiveToolStatuses
-        || keepThinkingVisible
-        || !cleanText.trim()
-        || cleanText.trim() === "思考中..."
-        || cleanText.trim().length < 240
-      );
+      const hasBodyContent = cleanText.trim() && cleanText.trim() !== "思考中...";
+      const showThinkingPanel = !finalRender;
       const contentHtml = finalRender
         ? renderMarkdown(cleanText)
         : (typeof renderStreamingMarkdownSegmented === "function"
           ? renderStreamingMarkdownSegmented(cleanText, animateFrom)
           : renderStreamingMarkdown(cleanText));
-      let html = (showThinkingPanel ? renderThinkingHtml() : "") + renderToolStatusesHtml() + contentHtml;
+      let thinkingHtml = "";
+      if (showThinkingPanel) {
+        thinkingHtml = renderThinkingHtml();
+        const shouldMuteThinking = hasBodyContent && !hasActiveToolStatuses && !keepThinkingVisible;
+        if (shouldMuteThinking) {
+          thinkingHtml = thinkingHtml.replace('class="thinking"', 'class="thinking thinking-muted"');
+        }
+      }
+      let html = thinkingHtml + renderToolStatusesHtml() + contentHtml;
       html += renderSourcesStrip(sources);
       if (showCaret && cleanText.trim() && cleanText.trim() !== "思考中...") {
         html += '<span class="chatgpt-like-cursor">▍</span>';
