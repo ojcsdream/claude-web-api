@@ -320,7 +320,6 @@
     const buildAssistantContentHtml = options.buildAssistantContentHtml || ((text, sources, finalRender, animateFrom) => {
       const html = buildAssistantBubbleHtml(text, sources, finalRender, false, animateFrom);
       return String(html || "")
-        .replace(/^[\s\S]*?(?=<div class="stream-stable"|<div class="stream-active"|<p|<h|<ul|<ol|<pre|<blockquote|<table|$)/, "")
         .replace(/<span class="chatgpt-like-cursor">[\s\S]*?<\/span>\s*$/, "")
         .replace(/<div class="answer-meta stream-meta-placeholder"[\s\S]*?<\/div>\s*$/, "");
     });

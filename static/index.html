@@ -1992,6 +1992,14 @@
       transform: scale(0.94);
     }
 
+    .thinking-layer {
+      max-width: min(100%, 760px);
+    }
+
+    .thinking-layer:empty {
+      display: none;
+    }
+
     .thinking {
       display: inline-flex;
       align-items: flex-start;
@@ -1999,31 +2007,64 @@
       padding: 5px 0 3px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif;
       color: #a9a39a;
-      transition: opacity .2s ease, filter .2s ease;
+      opacity: 1;
+      filter: saturate(1);
+      transform: translateY(0) scale(1);
+      transition: opacity .28s ease, filter .28s ease, transform .32s cubic-bezier(.22, 1, .36, 1);
+      animation: thinkingFadeIn .32s cubic-bezier(.22, 1, .36, 1) both;
+      will-change: opacity, transform, filter;
     }
 
     .thinking.thinking-muted {
-      opacity: 0.52;
-      filter: saturate(0.72);
+      opacity: 0.64;
+      filter: saturate(0.58) grayscale(0.14);
+      transform: translateY(-1px) scale(0.992);
+      animation: none;
+    }
+
+    .thinking.thinking-exit {
+      opacity: 0;
+      filter: saturate(0.16) grayscale(0.45) blur(5px);
+      transform: translateY(-12px) scale(0.965);
+      transition: opacity .42s ease, filter .42s ease, transform .46s cubic-bezier(.22, 1, .36, 1);
+      pointer-events: none;
+    }
+
+    .thinking.thinking-muted .thinking-panel,
+    .thinking.thinking-muted .thinking-status,
+    .thinking.thinking-muted .thinking-status::before,
+    .thinking.thinking-muted .thinking-summary .quiet,
+    .thinking.thinking-muted .thinking-step,
+    .thinking.thinking-muted .thinking-step::before,
+    .thinking.thinking-muted .thinking-toggle,
+    .thinking.thinking-muted .thinking-toggle::after {
+      animation: none;
+      transition: none;
+      transform: none;
+      text-shadow: none;
     }
 
     .thinking.thinking-muted .thinking-status,
+    .thinking.thinking-muted .thinking-summary,
+    .thinking.thinking-muted .thinking-summary .quiet,
+    .thinking.thinking-muted .thinking-step,
     .thinking.thinking-muted .thinking-step.active,
-    .thinking.thinking-muted .thinking-step.current {
-      color: #8f887d;
-      animation: none;
+    .thinking.thinking-muted .thinking-step.current,
+    .thinking.thinking-muted .thinking-step-detail,
+    .thinking.thinking-muted .thinking-toggle {
+      color: #9b9288;
     }
 
     .thinking.thinking-muted .thinking-status::before {
+      background: rgba(196, 190, 180, 0.52);
       box-shadow: none;
-      animation: none;
-      opacity: 0.58;
+      opacity: 0.64;
     }
 
     .thinking.thinking-muted .thinking-step::before,
     .thinking.thinking-muted .thinking-step.active::before,
     .thinking.thinking-muted .thinking-step.current::before {
-      background: rgba(174, 170, 164, 0.32);
+      background: rgba(180, 173, 162, 0.38);
       box-shadow: none;
     }
 
@@ -2295,6 +2336,19 @@
     @keyframes thinkingTextBreath {
       0%, 100% { opacity: 0.66; }
       48% { opacity: 1; }
+    }
+
+    @keyframes thinkingFadeIn {
+      0% {
+        opacity: 0;
+        transform: translateY(8px) scale(0.985);
+        filter: saturate(0.82) blur(3px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: saturate(1) blur(0);
+      }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -8029,6 +8083,8 @@
     let activeToolStatuses = [];
     let activeStreamingSources = [];
     let lastUserPromptForThinking = "";
+    let streamingAssistantPhase = "idle";
+    let thinkingExitTimer = null;
     let thinkingContext = {
       prompt: "",
       fileCount: 0,
@@ -8465,6 +8521,88 @@
       return msg && msg.id !== undefined && msg.id !== null ? String(msg.id) : "";
     }
 
+    function isStreamingAssistantMessage(msg, idx) {
+      if (!msg || msg.role !== "assistant") return false;
+      if (streamingAssistantPhase === "idle" || streamingAssistantPhase === "done") return false;
+      return idx === messages.length - 1;
+    }
+
+    function clearThinkingExitTimer() {
+      if (!thinkingExitTimer) return;
+      clearTimeout(thinkingExitTimer);
+      thinkingExitTimer = null;
+    }
+
+    function getThinkingPhaseClass(msg, idx) {
+      if (!isStreamingAssistantMessage(msg, idx)) return "";
+      if (streamingAssistantPhase === "finalizing") return " thinking-muted thinking-exit";
+      if (streamingAssistantPhase === "answering") return " thinking-muted";
+      return "";
+    }
+
+    function renderThinkingPanelHtml(extraClass = "") {
+      const normalized = String(extraClass || "").trim();
+      if (!normalized) return renderThinkingHtml();
+      return renderThinkingHtml().replace('class="thinking"', `class="thinking ${normalized}"`);
+    }
+
+    function syncThinkingDomState(root, extraClass = "") {
+      if (!root) return false;
+      const thinking = root.querySelector(".thinking");
+      if (!thinking) return false;
+      thinking.classList.remove("thinking-muted", "thinking-exit");
+      String(extraClass || "").split(/\s+/).filter(Boolean).forEach(cls => thinking.classList.add(cls));
+      return true;
+    }
+
+    function getAssistantThinkingLayer(wrap) {
+      return wrap ? wrap.querySelector(":scope > .thinking-layer") : null;
+    }
+
+    function syncAssistantThinkingLayer(wrap, msg, idx) {
+      if (!wrap || !msg || msg.role !== "assistant") return false;
+      let layer = getAssistantThinkingLayer(wrap);
+      if (!isStreamingAssistantMessage(msg, idx)) {
+        if (layer) layer.remove();
+        return false;
+      }
+
+      const phaseClass = getThinkingPhaseClass(msg, idx).trim();
+      if (!layer) {
+        layer = document.createElement("div");
+        layer.className = "thinking-layer";
+        wrap.insertBefore(layer, wrap.firstChild || null);
+      }
+      if (!syncThinkingDomState(layer, phaseClass)) {
+        layer.innerHTML = renderThinkingPanelHtml(phaseClass);
+        bindThinkingPanels(layer);
+      }
+      return true;
+    }
+
+    function syncLastAssistantThinkingLayer() {
+      const wraps = chatList ? chatList.querySelectorAll(".msg-wrap.assistant") : [];
+      if (!wraps.length || !messages.length) return false;
+      const wrap = wraps[wraps.length - 1];
+      return syncAssistantThinkingLayer(wrap, messages[messages.length - 1], messages.length - 1);
+    }
+
+    function setAssistantPhase(nextPhase, options = {}) {
+      const phase = String(nextPhase || "idle");
+      const changed = streamingAssistantPhase !== phase;
+      streamingAssistantPhase = phase;
+      if (changed || options.forceSync) syncLastAssistantThinkingLayer();
+    }
+
+    function scheduleThinkingDone(callback) {
+      clearThinkingExitTimer();
+      thinkingExitTimer = setTimeout(() => {
+        thinkingExitTimer = null;
+        setAssistantPhase("done", { forceSync: true });
+        if (typeof callback === "function") callback();
+      }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 420);
+    }
+
     function isThinkingMessage(msg) {
       return (msg && (msg.content || "").trim()) === "思考中...";
     }
@@ -8506,7 +8644,7 @@
 
       const bubble = wrap.querySelector(".bubble");
       const foldBtn = wrap.querySelector(".message-fold-btn");
-      if (!bubble || !foldBtn || bubble.querySelector(".thinking")) return;
+      if (!bubble || !foldBtn || wrap.querySelector(":scope > .thinking-layer .thinking")) return;
 
       const key = wrap.dataset.msgId || foldBtn.dataset.msgId || foldBtn.dataset.idx || "";
       const isLong = forceCheck || longMessageKeys.has(key) || bubble.scrollHeight > 380;
@@ -8563,12 +8701,16 @@
       bubble.className = "bubble";
 
       if (msg.role === "assistant") {
-        if ((msg.content || "").trim() === "思考中...") {
-          bubble.innerHTML = renderThinkingHtml();
-          bindThinkingPanels(bubble);
+        if (isStreamingAssistantMessage(msg, idx) && !(msg.content || "").trim()) {
+          bubble.hidden = true;
+          bubble.innerHTML = "";
+        } else if ((msg.content || "").trim() === "思考中...") {
+          bubble.hidden = true;
+          bubble.innerHTML = "";
         } else {
           const sources = parseMessageSources(msg.sources);
           const cleanContent = stripStreamingStatusMarkers(msg.content || "");
+          bubble.hidden = false;
           bubble.innerHTML = renderToolStatusesHtml() + (lightweight ? renderMarkdownForDeferredMath(cleanContent) : renderMarkdown(cleanContent));
           injectCitationMarkers(bubble, sources);
           bubble.insertAdjacentHTML("beforeend", renderSourcesStrip(sources));
@@ -8614,6 +8756,7 @@
 
       row.appendChild(bubble);
       wrap.appendChild(row);
+      if (msg.role === "assistant") syncAssistantThinkingLayer(wrap, msg, idx);
 
       if (!isThinkingMessage(msg)) {
         const foldBar = document.createElement("div");
@@ -9057,25 +9200,12 @@
 
     function buildAssistantBubbleHtml(text, sources, finalRender, showCaret, animateFrom = null) {
       const cleanText = String(text || "");
-      const hasActiveToolStatuses = typeof activeToolStatuses !== "undefined" && Array.isArray(activeToolStatuses) && activeToolStatuses.length > 0;
-      const visibleUntil = typeof thinkingVisibleUntil === "number" ? thinkingVisibleUntil : 0;
-      const keepThinkingVisible = !finalRender && Date.now() < visibleUntil;
-      const hasBodyContent = cleanText.trim() && cleanText.trim() !== "思考中...";
-      const showThinkingPanel = !finalRender;
       const contentHtml = finalRender
         ? renderMarkdown(cleanText)
         : (typeof renderStreamingMarkdownSegmented === "function"
           ? renderStreamingMarkdownSegmented(cleanText, animateFrom)
           : renderStreamingMarkdown(cleanText));
-      let thinkingHtml = "";
-      if (showThinkingPanel) {
-        thinkingHtml = renderThinkingHtml();
-        const shouldMuteThinking = hasBodyContent && !hasActiveToolStatuses && !keepThinkingVisible;
-        if (shouldMuteThinking) {
-          thinkingHtml = thinkingHtml.replace('class="thinking"', 'class="thinking thinking-muted"');
-        }
-      }
-      let html = thinkingHtml + renderToolStatusesHtml() + contentHtml;
+      let html = renderToolStatusesHtml() + contentHtml;
       html += renderSourcesStrip(sources);
       if (showCaret && cleanText.trim() && cleanText.trim() !== "思考中...") {
         html += '<span class="chatgpt-like-cursor">▍</span>';
@@ -9087,7 +9217,6 @@
     }
 
     function prepareAssistantBubbleDom(bubble, sources, finalRender) {
-      if (!finalRender) bindThinkingPanels(bubble);
       injectCitationMarkers(bubble, sources);
       enhanceRichText(bubble);
 
@@ -9172,14 +9301,22 @@
       const lastAssistantMsg = getLastAssistantMessage();
       const savedSources = lastAssistantMsg ? parseMessageSources(lastAssistantMsg.sources) : [];
       const sources = activeStreamingSources.length ? activeStreamingSources : savedSources;
+      const hasVisibleText = !!text.trim() && text.trim() !== "思考中...";
 
       if (text.trim() === "思考中...") {
-        if (!bubble.querySelector(".thinking")) {
-          bubble.innerHTML = renderThinkingHtml();
-        }
-        bindThinkingPanels(bubble);
+        bubble.hidden = true;
+        bubble.innerHTML = "";
+        syncLastAssistantThinkingLayer();
         return true;
       }
+
+      if (!finalRender && !hasVisibleText) {
+        bubble.hidden = true;
+        syncLastAssistantThinkingLayer();
+        return true;
+      }
+
+      bubble.hidden = false;
 
       if (renderer && typeof renderer.render === "function") {
         renderer.render(bubble, text, {
@@ -9213,7 +9350,7 @@
         const bubble = getLastAssistantBubble();
         if (!bubble) return;
         const rawContent = messages.length ? (messages[messages.length - 1].content || "") : "思考中...";
-        if ((rawContent || "").trim() === "思考中...") {
+        if (streamingAssistantPhase === "thinking" || streamingAssistantPhase === "answering") {
           renderAssistantContentIntoBubble(bubble, rawContent, false, false);
           return;
         }
@@ -9312,7 +9449,7 @@
       }
 
       renderAssistantContentIntoBubble(bubble, content, finalRender, showCaret, animateFrom);
-      bindThinkingPanels(bubble);
+      syncLastAssistantThinkingLayer();
       followBottomDuringStreaming();
       return true;
     }
@@ -9476,6 +9613,8 @@
       streamingDisplayContentPending = "";
       streamingDisplayAnimateFromPending = 0;
       streamingTargetContent = "";
+      clearThinkingExitTimer();
+      setAssistantPhase("thinking", { forceSync: true });
       activeToolStatuses = [];
       activeStreamingSources = [];
       streamingFinalFlushPending = false;
@@ -9487,6 +9626,9 @@
     function commitStreamingFrame(text) {
       pendingStreamingContent = "";
       streamingTargetContent = text;
+      if ((stripStreamingStatusMarkers(text || "") || "").trim()) {
+        setAssistantPhase("answering");
+      }
       if (messages.length && messages[messages.length - 1].role === "assistant") {
         messages[messages.length - 1].content = text;
       }
@@ -9499,6 +9641,7 @@
 
     function completeStreamingAssistantFinalFrame() {
       const text = streamingTargetContent || streamingDisplayContent || "";
+      setAssistantPhase("finalizing", { forceSync: true });
       streamingFinalFlushPending = false;
       streamingDisplayContent = text;
       streamingDisplayContentPending = text;
@@ -9514,8 +9657,11 @@
         streamingTextController = null;
       }
 
-      updateLastAssistantBubble(text, true, false, text.length);
-      settleScrollToBottomAfterStreaming();
+      updateLastAssistantBubble(text, false, false, text.length);
+      scheduleThinkingDone(() => {
+        updateLastAssistantBubble(text, true, false, text.length);
+        settleScrollToBottomAfterStreaming();
+      });
     }
 
     function setThinkingContextFromInput(text, files, options = {}) {
@@ -9576,7 +9722,14 @@
       streamingDisplayAnimateFromPending = text.length;
       thinkingVisibleUntil = 0;
       stopStreamingTypewriter(false);
+      clearThinkingExitTimer();
+      if (finalRender) setAssistantPhase("finalizing", { forceSync: true });
+      if (finalRender && finalizeLastAssistantBubbleInPlace()) {
+        scheduleThinkingDone(() => settleScrollToBottomAfterStreaming());
+        return;
+      }
       updateLastAssistantBubble(text, true, false, text.length);
+      if (finalRender) setAssistantPhase("done", { forceSync: true });
       settleScrollToBottomAfterStreaming();
     }
 
