@@ -30,14 +30,14 @@
   }
 
   function getStepAndDelay(remaining, minDelay, maxDelay) {
-    if (remaining > 2600) return { minStep: 14, maxStep: 28, cps: 1500, frameMs: minDelay };
-    if (remaining > 1500) return { minStep: 12, maxStep: 24, cps: 1240, frameMs: minDelay + 1 };
-    if (remaining > 900) return { minStep: 10, maxStep: 20, cps: 980, frameMs: minDelay + 2 };
-    if (remaining > 480) return { minStep: 8, maxStep: 16, cps: 720, frameMs: minDelay + 4 };
-    if (remaining > 220) return { minStep: 6, maxStep: 12, cps: 500, frameMs: minDelay + 6 };
-    if (remaining > 90) return { minStep: 4, maxStep: 8, cps: 320, frameMs: minDelay + 8 };
-    if (remaining > 32) return { minStep: 2, maxStep: 5, cps: 190, frameMs: minDelay + 10 };
-    return { minStep: 1, maxStep: 3, cps: 120, frameMs: maxDelay };
+    if (remaining > 2600) return { minStep: 22, maxStep: 44, cps: 3000, frameMs: Math.max(4, minDelay - 2) };
+    if (remaining > 1500) return { minStep: 18, maxStep: 36, cps: 2450, frameMs: Math.max(5, minDelay - 1) };
+    if (remaining > 900) return { minStep: 14, maxStep: 28, cps: 1850, frameMs: minDelay };
+    if (remaining > 480) return { minStep: 11, maxStep: 22, cps: 1320, frameMs: minDelay + 1 };
+    if (remaining > 220) return { minStep: 8, maxStep: 16, cps: 900, frameMs: minDelay + 3 };
+    if (remaining > 90) return { minStep: 5, maxStep: 11, cps: 560, frameMs: minDelay + 5 };
+    if (remaining > 32) return { minStep: 3, maxStep: 8, cps: 340, frameMs: minDelay + 7 };
+    return { minStep: 1, maxStep: 4, cps: 210, frameMs: Math.max(8, maxDelay - 5) };
   }
 
   function consumeWhitespace(source, end) {

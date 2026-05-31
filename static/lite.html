@@ -488,9 +488,10 @@
       if (!confirm("确定重新回答吗？旧回复将保留并可随时查看。")) return;
 
       const p = profiles.find(x => x.id === profileEl.value) || {};
+      const protocol = String(p.protocol || "").trim().toLowerCase();
       const useWebSearch = typeof webSearchEnabled === "boolean"
         ? webSearchEnabled
-        : (typeof defaultWebSearch === "boolean" ? defaultWebSearch : true);
+        : (protocol === "responses" ? (typeof defaultWebSearch === "boolean" ? defaultWebSearch : true) : false);
       if (typeof webSearchEnabled !== "undefined") webSearchEnabled = null;
       if (typeof renderWebSearchButton === "function") renderWebSearchButton();
 

@@ -1,0 +1,70 @@
+name: Android APK Release
+
+on:
+  push:
+    tags:
+      - "android-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python for Chaquopy
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build debug APK
+        run: gradle assembleDebug
+
+      - name: Rename APK
+        run: |
+          VERSION="${GITHUB_REF_NAME:-manual}"
+          mkdir -p ../release
+          cp app/build/outputs/apk/debug/app-debug.apk "../release/ClaudeWeb-${VERSION}.apk"
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/ClaudeWeb-${{ github.ref_name }}.apk
+          name: Claude Web Android ${{ github.ref_name }}
+          body: |
+            Local-first Android APK for Claude Web.
+
+            The APK starts the bundled FastAPI backend on the device and loads it
+            through the embedded WebView at 127.0.0.1.
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeWeb-APK
+          path: release/ClaudeWeb-*.apk
