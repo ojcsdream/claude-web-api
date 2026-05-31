@@ -155,6 +155,45 @@ class ResponsesPayloadTest(unittest.TestCase):
         self.assertTrue(captured["body"]["stream"])
         self.assertNotIn("tools", captured["body"])
 
+    def test_streaming_responses_suppresses_late_stream_read_error_after_text(self):
+        def fake_urlopen(_request, timeout=0):
+            return _FakeResponse(lines=[
+                b'data: {"type":"response.output_text.delta","delta":"ok"}\n\n',
+                b'data: {"type":"error","error":{"type":"upstream_error","message":"stream_read_error","code":"stream_read_error"}}\n\n',
+            ])
+
+        with patch.object(services, "resilient_urlopen", fake_urlopen):
+            with patch.object(services, "call_direct_responses_api", return_value="ok done"):
+                chunks = list(services.stream_direct_responses_api_text(
+                    "你好",
+                    "https://api.openai.com",
+                    "test-token",
+                    api_model="gpt-5.5",
+                    system_prompt="只输出 JSON",
+                    use_web_search=False,
+                ))
+
+        self.assertEqual("".join(chunks), "ok done")
+
+    def test_streaming_responses_falls_back_to_non_stream_on_early_stream_read_error(self):
+        def fake_urlopen(_request, timeout=0):
+            return _FakeResponse(lines=[
+                b'data: {"type":"error","error":{"type":"upstream_error","message":"stream_read_error","code":"stream_read_error"}}\n\n',
+            ])
+
+        with patch.object(services, "resilient_urlopen", fake_urlopen):
+            with patch.object(services, "call_direct_responses_api", return_value="fallback full text"):
+                chunks = list(services.stream_direct_responses_api_text(
+                    "你好",
+                    "https://api.openai.com",
+                    "test-token",
+                    api_model="gpt-5.5",
+                    system_prompt="只输出 JSON",
+                    use_web_search=False,
+                ))
+
+        self.assertEqual("".join(chunks), "fallback full text")
+
     def test_responses_input_payload_includes_images_and_files(self):
         with patch.object(services, "_file_data_url", lambda path, media_type="": f"data:{media_type or 'text/plain'};base64,xxx"):
             payload = services.build_responses_input_payload(

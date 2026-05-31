@@ -1512,57 +1512,17 @@
 
     .flowtoken-token,
     .chatgpt-like-token {
-      display: inline-block;
-      animation:
-        chatgptLikeInlineReveal 680ms cubic-bezier(0.16, 1, 0.3, 1) both,
-        chatgptLikeInlineGlow 860ms cubic-bezier(0.22, 1, 0.36, 1) both;
-      animation-delay: var(--chatgpt-like-token-delay, var(--flowtoken-delay, 0ms)), var(--chatgpt-like-token-delay, var(--flowtoken-delay, 0ms));
-      will-change: opacity, transform, filter, text-shadow;
-      transform-origin: 50% 85%;
+      display: inline;
+      animation: none;
+      opacity: 1;
+      filter: none;
+      text-shadow: none;
+      will-change: auto;
     }
 
     .stream-stable,
     .stream-active {
       display: contents;
-    }
-
-    @keyframes chatgptLikeInlineReveal {
-      0% {
-        opacity: 0;
-        filter: blur(3px);
-        transform: translateY(0.42em) scale(0.985);
-      }
-      42% {
-        opacity: 0.78;
-        filter: blur(1px);
-        transform: translateY(-0.035em) scale(1.006);
-      }
-      100% {
-        opacity: 1;
-        filter: blur(0);
-        transform: translateY(0) scale(1);
-      }
-    }
-
-    @keyframes chatgptLikeInlineGlow {
-      0% {
-        text-shadow: 0 0 0 rgba(230, 220, 202, 0);
-      }
-      42% {
-        text-shadow:
-          0 0 9px rgba(255, 246, 220, 0.26),
-          0 0 16px rgba(177, 149, 96, 0.14);
-      }
-      100% {
-        text-shadow: 0 0 0 rgba(230, 220, 202, 0);
-      }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .flowtoken-token,
-      .chatgpt-like-token {
-        animation: none;
-      }
     }
 
     @media (max-width: 760px) {
@@ -5818,8 +5778,8 @@
           </div>
           <div class="settings-toggle-row">
             <div>
-              <div>默认联网搜索</div>
-              <div class="settings-note">每次发送都会默认携带联网搜索意图，仍可用输入框旁按钮临时关闭。</div>
+              <div>Responses 默认联网搜索</div>
+              <div class="settings-note">仅对 responses 协议默认开启；其他协议必须点击输入框旁按钮后，本条消息才联网搜索。</div>
             </div>
             <input id="settingsDefaultWebSearch" class="settings-toggle" type="checkbox" />
           </div>
@@ -6116,11 +6076,26 @@
       renderSendButtonState();
     }
 
+    function currentApiProtocol() {
+      return normalizeApiProtocol(apiProtocol && apiProtocol.value, inferredProtocolForModel(apiModel && apiModel.value));
+    }
+
+    function defaultWebSearchForProtocol(protocol) {
+      return protocol === "responses" ? defaultWebSearch : false;
+    }
+
+    function resolveWebSearchState(protocol = currentApiProtocol()) {
+      return webSearchEnabled === null ? defaultWebSearchForProtocol(protocol) : !!webSearchEnabled;
+    }
+
     function renderWebSearchButton() {
       if (!webSearchBtn) return;
-      const active = webSearchEnabled === null ? defaultWebSearch : webSearchEnabled;
+      const protocol = currentApiProtocol();
+      const active = resolveWebSearchState(protocol);
       webSearchBtn.classList.toggle("active", active);
-      webSearchBtn.title = active ? "本条消息将联网搜索" : "强制联网搜索";
+      webSearchBtn.title = protocol === "responses"
+        ? (active ? "本条消息将联网搜索" : "关闭本条联网搜索")
+        : (active ? "本条消息将联网搜索" : "点击后本条才联网搜索");
     }
 
     function renderSendButtonState() {
@@ -8983,7 +8958,7 @@
     let streamingRenderQueued = false;
     let pendingStreamingContent = "";
     let lastStreamingRenderTime = 0;
-    const STREAMING_RENDER_THROTTLE = 16; // 接近 60fps，减少换行和段落推进的顿挫
+    const STREAMING_RENDER_THROTTLE = 4; // 再提一档，尽量贴近连续流式刷新
     let streamingDisplayContent = "";
     let streamingDisplayContentPending = "";
     let streamingDisplayAnimateFromPending = 0;
@@ -10041,6 +10016,7 @@
       localStorage.setItem("active_profile", activeProfileId);
       restoreModel(fallbackModel);
       loadProviderModels();
+      renderWebSearchButton();
     }
 
 
@@ -10397,7 +10373,7 @@
       const protocol = apiProtocol.value || "claude";
       const systemPrompt = activeSystemPromptText();
       setModel(model);
-      const useWebSearch = webSearchEnabled === null ? defaultWebSearch : webSearchEnabled;
+      const useWebSearch = resolveWebSearchState(protocol);
       webSearchEnabled = null;
       renderWebSearchButton();
       activeStreamController = new AbortController();
@@ -10532,7 +10508,7 @@
       const msg = idx >= 0 ? messages[idx] : null;
       if (!msg || msg.role !== "assistant" || !msg.id) return;
       if (!confirm("确定重新回答吗？旧回复将保留并可随时查看。")) return;
-      const useWebSearch = webSearchEnabled === null ? defaultWebSearch : webSearchEnabled;
+      const useWebSearch = resolveWebSearchState(apiProtocol.value || "claude");
       webSearchEnabled = null;
       renderWebSearchButton();
 
@@ -10726,6 +10702,7 @@
         const p = profiles.find(x => x.id === activeProfileId);
         if (p) p.protocol = apiProtocol.value || "claude";
       }
+      renderWebSearchButton();
     };
 
     modelPill.onclick = openDrawer;
@@ -10860,7 +10837,7 @@
 
     if (webSearchBtn) {
       webSearchBtn.onclick = () => {
-        const active = webSearchEnabled === null ? defaultWebSearch : webSearchEnabled;
+        const active = resolveWebSearchState();
         webSearchEnabled = !active;
         renderWebSearchButton();
       };

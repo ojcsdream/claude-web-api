@@ -2435,6 +2435,47 @@ def stream_direct_responses_api_text(
     import urllib.request
     import urllib.error
 
+    emitted_any_text = False
+    emitted_text_parts: list[str] = []
+
+    def _should_suppress_stream_error(err) -> bool:
+        text = str(err or "").lower()
+        return (
+            "stream_read_error" in text
+            or "incomplete read" in text
+            or "response ended prematurely" in text
+            or "remote end closed connection" in text
+            or "connection reset by peer" in text
+            or "broken pipe" in text
+        )
+
+    def _yield_fallback_tail() -> str:
+        try:
+            fallback_text = call_direct_responses_api(
+                prompt,
+                api_base_url,
+                api_auth_token,
+                api_model=api_model,
+                system_prompt=system_prompt,
+                max_output_tokens=max_output_tokens,
+                search_context_size=search_context_size,
+                use_web_search=use_web_search,
+                input_payload=input_payload,
+            )
+        except Exception:
+            return ""
+        if not fallback_text:
+            return ""
+        emitted_text = "".join(emitted_text_parts)
+        if not emitted_text:
+            return fallback_text
+        if fallback_text.startswith(emitted_text):
+            return fallback_text[len(emitted_text):]
+        trimmed = emitted_text.rstrip()
+        if trimmed and fallback_text.startswith(trimmed):
+            return fallback_text[len(trimmed):]
+        return ""
+
     base_url = (api_base_url or "").strip().rstrip("/")
     token = (api_auth_token or "").strip()
     model = (api_model or DEFAULT_MODEL).strip()
@@ -2474,7 +2515,7 @@ def stream_direct_responses_api_text(
             event_name = ""
             data_lines = []
             def flush_event():
-                nonlocal event_name, data_lines
+                nonlocal event_name, data_lines, emitted_any_text
                 payload = "\n".join(data_lines).strip()
                 if payload and payload != "[DONE]":
                     try:
@@ -2483,9 +2524,16 @@ def stream_direct_responses_api_text(
                         if typ == "response.output_text.delta":
                             delta = obj.get("delta") or ""
                             if delta:
+                                emitted_any_text = True
+                                emitted_text_parts.append(delta)
                                 yield delta
                         elif typ == "error" or obj.get("error"):
                             err = obj.get("error") or obj
+                            if _should_suppress_stream_error(err):
+                                tail = _yield_fallback_tail()
+                                if tail:
+                                    yield tail
+                                return
                             yield "\n[Responses流式接口失败]\n" + json.dumps(err, ensure_ascii=False)
                     except Exception:
                         pass
@@ -2509,6 +2557,11 @@ def stream_direct_responses_api_text(
                 yield from flush_event()
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="ignore")
+        if _should_suppress_stream_error(err or e):
+            tail = _yield_fallback_tail()
+            if tail:
+                yield tail
+            return
         yield (
             "\n[Responses流式接口失败]\n"
             f"HTTP {getattr(e, 'code', '')} {getattr(e, 'reason', '')}\n"
@@ -2516,6 +2569,11 @@ def stream_direct_responses_api_text(
             + (err or str(e))
         )
     except Exception as e:
+        if _should_suppress_stream_error(e):
+            tail = _yield_fallback_tail()
+            if tail:
+                yield tail
+            return
         yield "\n[Responses流式接口失败]\n" + str(e)
 
 
